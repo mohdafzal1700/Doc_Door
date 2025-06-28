@@ -1,0 +1,53 @@
+
+__pycache__/
+*.py[cod]
+*.sqlite3
+*.log
+*.pot
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+
+**/migrations/
+!*/migrations/__init__.py
+db.sqlite3
+
+
+env/
+ENV/
+venv/
+env.bak/
+
+
+.env
+.env.*
+
+# =========================
+#  React / Frontend (Node + Vite + Tailwind)
+
+node_modules/
+dist/
+.vite/
+.build/
+
+# Log files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# System files
+.DS_Store
+Thumbs.db
+
+# IDE settings (optional, if using VSCode/PyCharm/etc.)
+.vscode/
+.idea/
+*.swp
+
+# =========================
+#  Dependency lock files (optional)
+# =========================
+package-lock.json
+yarn.lock
