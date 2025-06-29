@@ -24,7 +24,7 @@ const DoctorEducationComponent = () => {
         degree_name: '',
         institution_name: '',
         year_of_completion: '',
-        certificate_id: ''
+        degree_certificate_id: ''
     });
 
     // Navigation handlers
@@ -73,7 +73,7 @@ const DoctorEducationComponent = () => {
             degree_name: '',
             institution_name: '',
             year_of_completion: '',
-            certificate_id: ''
+            degree_certificate_id: ''
         });
         setEditingEducation(null);
         setShowForm(false);
@@ -87,7 +87,7 @@ const DoctorEducationComponent = () => {
             degree_name: education.degree_name || '',
             institution_name: education.institution_name || '',
             year_of_completion: education.year_of_completion ? String(education.year_of_completion) : '',
-            certificate_id: education.certificate_id || ''
+            degree_certificate_id: education.degree_certificate_id|| ''
         });
         setEditingEducation(education);
         setShowForm(true);
@@ -216,7 +216,7 @@ const DoctorEducationComponent = () => {
             setError('Year of completion is required');
             return;
         }
-        if (!formData.certificate_id.trim()) {
+        if (!formData.degree_certificate_id.trim()) {
             setError('Certificate ID is required');
             return;
         }
@@ -317,8 +317,8 @@ const DoctorEducationComponent = () => {
                             <label>Certificate ID *</label>
                             <input
                                 type="text"
-                                name="certificate_id"
-                                value={formData.certificate_id}
+                                name="degree_certificate_id"
+                                value={formData.degree_certificate_id}
                                 onChange={handleInputChange}
                                 required
                                 maxLength="100"
@@ -349,7 +349,7 @@ const DoctorEducationComponent = () => {
                                 <h3>{education.degree_name}</h3>
                                 <p><strong>Institution:</strong> {education.institution_name}</p>
                                 <p><strong>Year:</strong> {education.year_of_completion}</p>
-                                <p><strong>Certificate ID:</strong> {education.certificate_id}</p>
+                                <p><strong>Certificate ID:</strong> {education.degree_certificate_id}</p>
                                 <p><small><strong>ID:</strong> {education.id}</small></p>
                             </div>
                             

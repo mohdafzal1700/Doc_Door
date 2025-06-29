@@ -187,8 +187,10 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
 
     date_of_birth = serializers.DateField(required=False, allow_null=True, write_only=True)
     gender = serializers.ChoiceField(
-        choices=[('male', 'Male'), ('female', 'Female'), ('other', 'Other')], 
-        required=False, allow_null=True, write_only=True
+        choices=Doctor.GENDER_CHOICES, 
+        required=False, 
+        allow_null=True, 
+        write_only=True
     )
 
 
@@ -209,7 +211,9 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
     profile_picture_url = serializers.SerializerMethodField()
     has_profile_picture = serializers.SerializerMethodField()
     profile_completed = serializers.SerializerMethodField()
-    
+    doctor_department = serializers.SerializerMethodField()
+    doctor_gender = serializers.SerializerMethodField()
+    doctor_date_of_birth = serializers.SerializerMethodField() 
 
     class Meta:
         model = User
@@ -225,12 +229,14 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
             'date_of_birth', 'gender',
 
             # Doctor read-only info
-            'doctor_first_name', 'doctor_last_name', 'doctor_specialization', 
+            'doctor_first_name', 'doctor_last_name', 'doctor_department', 
             'doctor_experience', 'doctor_bio', 'doctor_license_number',
             'doctor_consultation_fee', 'doctor_consultation_mode_online',
             'doctor_consultation_mode_offline', 'doctor_clinic_name', 
             'doctor_location', 'doctor_is_available', 'doctor_verification_status',
             'profile_picture_url', 'has_profile_picture', 'profile_completed',
+            'doctor_specialization','doctor_gender',
+            'doctor_date_of_birth'
         ]
         read_only_fields = ['id', 'role', 'is_active']
 
@@ -251,6 +257,11 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
     def get_doctor_last_name(self, obj):
         return obj.last_name or ''
 
+    def get_doctor_department(self, obj):
+        """Return the specialization field for department compatibility"""
+        specialization = getattr(getattr(obj, "doctor_profile", None), "specialization", '')
+        return specialization
+    
     def get_doctor_specialization(self, obj):
         return getattr(getattr(obj, "doctor_profile", None), "specialization", '')
 
@@ -290,6 +301,11 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         if doctor and doctor.profile_picture:
             return doctor.profile_picture.url
         return None
+    
+    def get_doctor_date_of_birth(self, obj):
+        """Return the date of birth from doctor profile"""
+        dob = getattr(getattr(obj, "doctor_profile", None), "date_of_birth", None)
+        return dob.strftime('%Y-%m-%d') if dob else None
 
     def get_has_profile_picture(self, obj):
         doctor = getattr(obj, "doctor_profile", None)
@@ -298,6 +314,10 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
     def get_profile_completed(self, obj):
         doctor = getattr(obj, "doctor_profile", None)
         return getattr(doctor, "is_profile_setup_done", False) if doctor else False
+    
+    def get_doctor_gender(self, obj):
+        """Return the gender from doctor profile"""
+        return getattr(getattr(obj, "doctor_profile", None), "gender", '')
 
     # === Validation Methods ===
 
@@ -420,6 +440,9 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
                         'location': '',
                         'created_at': timezone.now(),
                         'updated_at': timezone.now(),
+                        'gender': None,
+                        'date_of_birth': None,
+                        'verification_status': 'incomplete',
                     }
                 )
                 
@@ -479,7 +502,7 @@ class DoctorEducationSerializer(serializers.ModelSerializer):
         model = DoctorEducation
         fields = [
             'id', 'degree_name', 'institution_name', 'year_of_completion', 
-            'certificate_id',
+            'degree_certificate_id',
             # User fields (read-only for context)
             'first_name', 'last_name', 'phone_number', 'email', 'is_active', 'role'
         ]
@@ -533,16 +556,30 @@ class DoctorCertificationSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source='doctor.user.email', read_only=True)
     is_active = serializers.BooleanField(source='doctor.user.is_active', read_only=True)
     role = serializers.CharField(source='doctor.user.role', read_only=True)
-    
+    certificate_image_url = serializers.SerializerMethodField()
+    has_certificate_image = serializers.SerializerMethodField()
     class Meta:
         model = DoctorCertification
         fields = [
             'id', 'certification_name', 'issued_by', 'year_of_issue',
-            'certificate_id', 'certificate_image',
+            'certification_certificate_id', 'certificate_image',
+            'certificate_image_url', 'has_certificate_image',
             # User fields (read-only for context)
             'first_name', 'last_name', 'phone_number', 'email', 'is_active', 'role'
         ]
-        read_only_fields = ['id', 'first_name', 'last_name', 'phone_number', 'email', 'is_active', 'role']
+        read_only_fields = ['id', 'first_name', 'last_name', 'phone_number', 'email', 'is_active', 
+                            'role', 'certificate_image_url','has_certificate_image']
+    
+    def get_certificate_image_url(self, obj):
+        """Return the Cloudinary URL for certificate image"""
+        if obj.certificate_image:
+            return obj.certificate_image.url
+        return None
+    
+    def get_has_certificate_image(self, obj):
+        """Check if certification has an image"""
+        return bool(obj.certificate_image)
+    
     
     def validate_year_of_issue(self, value):
         current_year = datetime.now().year
@@ -568,14 +605,16 @@ class DoctorCertificationSerializer(serializers.ModelSerializer):
         """Override create to update certification completion status"""
         instance = super().create(validated_data)
         if hasattr(instance, 'doctor'):
-            instance.doctor.check_profile_completion()
+            instance.doctor.check_certification_completion()
+            instance.doctor.check_verification_completion()
         return instance
     
     def update(self, instance, validated_data):
         """Override update to check completion status"""
         instance = super().update(instance, validated_data)
         if hasattr(instance, 'doctor'):
-            instance.doctor.check_profile_completion()
+            instance.doctor.check_certification_completion()
+            instance.doctor.check_verification_completion()
         return instance
 
 
@@ -587,16 +626,36 @@ class DoctorProofSerializer(serializers.ModelSerializer):
     email = serializers.EmailField(source='doctor.user.email', read_only=True)
     is_active = serializers.BooleanField(source='doctor.user.is_active', read_only=True)
     role = serializers.CharField(source='doctor.user.role', read_only=True)
+    license_image_url = serializers.SerializerMethodField()
+    has_license_image = serializers.SerializerMethodField()
+    id_proof_url=serializers.SerializerMethodField()
+    has_id_proof=serializers.SerializerMethodField()
     
     class Meta:
         model = DoctorProof
         fields = [
             'medical_license_number', 'license_doc_id',
-            'license_proof_image', 'id_proof',
+            'license_proof_image', 'id_proof','license_image_url','has_license_image','id_proof_url','has_id_proof',
             # User fields (read-only for context)
             'first_name', 'last_name', 'phone_number', 'email', 'is_active', 'role'
         ]
         read_only_fields = ['first_name', 'last_name', 'phone_number', 'email', 'is_active', 'role']
+    
+    def get_has_id_proof(self,obj):
+        return bool(obj.id_proof)
+    
+    def get_id_proof_url(self,obj):
+        if obj.id_proof:
+            return obj.id_proof.url
+        return None
+    
+    def get_has_license_image(self,obj):
+        return bool(obj.license_proof_image)
+    
+    def get_license_image_url(self, obj):  
+        if obj.license_proof_image:
+            return obj.license_proof_image.url
+        return None
     
     def validate_medical_license_number(self, value):
         if not value or len(value.strip()) < 3:

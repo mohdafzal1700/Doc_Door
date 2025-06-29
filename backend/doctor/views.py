@@ -556,21 +556,180 @@ class DoctorCertificationView(APIView):
                 'message': 'Failed to delete certification record',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class LicenseUploadView(generics.UpdateAPIView):
-    serializer_class = DoctorProofSerializer
+class LicenseUploadView(APIView):
+    
     permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def get_object(self):
-        doctor, created = Doctor.objects.get_or_create(user=self.request.user)
-        proof, created = DoctorProof.objects.get_or_create(doctor=doctor)
-        return proof
+    def get(self, request):
+        try:
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Access denied. User is not a doctor',
+                }, status=status.HTTP_403_FORBIDDEN)
+                
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            # Since there should be only one DoctorProof per doctor, get it directly
+            try:
+                license_record = DoctorProof.objects.get(doctor=doctor)
+                serializer = DoctorProofSerializer(license_record)
+                return Response({
+                    'success': True,
+                    'data': serializer.data
+                }, status=status.HTTP_200_OK)
+            except DoctorProof.DoesNotExist:
+                return Response({
+                    'success': True,
+                    'data': None,
+                    'message': 'No license record found'
+                }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch license records',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def update(self, request, *args, **kwargs):
-        response = super().update(request, *args, **kwargs)
-        if response.status_code == 200:
-            response.data['message'] = 'License documents uploaded successfully'
-        return response
+    def post(self, request):
+        try:
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Access denied. User is not a doctor'
+                }, status=status.HTTP_403_FORBIDDEN)
+                
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            # Check if a DoctorProof already exists for this doctor
+            try:
+                existing_license = DoctorProof.objects.get(doctor=doctor)
+                # Update existing record
+                serializer = DoctorProofSerializer(existing_license, data=request.data, partial=True)
+                
+                if serializer.is_valid():
+                    license_record = serializer.save()
+                    response_serializer = DoctorProofSerializer(license_record)
+                    
+                    return Response({
+                        'success': True,
+                        'message': 'License record updated successfully',
+                        'data': response_serializer.data
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        'success': False,
+                        'field_errors': serializer.errors,
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                    
+            except DoctorProof.DoesNotExist:
+                # Create new record
+                serializer = DoctorProofSerializer(data=request.data)
+                
+                if serializer.is_valid():
+                    license_record = serializer.save(doctor=doctor)
+                    response_serializer = DoctorProofSerializer(license_record)
+                    
+                    return Response({
+                        'success': True,
+                        'message': 'License record created successfully',
+                        'data': response_serializer.data
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    return Response({
+                        'success': False,
+                        'field_errors': serializer.errors,
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to process license record',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def patch(self, request):
+        """Update license record"""
+        try:
+            # Check if user has doctor role
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Access denied. User is not a doctor.',
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Get doctor profile
+            doctor = get_object_or_404(Doctor, user=request.user)
+            
+            # Get the license record for this doctor
+            license_record = get_object_or_404(DoctorProof, doctor=doctor)
+            
+            serializer = DoctorProofSerializer(
+                license_record,
+                data=request.data,
+                partial=True
+            )
+            
+            if serializer.is_valid():
+                updated_record = serializer.save()
+                response_serializer = DoctorProofSerializer(updated_record)
+                
+                return Response({
+                    'success': True,
+                    'message': 'License record updated successfully',
+                    'data': response_serializer.data
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'success': False,
+                    'field_errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to update license record',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request):
+        """Delete license record"""
+        try:
+            # Check if user has doctor role
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Access denied. User is not a doctor.',
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Get doctor profile
+            doctor = get_object_or_404(Doctor, user=request.user)
+            
+            # Get and delete the license record
+            license_record = get_object_or_404(DoctorProof, doctor=doctor)
+            license_record.delete()
+            
+            return Response({
+                'success': True,
+                'message': 'License record deleted successfully'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to delete license record',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @api_view(['GET'])
@@ -589,5 +748,3 @@ def verification_status_view(request):
             'status': 'error',
             'message': 'Doctor profile not found'
         }, status=status.HTTP_404_NOT_FOUND)
-
-

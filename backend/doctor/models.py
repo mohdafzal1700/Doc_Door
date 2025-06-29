@@ -107,11 +107,26 @@ class Doctor(models.Model):
         ('rejected', 'Rejected'),
     ]
     
+    SPECIALIZATION_CHOICES = [
+        ('cardiology', 'Cardiology'),
+        ('neurology', 'Neurology'),
+        ('orthopedics', 'Orthopedics'),
+        ('pediatrics', 'Pediatrics'),
+        ('dermatology', 'Dermatology'),
+        ('psychiatry', 'Psychiatry'),
+        ('general_medicine', 'General Medicine'),
+        ('gynecology', 'Gynecology'),
+        ('surgery', 'Surgery'),
+        ('ophthalmology', 'Ophthalmology'),
+        ('ent', 'ENT'),
+        ('radiology', 'Radiology'),
+    ]
+    
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.OneToOneField('User', on_delete=models.CASCADE, related_name='doctor_profile', null=True, blank=True)
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, null=True, blank=True)
-    specialization = models.CharField(max_length=100, null=True, blank=True)
+    specialization = models.CharField(max_length=100, choices=SPECIALIZATION_CHOICES, null=True, blank=True)
     experience = models.IntegerField(null=True, blank=True)
     # Add alias property for experience_years to maintain compatibility
     @property
@@ -168,7 +183,7 @@ class Doctor(models.Model):
         """Check if profile setup is complete"""
         required_fields = [
             self.gender, self.specialization, self.experience, 
-            self.profile_picture, self.bio, self.date_of_birth
+            self.profile_picture, self.bio, self.date_of_birth,self.license_number
         ]
         is_complete = all(field for field in required_fields)
         
@@ -177,7 +192,7 @@ class Doctor(models.Model):
             self.save(update_fields=['is_profile_setup_done'])
             # Trigger user verification check
             if self.user:
-                self.user.check_and_update_verification_status()
+                self.user.check_verification_completion()
         
         return is_complete
 
@@ -189,7 +204,7 @@ class Doctor(models.Model):
             self.is_education_done = has_education
             self.save(update_fields=['is_education_done'])
             if self.user:
-                self.user.check_and_update_verification_status()
+                self.user.check_verification_completion()
         
         return has_education
 
@@ -201,7 +216,7 @@ class Doctor(models.Model):
             self.is_certification_done = has_certification
             self.save(update_fields=['is_certification_done'])
             if self.user:
-                self.user.check_and_update_verification_status()
+                self.user.check_verification_completion()
         
         return has_certification
 
@@ -213,7 +228,7 @@ class Doctor(models.Model):
             self.is_license_done = has_license
             self.save(update_fields=['is_license_done'])
             if self.user:
-                self.user.check_and_update_verification_status()
+                self.user.check_verification_completion()
         
         return has_license
     
@@ -285,7 +300,10 @@ class DoctorEducation(models.Model):
     degree_name = models.CharField(max_length=100)
     institution_name = models.CharField(max_length=255)
     year_of_completion = models.PositiveIntegerField()
-    certificate_id = models.CharField(max_length=100)
+    degree_certificate_id = models.CharField(
+        max_length=100, 
+        default='PENDING_UPDATE'
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -305,7 +323,10 @@ class DoctorCertification(models.Model):
     certification_name = models.CharField(max_length=100)
     issued_by = models.CharField(max_length=100)
     year_of_issue = models.PositiveIntegerField()
-    certificate_id = models.CharField(max_length=100)
+    certification_certificate_id = models.CharField(
+        max_length=100,
+        default='PENDING_UPDATE'
+    )
     certificate_image = CloudinaryField('image', blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -335,3 +356,7 @@ class DoctorProof(models.Model):
         super().save(*args, **kwargs)
         # Update doctor's license completion status
         self.doctor.check_license_completion()
+        
+        
+        
+        

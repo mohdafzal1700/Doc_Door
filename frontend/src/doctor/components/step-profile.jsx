@@ -62,9 +62,9 @@ export default function StepProfile() {
                 setFormData({
                     first_name: profileData.doctor_first_name || "",
                     last_name: profileData.doctor_last_name || "",
-                    date_of_birth: profileData.date_of_birth || "",
-                    gender: profileData.gender || "male",
-                    department: profileData.doctor_specialization || "",
+                    date_of_birth: profileData.doctor_date_of_birth || "",
+                    gender: profileData.doctor_gender || "male",
+                    department: profileData.doctor_department || profileData.doctor_specialization || "",
                     years_of_experience: profileData.doctor_experience || "",
                     consultation_mode_online: profileData.doctor_consultation_mode_online || false,
                     consultation_mode_offline: profileData.doctor_consultation_mode_offline || false,
@@ -346,26 +346,35 @@ export default function StepProfile() {
             </div>
 
             <div>
-                <Label>Gender</Label>
+                <Label className="text-base font-semibold text-gray-800 mb-4 block">Gender</Label>
                 <RadioGroup 
                     value={formData.gender} 
                     onValueChange={(value) => handleInputChange('gender', value)}
-                    className="flex space-x-6 mt-2"
+                    className="flex flex-col sm:flex-row gap-4"
                 >
-                    <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="male" id="male" />
-                        <Label htmlFor="male">Male</Label>
+                    <div className="flex items-center space-x-3 p-3 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200">
+                    <RadioGroupItem value="male" id="male" />
+                    <Label htmlFor="male" className="font-medium text-gray-700 cursor-pointer flex items-center">
+                        <span className="mr-2">👨</span>
+                        Male
+                    </Label>
                     </div>
-                    <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="female" id="female" />
-                        <Label htmlFor="female">Female</Label>
+                    <div className="flex items-center space-x-3 p-3 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200">
+                    <RadioGroupItem value="female" id="female" />
+                    <Label htmlFor="female" className="font-medium text-gray-700 cursor-pointer flex items-center">
+                        <span className="mr-2">👩</span>
+                        Female
+                    </Label>
                     </div>
-                    <div className="flex items-center space-x-2">
-                        <RadioGroupItem value="other" id="other" />
-                        <Label htmlFor="other">Other</Label>
+                    <div className="flex items-center space-x-3 p-3 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 transition-all duration-200">
+                    <RadioGroupItem value="other" id="other" />
+                    <Label htmlFor="other" className="font-medium text-gray-700 cursor-pointer flex items-center">
+                        <span className="mr-2">🧑</span>
+                        Other
+                    </Label>
                     </div>
                 </RadioGroup>
-            </div>
+                </div>
 
             {/* Professional Information */}
             <div>
@@ -375,7 +384,7 @@ export default function StepProfile() {
                     onValueChange={(value) => handleInputChange('department', value)}
                 >
                     <SelectTrigger className="mt-1">
-                        <SelectValue placeholder="Select your specialization" />
+                        <SelectValue placeholder={formData.department}  />
                     </SelectTrigger>
                     <SelectContent>
                         <SelectItem value="cardiology">Cardiology</SelectItem>

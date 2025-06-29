@@ -3,7 +3,7 @@ import React, { useState, useEffect } from "react"
 import Button from "../../components/ui/Button"
 import Input from "../../components/ui/Input"
 import { Label } from "../../components/ui/Label"
-import { Plus, Upload, X, Edit2, Save, AlertCircle } from "lucide-react"
+import { Plus, Upload, X, Edit2, Save, AlertCircle, Eye } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import { getDoctorCertification,createDoctorCertification, 
     updateDoctorCertification, 
@@ -17,13 +17,15 @@ export default function StepCertification() {
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState("")
     const [editingId, setEditingId] = useState(null)
+    const [showImageModal, setShowImageModal] = useState(false)
+    const [modalImageUrl, setModalImageUrl] = useState("")
     
     // Form state for new certification
     const [newCertification, setNewCertification] = useState({
         certification_name: "",
         issued_by: "",
         year_of_issue: "",
-        certificate_id: "",
+        certification_certificate_id: "",
         certificate_image: null
     })
     
@@ -43,6 +45,7 @@ export default function StepCertification() {
             setIsLoading(true)
             const response = await getDoctorCertification()
             if (response.data.success) {
+                console.log("📋 Fetched certifications:", response.data.data) // Debug log
                 setCertifications(response.data.data)
             }
         } catch (error) {
@@ -113,7 +116,7 @@ export default function StepCertification() {
             setError("Year of issue is required")
             return false
         }
-        if (!data.certificate_id?.trim()) {
+        if (!data.certification_certificate_id?.trim()) {
             setError("Certificate ID is required")
             return false
         }
@@ -141,14 +144,14 @@ export default function StepCertification() {
                 dataToSend.append('certification_name', newCertification.certification_name.trim())
                 dataToSend.append('issued_by', newCertification.issued_by.trim())
                 dataToSend.append('year_of_issue', newCertification.year_of_issue)
-                dataToSend.append('certificate_id', newCertification.certificate_id.trim())
+                dataToSend.append('certification_certificate_id', newCertification.certification_certificate_id.trim())
                 dataToSend.append('certificate_image', newCertification.certificate_image)
             } else {
                 dataToSend = {
                     certification_name: newCertification.certification_name.trim(),
                     issued_by: newCertification.issued_by.trim(),
                     year_of_issue: parseInt(newCertification.year_of_issue),
-                    certificate_id: newCertification.certificate_id.trim()
+                    certification_certificate_id: newCertification.certification_certificate_id.trim()
                 }
             }
             
@@ -160,7 +163,7 @@ export default function StepCertification() {
                     certification_name: "",
                     issued_by: "",
                     year_of_issue: "",
-                    certificate_id: "",
+                    certification_certificate_id: "",
                     certificate_image: null
                 })
                 
@@ -183,7 +186,7 @@ export default function StepCertification() {
             certification_name: certification.certification_name,
             issued_by: certification.issued_by,
             year_of_issue: certification.year_of_issue.toString(),
-            certificate_id: certification.certificate_id,
+            certification_certificate_id: certification.certification_certificate_id,
             certificate_image: null // Will be set if user uploads new image
         })
     }
@@ -202,7 +205,7 @@ export default function StepCertification() {
                 dataToSend.append('certification_name', editForm.certification_name.trim())
                 dataToSend.append('issued_by', editForm.issued_by.trim())
                 dataToSend.append('year_of_issue', editForm.year_of_issue)
-                dataToSend.append('certificate_id', editForm.certificate_id.trim())
+                dataToSend.append('certification_certificate_id', editForm.certification_certificate_id.trim())
                 dataToSend.append('certificate_image', editForm.certificate_image)
             } else {
                 dataToSend = {
@@ -210,7 +213,7 @@ export default function StepCertification() {
                     certification_name: editForm.certification_name.trim(),
                     issued_by: editForm.issued_by.trim(),
                     year_of_issue: parseInt(editForm.year_of_issue),
-                    certificate_id: editForm.certificate_id.trim()
+                    certification_certificate_id: editForm.certification_certificate_id.trim()
                 }
             }
             
@@ -266,12 +269,57 @@ export default function StepCertification() {
         document.getElementById(inputId).click()
     }
 
+    // Function to open image modal
+    const openImageModal = (imageUrl) => {
+        setModalImageUrl(imageUrl)
+        setShowImageModal(true)
+    }
+
+    // Function to get preview image for new upload
+    const getNewImagePreview = () => {
+        if (newCertification.certificate_image) {
+            return URL.createObjectURL(newCertification.certificate_image)
+        }
+        return null
+    }
+
+    // Function to get preview image for edit form
+    const getEditImagePreview = () => {
+        if (editForm.certificate_image) {
+            return URL.createObjectURL(editForm.certificate_image)
+        }
+        return null
+    }
+
     return (
         <div className="space-y-6">
             {error && (
                 <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-2">
                     <AlertCircle className="w-5 h-5 text-red-500" />
                     <p className="text-red-700">{error}</p>
+                </div>
+            )}
+
+            {/* Image Modal */}
+            {showImageModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={() => setShowImageModal(false)}>
+                    <div className="bg-white p-4 rounded-lg max-w-3xl max-h-[90vh] overflow-auto">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold">Certificate Image</h3>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setShowImageModal(false)}
+                            >
+                                <X className="w-4 h-4" />
+                            </Button>
+                        </div>
+                        <img 
+                            src={modalImageUrl} 
+                            alt="Certificate"
+                            className="max-w-full h-auto rounded"
+                        />
+                    </div>
                 </div>
             )}
 
@@ -328,8 +376,8 @@ export default function StepCertification() {
                                         <div>
                                             <Label>Certificate ID</Label>
                                             <Input
-                                                value={editForm.certificate_id}
-                                                onChange={(e) => handleEditInputChange('certificate_id', e.target.value)}
+                                                value={editForm.certification_certificate_id}
+                                                onChange={(e) => handleEditInputChange('certification_certificate_id', e.target.value)}
                                                 placeholder="Enter certificate id"
                                             />
                                         </div>
@@ -342,6 +390,18 @@ export default function StepCertification() {
                                             <p className="text-gray-500 mb-2">
                                                 {editForm.certificate_image ? editForm.certificate_image.name : "Upload new certificate image (optional)"}
                                             </p>
+                                            
+                                            {/* Show preview of new image being uploaded */}
+                                            {getEditImagePreview() && (
+                                                <div className="mt-2 mb-2">
+                                                    <img 
+                                                        src={getEditImagePreview()} 
+                                                        alt="New certificate preview"
+                                                        className="max-w-xs mx-auto rounded border"
+                                                    />
+                                                </div>
+                                            )}
+                                            
                                             <input
                                                 type="file"
                                                 id={`edit-file-${cert.id}`}
@@ -409,18 +469,38 @@ export default function StepCertification() {
                                         </div>
                                         <div>
                                             <span className="text-gray-600">Certificate ID:</span>
-                                            <p className="font-medium">{cert.certificate_id}</p>
+                                            <p className="font-medium">{cert.certification_certificate_id}</p>
                                         </div>
                                     </div>
                                     
-                                    {cert.certificate_image && (
+                                    {/* UPDATED: Certificate Image Display */}
+                                    {cert.certificate_image_url && (
                                         <div className="mt-3">
                                             <span className="text-gray-600 text-sm">Certificate Image:</span>
-                                            <img 
-                                                src={cert.certificate_image} 
-                                                alt="Certificate"
-                                                className="mt-1 max-w-xs rounded border"
-                                            />
+                                            <div className="mt-1 flex items-center gap-2">
+                                                <img 
+                                                    src={cert.certificate_image_url} 
+                                                    alt="Certificate"
+                                                    className="max-w-32 h-20 object-cover rounded border cursor-pointer hover:opacity-80"
+                                                    onClick={() => openImageModal(cert.certificate_image_url)}
+                                                />
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    onClick={() => openImageModal(cert.certificate_image_url)}
+                                                    className="text-blue-600"
+                                                >
+                                                    <Eye className="w-4 h-4 mr-1" />
+                                                    View Full Size
+                                                </Button>
+                                            </div>
+                                        </div>
+                                    )}
+                                    
+                                    {/* Show message if no image */}
+                                    {!cert.certificate_image_url && (
+                                        <div className="mt-3">
+                                            <span className="text-gray-500 text-sm italic">No certificate image uploaded</span>
                                         </div>
                                     )}
                                 </div>
@@ -472,8 +552,8 @@ export default function StepCertification() {
                         <Label htmlFor="certId">Certificate ID</Label>
                         <Input
                             id="certId"
-                            value={newCertification.certificate_id}
-                            onChange={(e) => handleInputChange('certificate_id', e.target.value)}
+                            value={newCertification.certification_certificate_id}
+                            onChange={(e) => handleInputChange('certification_certificate_id', e.target.value)}
                             placeholder="Enter certificate id"
                         />
                     </div>
@@ -489,6 +569,18 @@ export default function StepCertification() {
                                 "Upload your certificate image"
                             }
                         </p>
+                        
+                        {/* Show preview of selected image */}
+                        {getNewImagePreview() && (
+                            <div className="mt-2 mb-2">
+                                <img 
+                                    src={getNewImagePreview()} 
+                                    alt="Certificate preview"
+                                    className="max-w-xs mx-auto rounded border"
+                                />
+                            </div>
+                        )}
+                        
                         <input
                             type="file"
                             id="new-certificate-file"
