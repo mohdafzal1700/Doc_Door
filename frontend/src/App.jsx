@@ -18,7 +18,12 @@ import PatientsPage from "./admin/PatientsPage"
 import DoctorRegistration from "./doctor/pages/DocVerification"
 import PreVerificationView from "./doctor/pages/preverification"
 import PostVerificationDashboard from "./doctor/pages/post-verification-dashboard"
-
+import DoctorsPage from "./admin/DoctorMPage"
+import DoctorApplicationsPage from "./admin/DoctorApage"
+import PortalProfile from "./doctor/components/DocProfileEdit"
+import PortalCertification from "./doctor/components/DocCertification"
+import ManageQualifications from "./doctor/components/DocEducation"
+import DoctorProfilePage from "./doctor/components/DocProfile"
 
 function App() {
   return (
@@ -38,9 +43,15 @@ function App() {
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/adminloginpage" element={<AdminLogin />} />
         <Route path='/patientspage' element={<PatientsPage/>}/>
+        <Route path='/doctorspage'  element={<DoctorsPage/>}/>
+        <Route path='/doctorapplications'  element={<DoctorApplicationsPage/>}/>
         <Route path='/doctor-registration/*' element={<DoctorRegistration/>}/>
         <Route path='/doctor/verification'  element={<PreVerificationView/>}/>
         <Route path='/doctor/home'  element={<PostVerificationDashboard/>}/>
+        <Route path='/doctor/portal'  element={<DoctorProfilePage/>}/>
+        <Route path='/doctor/editProfile'  element={<PortalProfile/>}/>
+        <Route path='/doctor/certification'  element={<PortalCertification />}/>
+        <Route path='/doctor/education'  element={<ManageQualifications/>}/>
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>

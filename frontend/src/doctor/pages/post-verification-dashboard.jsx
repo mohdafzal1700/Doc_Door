@@ -3,6 +3,7 @@
 import Button from "../../components/ui/Button"
 import { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "../../components/ui/card" 
 import { Calendar, Users, Clock, Plus, Edit, ChevronRight } from "lucide-react"
+import DocHeader from "../../components/ui/DocHeader"
 
 export default function PostVerificationDashboard({ onToggleVerification }) {
     const todaysAppointments = [
@@ -83,6 +84,7 @@ export default function PostVerificationDashboard({ onToggleVerification }) {
 
     return (
         <div className="min-h-screen bg-gray-50">
+        <DocHeader/>
         <div className="max-w-7xl mx-auto px-4 py-8">
             {/* Top Welcome Header */}
             <div className="bg-white rounded-lg shadow-sm p-6 mb-8">

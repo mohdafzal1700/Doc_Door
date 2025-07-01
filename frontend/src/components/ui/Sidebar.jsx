@@ -26,8 +26,8 @@ const Sidebar = () => {
     const getCurrentActiveItem = () => {
         const path = location.pathname;
         if (path === '/' || path === '/dashboard') return 'dashboard';
-        if (path === '/doctors') return 'doctors';
-        if (path === '/applications') return 'applications';
+        if (path === '/doctorspage') return 'doctors';
+        if (path === '/doctorapplications') return 'applications';
         if (path === '/patientspage') return 'patients';
         if (path === '/appointments') return 'appointments';
         if (path === '/plans') return 'plans';
@@ -39,8 +39,8 @@ const Sidebar = () => {
 
     const menuItems = [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, path: '/dashboard' },
-        { id: 'doctors', label: 'Doctors', icon: Users, path: '/doctors' },
-        { id: 'applications', label: 'Applications', icon: FileText, path: '/applications' },
+        { id: 'doctors', label: 'Doctors', icon: Users, path: '/doctorspage' },
+        { id: 'applications', label: 'Applications', icon: FileText, path: '/doctorapplications' },
         { id: 'patients', label: 'Patients', icon: UserCheck, path: '/patientspage' },
         { id: 'appointments', label: 'Appointments', icon: Calendar, path: '/appointments' },
         { id: 'plans', label: 'Plans', icon: Briefcase, path: '/plans' },

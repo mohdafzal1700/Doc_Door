@@ -1,4 +1,4 @@
-from doctor.views import DoctorLoginView,DoctorProfileView,DoctorEducationView,DoctorCertificationView,LicenseUploadView
+from doctor.views import DoctorLoginView,DoctorProfileView,DoctorEducationView,DoctorCertificationView,LicenseUploadView,DoctorVerificationStatusView
 from django.urls import path
 from . import views
 
@@ -17,7 +17,7 @@ urlpatterns = [
     path('license/', LicenseUploadView.as_view(), name='license-upload'),
     
     # Verification Status
-    path('verification/status/', views.verification_status_view, name='verification-status')
+    path('verification-status/', DoctorVerificationStatusView.as_view(), name='doctor-verification-status'),
 ]
 
 

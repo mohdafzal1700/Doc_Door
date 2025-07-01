@@ -18,3 +18,29 @@ export const togglePatientStatusSimple = (patientId, isActive) =>
 
 export const getPatientDetails = (patientId) => 
     adminAxios.get(`patient-management/${patientId}/`);
+
+
+export const doctorManagement = () => adminAxios.get('doctor-management/');
+
+export const toggle_doctorStatusSimple = (doctorId, isActive) => 
+    adminAxios.patch(`doctor-management/${doctorId}/toggle/`, {
+        is_active: isActive
+    });
+
+export const get_doctor_Details = (doctorId) => 
+    adminAxios.get(`doctor-management/${doctorId}/`);
+
+
+export const getDoctorApplications = () => 
+    adminAxios.get('doctor-applications/');
+
+// Get detailed view of a specific doctor application
+export const getDoctorApplicationDetail = (doctorId) =>
+    adminAxios.get(`doctor-applications/${doctorId}/`);
+
+// Approve or reject a doctor application
+export const doctorApprovalAction = (doctorId, action, adminComments = '') =>
+    adminAxios.patch(`doctor-applications/${doctorId}/action/`, {
+        action: action, // 'approve' or 'reject'
+        admin_comments: adminComments
+    });

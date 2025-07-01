@@ -32,7 +32,7 @@ export default function DocHeader() {
   }
 
   const handleProfileClick = () => {
-    navigate("/doctor/profile")
+    navigate("/doctor/portal")
     setIsUserMenuOpen(false)
     setIsMenuOpen(false)
   }

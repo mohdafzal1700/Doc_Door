@@ -165,15 +165,28 @@ class Doctor(models.Model):
     
     
     def check_verification_completion(self):
-        """Check if all verification steps are complete"""
+        """Check if all verification steps are complete and update status"""
+        print(f"🔍 Checking verification for Doctor {self.id}")
+        print(f"Profile setup: {self.is_profile_setup_done}")
+        print(f"Education: {self.is_education_done}")
+        print(f"Certification: {self.is_certification_done}")
+        print(f"License: {self.is_license_done}")
+        print(f"Current status: {self.verification_status}")
+        
         if (self.is_profile_setup_done and 
             self.is_education_done and 
             self.is_certification_done and 
             self.is_license_done):
             
+            # Only update if currently incomplete
             if self.verification_status == 'incomplete':
                 self.verification_status = 'pending_approval'
-                self.save()
+                self.save(update_fields=['verification_status'])
+                print(f"✅ Updated verification status to: {self.verification_status}")
+            else:
+                print(f"ℹ️ Status already: {self.verification_status}")
+        else:
+            print("❌ Not all verification steps complete")
         
         return self.verification_status
     
@@ -182,19 +195,27 @@ class Doctor(models.Model):
     def check_profile_completion(self):
         """Check if profile setup is complete"""
         required_fields = [
-            self.gender, self.specialization, self.experience, 
-            self.profile_picture, self.bio, self.date_of_birth,self.license_number
+            'specialization', 'experience', 'clinic_name', 'location', 
+            'license_number', 'consultation_fee', 'date_of_birth', 'gender'
         ]
-        is_complete = all(field for field in required_fields)
         
-        if is_complete != self.is_profile_setup_done:
-            self.is_profile_setup_done = is_complete
+        # Check if user has required name fields
+        user_complete = bool(self.user.first_name and self.user.last_name)
+        
+        # Check if doctor has all required fields
+        doctor_complete = all(getattr(self, field, None) is not None for field in required_fields)
+        
+        was_complete = self.is_profile_setup_done
+        self.is_profile_setup_done = user_complete and doctor_complete
+        
+        if was_complete != self.is_profile_setup_done:
             self.save(update_fields=['is_profile_setup_done'])
-            # Trigger user verification check
-            if self.user:
-                self.user.check_verification_completion()
+            print(f"✅ Profile completion updated: {self.is_profile_setup_done}")
         
-        return is_complete
+        # Check overall verification after updating profile status
+        self.check_verification_completion()
+        
+        return self.is_profile_setup_done
 
     def check_education_completion(self):
         """Check if education step is complete"""
@@ -203,10 +224,11 @@ class Doctor(models.Model):
         if has_education != self.is_education_done:
             self.is_education_done = has_education
             self.save(update_fields=['is_education_done'])
+            print(f"✅ Education completion updated: {self.is_education_done}")
             if self.user:
-                self.user.check_verification_completion()
+                self.check_verification_completion()
         
-        return has_education
+        return self.is_education_done
 
     def check_certification_completion(self):
         """Check if certification step is complete"""
@@ -215,8 +237,9 @@ class Doctor(models.Model):
         if has_certification != self.is_certification_done:
             self.is_certification_done = has_certification
             self.save(update_fields=['is_certification_done'])
+            print(f"✅ Certification completion updated: {self.is_certification_done}")
             if self.user:
-                self.user.check_verification_completion()
+                self.check_verification_completion()
         
         return has_certification
 
@@ -227,8 +250,9 @@ class Doctor(models.Model):
         if has_license != self.is_license_done:
             self.is_license_done = has_license
             self.save(update_fields=['is_license_done'])
+            print(f"✅ License completion updated: {self.is_license_done}")
             if self.user:
-                self.user.check_verification_completion()
+                self.check_verification_completion()
         
         return has_license
     
@@ -338,7 +362,6 @@ class DoctorCertification(models.Model):
         super().save(*args, **kwargs)
         # Update doctor's certification completion status
         self.doctor.check_certification_completion()
-    
 class DoctorProof(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     doctor = models.OneToOneField(Doctor, on_delete=models.CASCADE, related_name='proof')

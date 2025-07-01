@@ -732,19 +732,159 @@ class LicenseUploadView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def verification_status_view(request):
-    """Get current verification status for the user"""
-    try:
-        doctor = Doctor.objects.get(user=request.user)
-        serializer = VerificationStatusSerializer(doctor)
-        return Response({
-            'status': 'success',
-            'data': serializer.data
-        })
-    except Doctor.DoesNotExist:
-        return Response({
-            'status': 'error',
-            'message': 'Doctor profile not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+class DoctorVerificationStatusView(APIView):
+    """Handle doctor verification status checks"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Check and return current verification status"""
+        try:
+            # Check if user has doctor role
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Access denied. User is not a doctor.',
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Get doctor profile
+            try:
+                doctor = Doctor.objects.get(user=request.user)
+            except Doctor.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'message': 'Doctor profile not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Force check verification completion
+            current_status = doctor.check_verification_completion()
+            
+            # Get updated doctor data
+            doctor.refresh_from_db()
+            
+            # Get rejection reasons - check multiple possible sources
+            rejection_reasons = []
+            if doctor.verification_status == 'rejected':
+                # Check if rejection_reasons exists on user model
+                if hasattr(request.user, 'rejection_reasons') and request.user.rejection_reasons:
+                    if isinstance(request.user.rejection_reasons, list):
+                        rejection_reasons = request.user.rejection_reasons
+                    elif isinstance(request.user.rejection_reasons, str):
+                        try:
+                            import json
+                            rejection_reasons = json.loads(request.user.rejection_reasons)
+                        except:
+                            rejection_reasons = [request.user.rejection_reasons]
+                
+                # Check if rejection_reasons exists on doctor model
+                elif hasattr(doctor, 'rejection_reasons') and doctor.rejection_reasons:
+                    if isinstance(doctor.rejection_reasons, list):
+                        rejection_reasons = doctor.rejection_reasons
+                    elif isinstance(doctor.rejection_reasons, str):
+                        try:
+                            import json
+                            rejection_reasons = json.loads(doctor.rejection_reasons)
+                        except:
+                            rejection_reasons = [doctor.rejection_reasons]
+                
+                # Default rejection reasons if none found
+                else:
+                    rejection_reasons = [
+                        "Please review and update your submitted documents",
+                        "Additional verification required"
+                    ]
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'verification_status': doctor.verification_status,
+                    'is_profile_setup_done': doctor.is_profile_setup_done,
+                    'is_education_done': doctor.is_education_done,
+                    'is_certification_done': doctor.is_certification_done,
+                    'is_license_done': doctor.is_license_done,
+                    'rejection_reasons': rejection_reasons
+                }
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to check verification status',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        """Force refresh verification status"""
+        try:
+            # Check if user has doctor role
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Access denied. User is not a doctor.',
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Get doctor profile
+            try:
+                doctor = Doctor.objects.get(user=request.user)
+            except Doctor.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'message': 'Doctor profile not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Force recheck all completion statuses
+            doctor.check_profile_completion()
+            doctor.check_education_completion()
+            doctor.check_certification_completion()
+            doctor.check_license_completion()
+            
+            # Check overall verification
+            current_status = doctor.check_verification_completion()
+            
+            # Get updated doctor data
+            doctor.refresh_from_db()
+            
+            # Get rejection reasons for refresh response too
+            rejection_reasons = []
+            if doctor.verification_status == 'rejected':
+                if hasattr(request.user, 'rejection_reasons') and request.user.rejection_reasons:
+                    if isinstance(request.user.rejection_reasons, list):
+                        rejection_reasons = request.user.rejection_reasons
+                    elif isinstance(request.user.rejection_reasons, str):
+                        try:
+                            import json
+                            rejection_reasons = json.loads(request.user.rejection_reasons)
+                        except:
+                            rejection_reasons = [request.user.rejection_reasons]
+                elif hasattr(doctor, 'rejection_reasons') and doctor.rejection_reasons:
+                    if isinstance(doctor.rejection_reasons, list):
+                        rejection_reasons = doctor.rejection_reasons
+                    elif isinstance(doctor.rejection_reasons, str):
+                        try:
+                            import json
+                            rejection_reasons = json.loads(doctor.rejection_reasons)
+                        except:
+                            rejection_reasons = [doctor.rejection_reasons]
+            
+            return Response({
+                'success': True,
+                'message': 'Verification status refreshed successfully',
+                'data': {
+                    'verification_status': doctor.verification_status,
+                    'is_profile_setup_done': doctor.is_profile_setup_done,
+                    'is_education_done': doctor.is_education_done,
+                    'is_certification_done': doctor.is_certification_done,
+                    'is_license_done': doctor.is_license_done,
+                    'rejection_reasons': rejection_reasons
+                }
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to refresh verification status',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

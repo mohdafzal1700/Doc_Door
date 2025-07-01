@@ -194,7 +194,7 @@ export default function StepLicense() {
                 // Reload the data to show updated information
                 await loadExistingData()
                 
-                navigate("/complete-verification", { state: { submitted: true } })
+                navigate("/doctor/verification", { state: { submitted: true } })
             } else {
                 console.log("❌ License save failed:", response.data) // Added failure log
                 // Handle field errors

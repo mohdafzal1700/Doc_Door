@@ -13,11 +13,15 @@ from rest_framework_simplejwt.exceptions import InvalidToken
 from adminside.serializers import AdminLoginSerializer
 from patients.serializers import UserProfileSerializer, UserStatusSerializer 
 from doctor.models import User  # Custom User model
-
+from doctor.serializers import DoctorProfileSerializer,doctorStatusSerializer, DoctorApplicationListSerializer,DoctorApplicationDetailSerializer,DoctorApprovalActionSerializer
 from django.db.models import Q, Count
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
-
+from rest_framework import generics, status
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAdminUser
+from rest_framework.response import Response
+from django.shortcuts import get_object_or_404
 import logging
 logger = logging.getLogger(__name__)
 
@@ -254,29 +258,215 @@ class PatientManagementView(APIView):
             logger.warning(f"Validation error in toggle_status: {serializer.errors}")
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-# class PatientStatsView(APIView):
-'''dashboard'''
-#     """Separate view for patient statistics"""
-#     permission_classes = [permissions.IsAuthenticated]
+
+
+class DoctorManagementView(APIView):
+    serializer_class = DoctorProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
     
-#     def get(self, request):
-#         """Get patient statistics"""
-#         try:
-#             stats = {
-#                 'total_patients': User.objects.filter(role='patient').count(),
-#                 'active_patients': User.objects.filter(role='patient', is_active=True).count(),
-#                 'inactive_patients': User.objects.filter(role='patient', is_active=False).count(),
-#                 'new_patients_this_month': User.objects.filter(
-#                     role='patient',
-#                     date_joined__month=timezone.now().month,
-#                     date_joined__year=timezone.now().year
-#                 ).count(),
-#             }
+    
+    
+    def get_object(self, pk):
+        logger.debug(f"Fetching doctor object with ID: {pk}")
+        return get_object_or_404(User, pk=pk, role='doctor')
+    
+    
+    def get(self,request,pk=None):
+        try:
+            if pk:
+                logger.info(f"Getting specific doctor with ID: {pk}")
+                user=self.get_object(pk)
+                serialized_data=self.serializer_class(user)
+                return Response(serialized_data.data,status=status.HTTP_200_OK)
             
-#             return Response(stats, status=status.HTTP_200_OK)
+            logger.info('Getting all Doctors')
             
-#         except Exception as e:
-#             return Response(
-#                 {'error': 'An error occurred while fetching statistics', 'details': str(e)},
-#                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
-#             )
+            queryset = User.objects.filter(role='doctor').select_related('doctor_profile')
+            is_active=request.GET.get('is_active','')
+            
+            
+            if is_active:
+                is_active_bool= is_active.lower()=='true'
+                queryset = queryset.filter(is_active=is_active_bool)
+                
+            logger.debug(f"Final queryset count: {queryset.count()}")
+            
+            # Serialize the queryset for all doctors
+            serialized_data = self.serializer_class(queryset, many=True)
+            return Response(serialized_data.data, status=status.HTTP_200_OK)
+        
+        except ValueError as e:
+            logger.warning(f"Invalid value error: {str(e)}")
+            return Response({'error': 'Invalid parameter value', 'details': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
+        except Exception as e:
+            logger.error(f"Error in GET doctor(s): {str(e)}", exc_info=True)
+            return Response({'error': 'An error occurred while fetching doctors', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        
+        
+    def patch(self,request,pk=None):
+        
+        if not pk:
+            logger.warning('Patch request without doctor ID')
+            return Response({'error': 'Doctor ID is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            logger.info(f"PATCH update for doctor ID: {pk}")
+            user = self.get_object(pk)
+            
+            if 'is_active' in request.data and len(request.data) == 1:
+                logger.debug("Toggle is_active status triggered")
+                return self.toggle_status(request, user)
+            
+            logger.debug(f"Updating profile for user: {user}")
+            serializer = self.serializer_class(user, data=request.data, partial=True)
+            
+            
+            if serializer.is_valid():
+                serializer.save()
+                logger.info(f"User {user.id} profile updated successfully")
+                return Response(serializer.data, status=status.HTTP_200_OK)
+            else:
+                logger.warning(f"Validation error: {serializer.errors}")
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+            
+        except Exception as e:
+            logger.error(f"Error updating doctor profile: {str(e)}", exc_info=True)
+            return Response({'error': 'An error occurred while updating doctor', 'details': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    
+    def toggle_status(self,request,user):
+        
+        logger.debug(f'Toggling is_active status for user:{user.id}')
+        serializer=doctorStatusSerializer(data=request.data)
+        
+        if serializer.is_valid():
+            try:
+                serializer.update(user,serializer.validated_data)
+                logger.info(f'User {user.id} status changed to:{user.is_active}')
+                
+                return Response({
+                    'status': 'User status updated successfully',
+                    'is_active': user.is_active
+                }, status=status.HTTP_200_OK)
+            except Exception as e:
+                logger.error(f"Error in toggle_status: {str(e)}", exc_info=True)
+                return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            logger.warning(f"Validation error in toggle_status: {serializer.errors}")
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        
+    
+
+class DoctorApplicationListView(generics.ListAPIView):
+    """List doctors pending approval - only those who completed 4 steps"""
+    
+    serializer_class = DoctorApplicationListSerializer
+    permission_classes = [IsAdminUser]
+    
+    def get_queryset(self):
+        """Only show doctors with verification_status = 'pending_approval'"""
+        return User.objects.filter(
+            role='doctor',
+            doctor_profile__verification_status='pending_approval',
+            doctor_profile__is_profile_setup_done=True,
+            doctor_profile__is_education_done=True,
+            doctor_profile__is_certification_done=True,
+            doctor_profile__is_license_done=True
+        ).select_related('doctor_profile').order_by('-doctor_profile__updated_at')
+
+
+class DoctorApplicationDetailView(generics.RetrieveAPIView):
+    """Get complete doctor application details for review"""
+    
+    serializer_class = DoctorApplicationDetailSerializer
+    permission_classes = [IsAdminUser]
+    lookup_field = 'id'
+    
+    def get_queryset(self):
+        return User.objects.filter(
+            role='doctor'
+        ).select_related('doctor_profile').prefetch_related(
+            'doctor_profile__educations',
+            'doctor_profile__certifications',
+            'doctor_profile__proof'
+        )
+
+
+class DoctorApprovalActionView(generics.UpdateAPIView):
+    """Simple approve/reject action"""
+    
+    serializer_class = DoctorApprovalActionSerializer
+    permission_classes = [IsAdminUser]
+    lookup_field = 'id'
+    
+    def get_queryset(self):
+        return User.objects.filter(
+            role='doctor',
+            doctor_profile__verification_status='pending_approval'
+        ).select_related('doctor_profile')
+    
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data)
+        
+        if serializer.is_valid():
+            action = request.data.get('action')
+            
+            # Validate that doctor completed all steps before approval
+            doctor = instance.doctor_profile
+            if action == 'approve':
+                if not all([
+                    doctor.is_profile_setup_done,
+                    doctor.is_education_done,
+                    doctor.is_certification_done,
+                    doctor.is_license_done
+                ]):
+                    return Response({
+                        'error': 'Doctor has not completed all verification steps.',
+                        'completion_status': {
+                            'profile_setup': doctor.is_profile_setup_done,
+                            'education': doctor.is_education_done,
+                            'certification': doctor.is_certification_done,
+                            'license': doctor.is_license_done
+                        }
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Perform the action
+            updated_instance = serializer.save()
+            
+            return Response({
+                'success': True,
+                'message': f'Doctor application {action}d successfully.',
+                'doctor_id': str(instance.id),
+                'new_status': updated_instance.doctor_profile.verification_status
+            }, status=status.HTTP_200_OK)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# @api_view(['GET'])
+# @permission_classes([IsAdminUser])
+# def doctor_application_stats(request):
+#     """Simple stats for admin dashboard"""
+    
+#     stats = {
+#         'pending_applications': User.objects.filter(
+#             role='doctor',
+#             doctor_profile__verification_status='pending_approval'
+#         ).count(),
+#         'approved_doctors': User.objects.filter(
+#             role='doctor',
+#             doctor_profile__verification_status='approved'
+#         ).count(),
+#         'rejected_applications': User.objects.filter(
+#             role='doctor',
+#             doctor_profile__verification_status='rejected'
+#         ).count(),
+#         'total_doctors': User.objects.filter(role='doctor').count()
+#     }
+    
+#     return Response(stats)

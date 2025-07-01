@@ -3,6 +3,30 @@ axios.defaults.withCredentials = true;
 
 export const doctorLogin = (formBody) => axios.post('login/', formBody);
 
+export const checkVerificationStatus = async () => {
+    try {
+        console.log("🔍 Checking verification status...")
+        const response = await axios.get('verification-status/')  // Changed from 'api' to 'axios'
+        console.log("✅ Verification status response:", response.data)
+        return response
+    } catch (error) {
+        console.error("❌ Error checking verification status:", error)
+        throw error
+    }
+}
+
+export const refreshVerificationStatus = async () => {
+    try {
+        console.log("🔄 Refreshing verification status...")
+        const response = await axios.post('verification-status/')  // Changed from 'api' to 'axios'
+        console.log("✅ Verification status refreshed:", response.data)
+        return response
+    } catch (error) {
+        console.error("❌ Error refreshing verification status:", error)
+        throw error
+    }
+}
+
 export const getDoctorProfile = () => axios.get("profile/");
 
 export const updateDoctorProfile = (data) => {

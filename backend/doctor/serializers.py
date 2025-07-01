@@ -214,6 +214,7 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
     doctor_department = serializers.SerializerMethodField()
     doctor_gender = serializers.SerializerMethodField()
     doctor_date_of_birth = serializers.SerializerMethodField() 
+    
 
     class Meta:
         model = User
@@ -746,3 +747,270 @@ class CompleteDoctorProfileSerializer(serializers.ModelSerializer):
             # Timestamps
             'created_at', 'updated_at'
         ]
+        
+        
+class doctorStatusSerializer(serializers.Serializer):
+    is_active=serializers.BooleanField(required=True) 
+    
+    
+    def update(self,instance,validated_data):
+        
+        if instance.is_staff and not validated_data.get('is_active', True):
+            raise serializers.ValidationError(
+                "Staff accounts cannot be deactivated through this interface."
+            )
+        instance.is_active= validated_data.get('is_active', instance.is_active)
+        instance.save()
+        return instance
+    
+    
+class DoctorApplicationListSerializer(serializers.ModelSerializer):
+    """Simple serializer for listing doctors pending approval"""
+    
+    # Use your existing computed fields
+    full_name = serializers.SerializerMethodField()
+    profile_picture_url = serializers.SerializerMethodField()
+    doctor_specialization = serializers.SerializerMethodField()
+    doctor_experience = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'email', 'phone_number', 'full_name',
+            'profile_picture_url', 'doctor_specialization', 'doctor_experience'
+        ]
+    
+    def get_full_name(self, obj):
+        return f"{obj.first_name or ''} {obj.last_name or ''}".strip() or obj.email
+    
+    def get_profile_picture_url(self, obj):
+        doctor = getattr(obj, "doctor_profile", None)
+        if doctor and doctor.profile_picture:
+            return doctor.profile_picture.url
+        return None
+    
+    def get_doctor_specialization(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "specialization", '')
+    
+    def get_doctor_experience(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "experience", 0)
+
+
+    def update(self, instance, validated_data):
+        action = validated_data.get('action')  # 'approve' or 'reject'
+        admin_comments = validated_data.get('admin_comments', '')
+        
+        # Get the doctor profile
+        doctor_profile = instance.doctor_profile
+        
+        if action == 'approve':
+            doctor_profile.verification_status = 'approved'
+        elif action == 'reject':
+            doctor_profile.verification_status = 'rejected'
+            # You might want to store rejection reason
+            doctor_profile.rejection_reason = admin_comments
+        
+        doctor_profile.save()
+        
+        # Update user's is_active status if needed
+        if action == 'approve':
+            instance.is_active = True
+            instance.save(update_fields=['is_active'])
+        
+        return instance
+
+class DoctorApplicationDetailSerializer(serializers.ModelSerializer):
+    """Complete doctor application details using your existing serializers"""
+    
+    # 1. DOCTOR PROFILE - Reuse your existing DoctorProfileSerializer logic
+    doctor_profile = serializers.SerializerMethodField()
+    
+    # 2. EDUCATION - Reuse your existing DoctorEducationSerializer
+    doctor_educations = serializers.SerializerMethodField()
+    
+    # 3. CERTIFICATIONS - Reuse your existing DoctorCertificationSerializer  
+    doctor_certifications = serializers.SerializerMethodField()
+    
+    # 4. LICENSE/PROOF - Reuse your existing DoctorProofSerializer
+    doctor_proof = serializers.SerializerMethodField()
+    
+    # Verification status summary
+    verification_summary = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'username', 'email', 'phone_number', 'last_login',
+            'doctor_profile', 'doctor_educations', 'doctor_certifications', 
+            'doctor_proof', 'verification_summary'
+        ]
+    
+    def get_doctor_profile(self, obj):
+        """Get complete doctor profile info"""
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor:
+            return None
+            
+        return {
+            # Basic Info
+            'id': str(doctor.id),
+            'first_name': obj.first_name or '',
+            'last_name': obj.last_name or '',
+            'full_name': f"{obj.first_name or ''} {obj.last_name or ''}".strip() or obj.email,
+            'email': obj.email,
+            'phone_number': obj.phone_number or '',
+            
+            # Doctor Details
+            'specialization': doctor.specialization or '',
+            'experience': doctor.experience or 0,
+            'gender': doctor.gender or '',
+            'date_of_birth': doctor.date_of_birth.strftime('%Y-%m-%d') if doctor.date_of_birth else None,
+            'bio': doctor.bio or '',
+            'license_number': doctor.license_number or '',
+            'consultation_fee': float(doctor.consultation_fee) if doctor.consultation_fee else 0.00,
+            'consultation_mode_online': doctor.consultation_mode_online,
+            'consultation_mode_offline': doctor.consultation_mode_offline,
+            'clinic_name': doctor.clinic_name or '',
+            'location': doctor.location or '',
+            'is_available': doctor.is_available,
+            'profile_picture_url': doctor.profile_picture.url if doctor.profile_picture else None,
+            'has_profile_picture': bool(doctor.profile_picture),
+            'verification_status': doctor.verification_status,
+            'created_at': doctor.created_at.strftime('%Y-%m-%d %H:%M:%S') if doctor.created_at else None,
+            'updated_at': doctor.updated_at.strftime('%Y-%m-%d %H:%M:%S') if doctor.updated_at else None,
+        }
+    
+    def get_doctor_educations(self, obj):
+        """Get all education details"""
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor:
+            return []
+        
+        educations = doctor.educations.all()
+        return [{
+            'id': str(edu.id),
+            'degree_name': edu.degree_name,
+            'institution_name': edu.institution_name,
+            'year_of_completion': edu.year_of_completion,
+            'degree_certificate_id': edu.degree_certificate_id,
+            'created_at': edu.created_at.strftime('%Y-%m-%d') if edu.created_at else None
+        } for edu in educations]
+    
+    def get_doctor_certifications(self, obj):
+        """Get all certification details"""
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor:
+            return []
+        
+        certifications = doctor.certifications.all()
+        return [{
+            'id': str(cert.id),
+            'certification_name': cert.certification_name,
+            'issued_by': cert.issued_by,
+            'year_of_issue': cert.year_of_issue,
+            'certification_certificate_id': cert.certification_certificate_id,
+            'certificate_image_url': cert.certificate_image.url if cert.certificate_image else None,
+            'has_certificate_image': bool(cert.certificate_image),
+            'created_at': cert.created_at.strftime('%Y-%m-%d') if cert.created_at else None
+        } for cert in certifications]
+    
+    def get_doctor_proof(self, obj):
+        """Get license and proof details"""
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor or not hasattr(doctor, 'proof'):
+            return None
+        
+        proof = doctor.proof
+        return {
+            'id': str(proof.id),
+            'medical_license_number': proof.medical_license_number,
+            'license_doc_id': proof.license_doc_id,
+            'license_image_url': proof.license_proof_image.url if proof.license_proof_image else None,
+            'has_license_image': bool(proof.license_proof_image),
+            'id_proof_url': proof.id_proof.url if proof.id_proof else None,
+            'has_id_proof': bool(proof.id_proof),
+            'created_at': proof.created_at.strftime('%Y-%m-%d') if proof.created_at else None
+        }
+    
+    def get_verification_summary(self, obj):
+        """Get verification status summary"""
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor:
+            return None
+            
+        return {
+            'is_profile_setup_done': doctor.is_profile_setup_done,
+            'is_education_done': doctor.is_education_done,
+            'is_certification_done': doctor.is_certification_done,
+            'is_license_done': doctor.is_license_done,
+            'verification_status': doctor.verification_status,
+            'all_steps_complete': all([
+                doctor.is_profile_setup_done,
+                doctor.is_education_done,
+                doctor.is_certification_done,
+                doctor.is_license_done
+            ]),
+            'completion_percentage': int(sum([
+                doctor.is_profile_setup_done,
+                doctor.is_education_done,
+                doctor.is_certification_done,
+                doctor.is_license_done
+            ]) / 4 * 100)
+        }
+
+
+class DoctorApprovalActionSerializer(serializers.Serializer):
+    """Simple approve/reject serializer"""
+    
+    ACTION_CHOICES = [
+        ('approve', 'Approve'),
+        ('reject', 'Reject')
+    ]
+    
+    action = serializers.ChoiceField(choices=ACTION_CHOICES, required=True)
+    admin_comment = serializers.CharField(
+        max_length=500, 
+        required=False, 
+        allow_blank=True,
+        help_text="Optional comment (required for rejections)"
+    )
+    
+    def validate(self, data):
+        action = data.get('action')
+        admin_comment = data.get('admin_comment', '').strip()
+        
+        # Require comment for rejections
+        if action == 'reject' and not admin_comment:
+            raise serializers.ValidationError({
+                'admin_comment': 'Comment is required when rejecting an application.'
+            })
+        
+        return data
+    
+    def update(self, instance, validated_data):
+        """Update doctor verification status"""
+        from django.utils import timezone
+        
+        # Get the doctor profile
+        doctor = instance.doctor_profile
+        action = validated_data['action']
+        admin_comment = validated_data.get('admin_comment', '')
+        
+        # Update verification status
+        if action == 'approve':
+            doctor.verification_status = 'approved'
+            instance.is_active = True 
+            
+        elif action == 'reject':
+            doctor.verification_status = 'rejected'
+            
+        
+        # Save both user and doctor
+        doctor.save()
+        instance.save()
+        
+        # Log the action
+        print(f"🔍 APPROVAL ACTION: {action.upper()} for Doctor {doctor.id}")
+        print(f"📝 Admin Comment: {admin_comment}")
+        
+        return instance
