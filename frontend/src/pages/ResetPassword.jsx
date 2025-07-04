@@ -5,6 +5,8 @@ import { useNavigate, useLocation } from "react-router-dom"
 import { Lock, Eye, EyeOff, CheckCircle } from "lucide-react"
 import Button from "../components/ui/Button"
 import { resetPassword } from "../endpoints/APIs" // Import the API function
+import { useToast } from "../components/ui/Toast"
+
 
 const ResetPassword = () => {
     const navigate = useNavigate()
@@ -12,6 +14,7 @@ const ResetPassword = () => {
     const email = location.state?.email || ""
     const otp = location.state?.otp || ""
     const token = location.state?.token || "" // Reset token from OTP verification
+    const toast =useToast()
 
     const [formData, setFormData] = useState({
         password: "",
@@ -91,7 +94,7 @@ const ResetPassword = () => {
 
                 // Show success state
                 setIsSuccess(true)
-
+                toast.success("password reset successfully! Redirecting to login")
                 // Redirect to login after 3 seconds
                 setTimeout(() => {
                     navigate("/login", {
@@ -105,31 +108,30 @@ const ResetPassword = () => {
             } catch (error) {
                 console.error("Password reset failed:", error)
                 
-                // Handle different error scenarios
+                let errorMessage = "Failed to reset password. Please try again."
+                
                 if (error.response?.status === 400) {
                     const errorData = error.response.data
                     if (errorData.password) {
-                        setErrors({ password: Array.isArray(errorData.password) ? errorData.password[0] : errorData.password })
+                        errorMessage = Array.isArray(errorData.password) ? errorData.password[0] : errorData.password
+                        setErrors({ password: errorMessage })
                     } else if (errorData.confirm_password) {
-                        setErrors({ confirmPassword: Array.isArray(errorData.confirm_password) ? errorData.confirm_password[0] : errorData.confirm_password })
+                        errorMessage = Array.isArray(errorData.confirm_password) ? errorData.confirm_password[0] : errorData.confirm_password
+                        setErrors({ confirmPassword: errorMessage })
                     } else if (errorData.otp) {
-                        setErrors({ general: "OTP has expired or is invalid. Please request a new password reset." })
+                        errorMessage = "OTP has expired or is invalid. Please request a new password reset."
                     } else if (errorData.message || errorData.error) {
-                        setErrors({ general: errorData.message || errorData.error })
-                    } else {
-                        setErrors({ general: "Please check your password requirements and try again." })
+                        errorMessage = errorData.message || errorData.error
                     }
                 } else if (error.response?.status === 404) {
-                    setErrors({ general: "Reset session not found. Please start the password reset process again." })
+                    errorMessage = "Reset session not found. Please start the password reset process again."
                 } else if (error.response?.status === 410) {
-                    setErrors({ general: "Reset link has expired. Please request a new password reset." })
+                    errorMessage = "Reset link has expired. Please request a new password reset."
                 } else if (error.response?.status === 429) {
-                    setErrors({ general: "Too many attempts. Please try again later." })
-                } else if (error.response?.data?.message) {
-                    setErrors({ general: error.response.data.message })
-                } else {
-                    setErrors({ general: "Failed to reset password. Please try again." })
+                    errorMessage = "Too many attempts. Please try again later."
                 }
+
+                toast.error(errorMessage)
             } finally {
                 setIsLoading(false)
             }

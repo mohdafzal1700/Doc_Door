@@ -5,6 +5,9 @@ from django.core.mail import send_mail
 from django.utils import timezone
 from django.conf import settings
 from doctor.models import EmailOTP, User
+import logging
+
+logger = logging.getLogger(__name__)
 
 def send_otp_email(user):
     try:
@@ -18,22 +21,40 @@ def send_otp_email(user):
         )
         
         # Debug: Print OTP (remove in production)
-        print(f"🔐 OTP for {user.email}: {otp}")
+        logger.info(f"OTP for {user.email}: {otp}")
+        message = f"""
+            Hello {user.first_name or user.username},
+
+            🔐 *Your Doc_door Verification Code*
+
+            Your One-Time Password (OTP) is: **{otp}**
+
+            🕒 Please note:
+            This OTP will expire in **1 minute** for security reasons.
+
+            If you didn’t request this, please ignore this email or contact support immediately.
+
+            —
+            Thanks & Regards,  
+            🩺 Doc_door Team  
+            Your Trusted Healthcare Partner
+            """
+        message = message.replace("**", "")
         
         # Try sending email
         result = send_mail(
             subject='🔐 Your Verification Code',
-            message=f'Your OTP is: {otp}\n\nExpires in 1 minute.',
+            message=message,
             from_email=settings.DEFAULT_FROM_EMAIL,
             recipient_list=[user.email],
             fail_silently=False
         )
         
-        print(f"✅ Email sent successfully!")
+        logger.info(f"Email sent successfully!")
         return True, otp
         
     except Exception as e:
-        print(f"❌ Email failed: {e}")
+        logger.error(f"Email failed: {e}")
         return False, str(e)
 
 # Quick email test function
@@ -44,10 +65,10 @@ def test_email_connection():
         connection = get_connection()
         connection.open()
         connection.close()
-        print("✅ Email connection successful!")
+        logger.info("Email connection successful!")
         return True
     except Exception as e:
-        print(f"❌ Email connection failed: {e}")
+        logger.error(f"Email connection failed: {e}")
         return False
 
 # Test with a simple email
@@ -61,10 +82,10 @@ def send_test_email():
             ['your-test-email@gmail.com'],  # Replace with your email
             fail_silently=False,
         )
-        print("✅ Test email sent!")
+        logger.info("Test email sent!")
         return True
     except Exception as e:
-        print(f"❌ Test email failed: {e}")
+        logger.error(f"Test email failed: {e}")
         return False
 
 # Network connectivity test
@@ -83,10 +104,10 @@ def test_smtp_connectivity():
             print(f"Testing {host}:{port}...")
             sock = socket.create_connection((host, port), timeout=10)
             sock.close()
-            print(f"✅ {host}:{port} - Connection successful!")
+            print(f"{host}:{port} - Connection successful!")
             return True, host, port
         except Exception as e:
-            print(f"❌ {host}:{port} - {e}")
+            print(f"{host}:{port} - {e}")
     
     return False, None, None
 
@@ -127,9 +148,9 @@ def test_email_configs():
             )
             connection.open()
             connection.close()
-            print(f"✅ Configuration {i} works!")
+            print(f"Configuration {i} works!")
             return config
         except Exception as e:
-            print(f"❌ Configuration {i} failed: {e}")
+            print(f"Configuration {i} failed: {e}")
     
     return None

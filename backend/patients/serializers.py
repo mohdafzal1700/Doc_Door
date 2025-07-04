@@ -114,24 +114,24 @@ class CustomUserCreateSerializer(serializers.ModelSerializer):
             user.is_active = False  
             user.save()
             
-            logger.info(f"✅ User saved: {user.id} - {user.email}")
+            logger.info(f"User saved: {user.id} - {user.email}")
 
         
             EmailOTP.objects.filter(user=user).delete()
             logger.info(f"Cleared any existing OTP records for {user.email}")
 
 
-            logger.info(f"🔄 Sending OTP to {user.email}...")
+            logger.info(f"Sending OTP to {user.email}...")
             success, result = send_otp_email(user)
             
             if success:
-                logger.info(f"✅ OTP sent successfully to {user.email}")
+                logger.info(f"OTP sent successfully to {user.email}")
                 logger.info(f"Registration OTP sent to {user.email}")
             else:
             
                 logger.error(f"Registration OTP failed for {user.email}: {result}")
                 # Don't fail registration if OTP sending fails - user can resend
-                print("⚠️ User created but OTP sending failed - user can use resend OTP")
+                logger.warning("User created but OTP sending failed - user can use resend OTP")
 
             return user
 
@@ -149,33 +149,33 @@ class EmailOTPVerifySerializer(serializers.Serializer):
         email = data.get('email')
         otp = data.get('otp')
 
-        print(f"🔍 Verifying OTP for {email}: {otp}")
+        logger.debug(f"Verifying OTP for {email}: {otp}")
 
         try:
             user = User.objects.get(email=email)
-            print(f"✅ User found: {user.email}")
+            logger.info(f"User found: {user.email}")
             
             try:
                 email_otp = EmailOTP.objects.get(user=user)
-                print(f"✅ OTP record found for {user.email}")
-                print(f"🔐 Stored OTP: {email_otp.otp}, Provided OTP: {otp}")
+                logger.info(f"OTP record found for {user.email}")
+                logger.debug(f"Stored OTP: {email_otp.otp}, Provided OTP: {otp}")
                 
                 if email_otp.is_expired():
-                    print(f"⏰ OTP expired for {user.email}")
+                    logger.warning(f"OTP expired for {user.email}")
                     raise serializers.ValidationError("OTP has expired. Please request a new one.")
 
                 if email_otp.otp != otp:
-                    print(f"❌ OTP mismatch for {user.email}")
+                    logger.error(f"OTP mismatch for {user.email}")
                     raise serializers.ValidationError("Invalid OTP.")
                     
-                print(f"✅ OTP verification successful for {user.email}")
+                logger.info(f"OTP verification successful for {user.email}")
 
             except EmailOTP.DoesNotExist:
-                print(f"❌ No OTP record found for {user.email}")
+                logger.error(f"No OTP record found for {user.email}")
                 raise serializers.ValidationError("No OTP found for this account. Please request a new one.")
 
         except User.DoesNotExist:
-            print(f"❌ User not found: {email}")
+            logger.error(f"User not found: {email}")
             raise serializers.ValidationError("User not found.")
 
         return data
@@ -200,18 +200,18 @@ class ResendOTPSerializer(serializers.Serializer):
         email = self.validated_data.get('email')
         user = User.objects.get(email=email)
 
-        print(f"🔄 Resending OTP to {email}")
+        logger.info(f"Resending OTP to {email}")
         
-        # Delete any existing OTP records to avoid confusion
+        
         EmailOTP.objects.filter(user=user).delete()
-        print(f"🧹 Cleared existing OTP records for {email}")
+        logger.debug(f"Cleared existing OTP records for {email}")
 
         success, result = send_otp_email(user)
         if not success:
-            print(f"❌ Failed to resend OTP to {email}: {result}")
+            logger.error(f"Failed to resend OTP to {email}: {result}")
             raise serializers.ValidationError(f"Failed to send OTP email: {result}")
 
-        print(f"✅ OTP resent successfully to {email}")
+        logger.info(f"OTP resent successfully to {email}")
         return user
 
 
@@ -234,7 +234,7 @@ class ForgotPasswordSerializer(serializers.Serializer):
         except User.DoesNotExist:
             raise serializers.ValidationError("User not found.")
 
-        # ✅ Send OTP using the utility function
+    
         success, result = send_otp_email(user)
 
         if not success:
@@ -284,28 +284,28 @@ class ResetPasswordSerializer(serializers.Serializer):
 
     def validate_password(self, value):
         """Validate password strength"""
-        print(f"DEBUG - Validating password: {value}")
+        logger.debug(f"Validating password: {value}")
         try:
             email = self.initial_data.get('email')
             user = None
             if email:
                 try:
                     user = User.objects.get(email=email)
-                    print(f"DEBUG - Found user for password validation: {user.email}")
+                    logger.debug(f"Found user for password validation: {user.email}")
                 except User.DoesNotExist:
-                    print("DEBUG - User not found for password validation")
+                    logger.debug("User not found for password validation")
                     pass
             
             validate_password(value, user=user)
-            print(f"DEBUG - Password validation passed")
+            logger.debug(f"Password validation passed")
         except DjangoValidationError as e:
-            print(f"DEBUG - Password validation failed: {e.messages}")
+            logger.error(f"Password validation failed: {e.messages}")
             raise serializers.ValidationError(list(e.messages))
         
         return value
 
     def validate(self, data):
-        print(f"DEBUG - Full data validation: {data}")
+        logger.debug("Starting full data validation")
         
         email = data.get('email')
         password = data.get('password')
@@ -313,7 +313,7 @@ class ResetPasswordSerializer(serializers.Serializer):
 
         # Check if passwords match
         if password != confirm_password:
-            print("DEBUG - Passwords don't match")
+            logger.debug("DEBUG - Passwords don't match")
             raise serializers.ValidationError({
                 'confirm_password': 'Passwords do not match.'
             })
@@ -321,14 +321,14 @@ class ResetPasswordSerializer(serializers.Serializer):
         # Just verify user exists (OTP already verified in previous step)
         try:
             user = User.objects.get(email=email)
-            print(f"DEBUG - Found user: {user.email}")
+            logger.debug(f"Found user: {user.email}")
         except User.DoesNotExist:
-            print("DEBUG - User not found")
+            logger.debug("User not found")
             raise serializers.ValidationError({
                 'email': 'User not found.'
             })
 
-        print("DEBUG - All validation passed")
+        logger.info("All validation passed")
         return data
 
     def save(self, **kwargs):
@@ -336,69 +336,15 @@ class ResetPasswordSerializer(serializers.Serializer):
         password = self.validated_data['password']
         user = User.objects.get(email=email)
 
-        print(f"DEBUG - Saving password for user: {user.email}")
+        logger.info(f"DEBUG - Saving password for user: {user.email}")
         
         user.set_password(password)
         user.save()
 
-        print("DEBUG - Password saved successfully")
+        logger.info("Password saved successfully")
         return user
 
     
-
-# class EmailOTPVerifySerializer(serializers.Serializer):
-#     email = serializers.EmailField()
-#     otp = serializers.CharField(max_length=6)
-
-#     def validate(self, data):
-#         email = data.get('email')
-#         otp = data.get('otp')
-
-#         try:
-#             user = User.objects.get(email=email)
-#             email_otp = EmailOTP.objects.get(user=user)
-
-#             if email_otp.is_expired():
-#                 raise serializers.ValidationError("OTP has expired. Please request a new one.")
-
-#             if email_otp.otp != otp:
-#                 raise serializers.ValidationError("Invalid OTP.")
-
-#         except User.DoesNotExist:
-#             raise serializers.ValidationError("User not found.")
-#         except EmailOTP.DoesNotExist:
-#             raise serializers.ValidationError("No OTP found for this account. Please request a new one.")
-
-#         return data
-
-
-# class ResendOTPSerializer(serializers.Serializer):
-#     email = serializers.EmailField()
-
-#     def validate_email(self, value):
-#         if not value:
-#             raise serializers.ValidationError("Email is required.")
-
-#         try:
-#             user = User.objects.get(email=value)
-#             if user.is_active:
-#                 raise serializers.ValidationError("User is already verified.")
-#             return value
-#         except User.DoesNotExist:
-#             raise serializers.ValidationError("User with this email does not exist.")
-
-#     def save(self, **kwargs):
-#         email = self.validated_data.get('email')
-#         user = User.objects.get(email=email)
-
-#         success, result = send_otp_email(user)
-#         if not success:
-#             raise serializers.ValidationError(f"Failed to send OTP email: {result}")
-
-#         # Optionally, you can return the OTP here for testing purposes (remove in production)
-#         return user
-
-
 
 class UserProfileSerializer(serializers.ModelSerializer):
     """Serializer for user profile (User + Patient)"""
@@ -434,7 +380,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'patient_blood_group', 'patient_age', 'patient_gender',
             'profile_picture_url', 'has_profile_picture',
         ]
-        read_only_fields = ['id', 'role', 'is_active']
+        read_only_fields = ['id', 'role', 'is_active','email']
 
     # === Computed Field Methods ===
 
@@ -442,8 +388,8 @@ class UserProfileSerializer(serializers.ModelSerializer):
         return f"{obj.first_name or ''} {obj.last_name or ''}".strip() or obj.email or obj.username
 
     def get_member_since(self, obj):
-        """Get the date when user joined - using date_joined from AbstractBaseUser"""
-        # AbstractBaseUser provides date_joined by default
+        
+        
         return obj.date_joined.strftime('%Y-%m-%d') if hasattr(obj, 'date_joined') and obj.date_joined else None
 
     def get_last_visit(self, obj):
@@ -461,7 +407,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     def get_profile_picture_url(self, obj):
         patient = getattr(obj, "patient_profile", None)
         if patient and patient.profile_picture:
-            # For Cloudinary fields, you can access the URL directly
+        
             return patient.profile_picture.url
         return None
 
@@ -471,11 +417,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     # === Validation Methods ===
 
-    def validate_email(self, value):
-        user = self.instance
-        if user and User.objects.filter(email=value).exclude(id=user.id).exists():
-            raise serializers.ValidationError("This email is already in use.")
-        return value
+    # def validate_email(self, value):
+    #     user = self.instance
+    #     if user and User.objects.filter(email=value).exclude(id=user.id).exists():
+    #         raise serializers.ValidationError("This email is already in use.")
+    #     return value
 
     def validate_phone_number(self, value):
         if value:

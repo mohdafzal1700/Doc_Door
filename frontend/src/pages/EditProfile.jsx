@@ -3,6 +3,7 @@ import { ArrowLeft, Save, User, Mail, Phone, Calendar, Heart, MapPin, Camera, Ed
 import Button from "../components/ui/Button"
 import Header from "../components/home/Header"
 import { useNavigate, useLocation } from "react-router-dom"
+import { useToast } from "../components/ui/Toast"
 import {
     getUserProfile,
     updateUserProfile,
@@ -15,7 +16,7 @@ import {
 const EditProfile = () => {
     const navigate = useNavigate()
     const location = useLocation()
-
+    const toast = useToast()
     const [loading, setLoading] = useState(true)
     const [updateLoading, setUpdateLoading] = useState(false)
     const [error, setError] = useState(null)

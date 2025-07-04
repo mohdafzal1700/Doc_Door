@@ -6,7 +6,8 @@ import * as Yup from "yup"
 import { useNavigate } from "react-router-dom"
 import { Mail, Lock, LogIn } from "lucide-react"
 import { useState } from "react"
-
+import { useContext } from "react"
+import { ToastContext } from "../components/ui/Toast"
 import Logo from "../components/ui/Logo.jsx"
 import Input from "../components/ui/Input.jsx"
 import Button from "../components/ui/Button.jsx"
@@ -15,11 +16,13 @@ import GoogleButton from "../components/ui/GoogleButton.jsx"
 import { login } from "../endpoints/APIs.js"
 import { doctorLogin } from "../endpoints/Doc.js"
 import { setAuthData } from "../utils/auth.js"
+import { useToast } from "../components/ui/Toast"
 
 const Login = () => {
     const navigate = useNavigate()
-    const [errorMsg, setErrorMsg] = useState("")
+    // const [errorMsg, setErrorMsg] = useState("")
     const [loading, setLoading] = useState(false)
+    const toast = useToast() 
 
     const formik = useFormik({
         initialValues: {
@@ -33,10 +36,10 @@ const Login = () => {
         }),
         onSubmit: async (values) => {
             setLoading(true)
-            setErrorMsg("")
+            // setErrorMsg("")
             
             try {
-                console.log("🚀 Starting login process:", values)
+                console.log("Starting login process:", values)
                 
                 let response;
                 
@@ -53,8 +56,9 @@ const Login = () => {
                 
                 // Handle successful login
                 if (response.data.success || response.status === 200) {
-                    console.log("✅ Login successful!")
-                    
+                    console.log("Login successful!")
+                    toast.success("Login successful", "Welcome back")
+
                     // Extract user data and tokens from response
                     const userData = response.data.user || response.data.userDetails || response.data.data;
                     const tokens = {
@@ -94,16 +98,16 @@ const Login = () => {
                             }, 100)
                         } else {
                             console.error("❌ Failed to store auth data")
-                            setErrorMsg("Failed to save login state. Please try again.")
+                            toast.error("Failed to save login state. Please try again.")
                         }
                     } else {
                         console.error("❌ No user details or tokens received")
-                        setErrorMsg("Invalid response from server. Please try again.")
+                        toast.error("Invalid response from server. Please try again.")
                     }
                 } else {
                     // Handle unsuccessful login
                     console.log("❌ Login not successful:", response.data)
-                    setErrorMsg(response.data.message || response.data.error || "Login failed")
+                    toast.error(response.data.message || response.data.error || "Login failed")
                 }
                 
             } catch (error) {
@@ -251,7 +255,7 @@ const Login = () => {
             errorMessage = "Network error. Please check your connection.";
         }
         
-        setErrorMsg(errorMessage);
+        toast.error(errorMessage);
     }
 
     const handleForgotPassword = () => {
@@ -290,11 +294,11 @@ const Login = () => {
                         icon={<Lock size={18} className="text-gray-400" />}
                     />
 
-                    {errorMsg && (
+                    {/* {errorMsg && (
                         <div className="text-red-500 text-sm mb-4 p-3 bg-red-50 rounded-md border border-red-200">
                             {errorMsg}
                         </div>
-                    )}
+                    )} */}
 
                     <div className="text-right mb-6">
                         <button

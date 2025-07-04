@@ -7,7 +7,8 @@ from .views import (
     DoctorManagementView,
     DoctorApplicationListView,
     DoctorApplicationDetailView,
-    DoctorApprovalActionView
+    DoctorApprovalActionView,
+    
     
 )
 
@@ -24,4 +25,5 @@ urlpatterns = [
     path('admins/doctor-applications/', DoctorApplicationListView.as_view(), name='doctor-applications-list'),
     path('admins/doctor-applications/<uuid:id>/', DoctorApplicationDetailView.as_view(), name='doctor-application-detail'),
     path('admins/doctor-applications/<uuid:id>/action/', DoctorApprovalActionView.as_view(), name='doctor-approval-action'),
+    
 ]

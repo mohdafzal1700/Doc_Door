@@ -10,14 +10,14 @@ export const STORAGE_KEYS = {
     // Remove ACCESS_TOKEN and REFRESH_TOKEN - using cookies only
 };
 
-// 🔐 Auth check using cookie-based authentication
+//  Auth check using cookie-based authentication
 export const isAuthenticated = async () => {
     try {
-        console.log('🔍 Checking authentication via API call...');
+        console.log('Checking authentication via API call...');
         
         // Try to get user profile (backend reads from cookies automatically)
         const response = await getUserProfile();
-        console.log('✅ Auth check successful:', response.data);
+        console.log('Auth check successful:', response.data);
         
         // Update user data if we got it
         if (response.data?.data) {
@@ -28,23 +28,23 @@ export const isAuthenticated = async () => {
         return true;
         
     } catch (error) {
-        console.error('❌ Auth check failed:', error);
+        console.error(' Auth check failed:', error);
         
         // Clear auth data for actual auth failures (401, 403)
         if (error?.response?.status === 401 || error?.response?.status === 403) {
-            console.log('🔄 Authentication failed, clearing auth data');
+            console.log(' Authentication failed, clearing auth data');
             clearAuthData();
             return false;
         }
         
         // For server errors (500) or network errors, don't clear auth data
         if (error?.response?.status === 500) {
-            console.log('⚠️ Server error during auth check - keeping auth state');
+            console.log('Server error during auth check - keeping auth state');
             return isUserAuthenticated(); // Fall back to local storage check
         }
         
         if (!error?.response) {
-            console.log('🌐 Network error during auth check - keeping auth state');
+            console.log('Network error during auth check - keeping auth state');
             return isUserAuthenticated(); // Fall back to local storage check
         }
         
@@ -58,7 +58,7 @@ export const isDoctorAuthenticated = async () => {
         console.log('🔍 Checking doctor authentication via API call...');
         
         const response = await getDoctorProfile();
-        console.log('✅ Doctor auth check successful:', response.data);
+        console.log(' Doctor auth check successful:', response.data);
         
         // Update user data if we got it
         if (response.data?.data) {
@@ -70,11 +70,11 @@ export const isDoctorAuthenticated = async () => {
         return true;
         
     } catch (error) {
-        console.error('❌ Doctor auth check failed:', error);
+        console.error('Doctor auth check failed:', error);
         
         // For profile setup flow, 404 means authenticated but no profile yet
         if (error?.response?.status === 404) {
-            console.log('ℹ️ Doctor authenticated but profile not set up yet');
+            console.log('Doctor authenticated but profile not set up yet');
             localStorage.setItem(STORAGE_KEYS.IS_AUTHENTICATED, "true");
             localStorage.setItem(STORAGE_KEYS.USER_TYPE, "doctor");
             // Don't store user details since profile doesn't exist
@@ -83,19 +83,19 @@ export const isDoctorAuthenticated = async () => {
         
         // Clear auth data for actual auth failures (401, 403)
         if (error?.response?.status === 401 || error?.response?.status === 403) {
-            console.log('🔄 Doctor authentication failed, clearing auth data');
+            console.log('Doctor authentication failed, clearing auth data');
             clearAuthData();
             return false;
         }
         
         // For server errors (500) or network errors, don't clear auth data
         if (error?.response?.status === 500) {
-            console.log('⚠️ Server error during doctor auth check - keeping auth state');
+            console.log(' Server error during doctor auth check - keeping auth state');
             return isUserAuthenticated();
         }
         
         if (!error?.response) {
-            console.log('🌐 Network error during doctor auth check - keeping auth state');
+            console.log(' Network error during doctor auth check - keeping auth state');
             return isUserAuthenticated();
         }
         
@@ -103,7 +103,7 @@ export const isDoctorAuthenticated = async () => {
     }
 };
 
-// ✅ Save auth info (NO tokens - cookies handle this)
+//  Save auth info (NO tokens - cookies handle this)
 export const setAuthData = (userDetails, tokens, userType = "patient") => {
     try {
         localStorage.setItem(STORAGE_KEYS.USER_DETAILS, JSON.stringify(userDetails));
@@ -111,32 +111,32 @@ export const setAuthData = (userDetails, tokens, userType = "patient") => {
         localStorage.setItem(STORAGE_KEYS.USER_TYPE, userType);
         
         // Don't store tokens - they're in HTTP-only cookies
-        console.log("✅ Auth data stored successfully (tokens in cookies)");
+        console.log(" Auth data stored successfully (tokens in cookies)");
         
         window.dispatchEvent(new Event("authStateChanged"));
         return true;
     } catch (error) {
-        console.error("❌ Error storing auth data:", error);
+        console.error("Error storing auth data:", error);
         return false;
     }
 };
 
-// ✅ Save doctor auth info
+// Save doctor auth info
 export const setDoctorAuthData = (doctorDetails, tokens) => {
     return setAuthData(doctorDetails, tokens, "doctor");
 };
 
-// ❌ Clear all auth data
+// Clear all auth data
 export const clearAuthData = () => {
     try {
         Object.values(STORAGE_KEYS).forEach(key => {
             localStorage.removeItem(key);
         });
         window.dispatchEvent(new Event("authStateChanged"));
-        console.log("🧹 All auth data cleared");
+        console.log("All auth data cleared");
         return true;
     } catch (error) {
-        console.error("❌ Error clearing auth data:", error);
+        console.error("Error clearing auth data:", error);
         return false;
     }
 };
@@ -196,7 +196,7 @@ export const logoutUser = async () => {
         console.log('✅ Logout successful');
         return true;
     } catch (error) {
-        console.error('❌ Logout API failed:', error);
+        console.error(' Logout API failed:', error);
         clearAuthData(); // Still clear even if API fails
         return false;
     }

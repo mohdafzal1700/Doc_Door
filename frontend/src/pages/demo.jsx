@@ -416,3 +416,13 @@
 // }
 
 // export default EditProfile
+
+
+
+
+
+
+// Day 5-7: AI Symptom Checker
+// •	✅ Enter Symptoms (Text/Dropdown)
+// •	✅ AI Suggests Specialties & Triage
+// •	✅ Forward Report to Doctor Before Appointment

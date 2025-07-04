@@ -12,11 +12,13 @@ import Button from "../components/ui/Button.jsx"
 import UserTypeToggle from "../components/ui/UserTypeToggle.jsx"
 import GoogleButton from "../components/ui/GoogleButton.jsx"
 import { register } from "../endpoints/APIs.js" 
+import { useToast } from "../components/ui/Toast.jsx"
 
 const Register = () => {
     const navigate = useNavigate()
     const [errorMsg, setErrorMsg] = useState("")
     const [loading, setLoading] = useState(false)
+    const toast=useToast()
 
     const formik = useFormik({
         initialValues: {
@@ -30,8 +32,14 @@ const Register = () => {
             userType: "patient", // Default to patient
         },
         validationSchema: Yup.object({
-            firstName: Yup.string().required("First name is required"),
-            lastName: Yup.string().required("Last name is required"),
+            firstName: Yup.string()
+                    .required("First name is required")
+                    .matches(/^[A-Za-z]+$/, "First name must contain only letters")
+                    .trim(),
+                    lastName: Yup.string()
+                    .required("Last name is required")
+                    .matches(/^[A-Za-z]+$/, "Last name must contain only letters")
+                    .trim(),
             username: Yup.string()
                 .min(3, "Username must be at least 3 characters")
                 .required("Username is required"),
@@ -79,7 +87,8 @@ const Register = () => {
                 // Uncomment when you have the API endpoint
                 const response = await register(registrationData)
                 console.log("Registration successful:", response)
-                
+                toast.success("Registration successful! Please verify your email to continue.")
+
                 // Navigate to login or OTP verification page after successful registration
                 navigate('/verify-email-otp', { 
                     state: { 
@@ -89,41 +98,45 @@ const Register = () => {
                 })
                 
             } catch (error) {
-                console.error("Registration error:", error)
-                // Handle specific backend validation errors
-                if (error?.response?.data) {
-                    const backendErrors = error.response.data
-                    
-                    // Handle field-specific errors
-                    if (backendErrors.username) {
-                        formik.setFieldError("username", backendErrors.username[0])
-                    }
-                    if (backendErrors.email) {
-                        formik.setFieldError("email", backendErrors.email[0])
-                    }
-                    if (backendErrors.phone_number) {
-                        formik.setFieldError("phone", backendErrors.phone_number[0])
-                    }
-                    if (backendErrors.password) {
-                        formik.setFieldError("password", backendErrors.password[0])
-                    }
-                    if (backendErrors.first_name) {
-                        formik.setFieldError("firstName", backendErrors.first_name[0])
-                    }
-                    if (backendErrors.last_name) {
-                        formik.setFieldError("lastName", backendErrors.last_name[0])
-                    }
-                    
-                    // General error message
-                    if (backendErrors.detail || backendErrors.message) {
-                        setErrorMsg(backendErrors.detail || backendErrors.message)
-                    }
-                } else {
-                    setErrorMsg("Something went wrong. Please try again.")
-                }
-            } finally {
-                setLoading(false)
+        console.error("Registration error:", error)
+        
+        // Handle backend validation errors
+        if (error?.response?.data) {
+            const backendErrors = error.response.data
+            
+            // Handle field-specific errors
+            if (backendErrors.email) {
+                formik.setFieldError("email", backendErrors.email[0])
+                toast.error(backendErrors.email[0]) // Show toast for email error
             }
+            if (backendErrors.username) {
+                formik.setFieldError("username", backendErrors.username[0])
+            }
+            if (backendErrors.phone_number) {
+                formik.setFieldError("phone", backendErrors.phone_number[0])
+            }
+            if (backendErrors.password) {
+                formik.setFieldError("password", backendErrors.password[0])
+            }
+            if (backendErrors.first_name) {
+                formik.setFieldError("firstName", backendErrors.first_name[0])
+            }
+            if (backendErrors.last_name) {
+                formik.setFieldError("lastName", backendErrors.last_name[0])
+            }
+            
+            // Handle non-field errors
+            if (typeof backendErrors === 'string') {
+                toast.error(backendErrors)
+            } else if (backendErrors.detail) {
+                toast.error(backendErrors.detail)
+            }
+        } else {
+            toast.error("Something went wrong. Please try again.")
+        }
+    } finally {
+        setLoading(false)
+    }
         },
     })
 

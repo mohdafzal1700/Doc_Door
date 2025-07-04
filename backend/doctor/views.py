@@ -758,40 +758,29 @@ class DoctorVerificationStatusView(APIView):
             # Force check verification completion
             current_status = doctor.check_verification_completion()
             
-            # Get updated doctor data
+            
             doctor.refresh_from_db()
             
             # Get rejection reasons - check multiple possible sources
             rejection_reasons = []
             if doctor.verification_status == 'rejected':
-                # Check if rejection_reasons exists on user model
-                if hasattr(request.user, 'rejection_reasons') and request.user.rejection_reasons:
-                    if isinstance(request.user.rejection_reasons, list):
-                        rejection_reasons = request.user.rejection_reasons
-                    elif isinstance(request.user.rejection_reasons, str):
-                        try:
-                            import json
-                            rejection_reasons = json.loads(request.user.rejection_reasons)
-                        except:
-                            rejection_reasons = [request.user.rejection_reasons]
-                
-                # Check if rejection_reasons exists on doctor model
-                elif hasattr(doctor, 'rejection_reasons') and doctor.rejection_reasons:
-                    if isinstance(doctor.rejection_reasons, list):
-                        rejection_reasons = doctor.rejection_reasons
-                    elif isinstance(doctor.rejection_reasons, str):
-                        try:
-                            import json
-                            rejection_reasons = json.loads(doctor.rejection_reasons)
-                        except:
-                            rejection_reasons = [doctor.rejection_reasons]
-                
-                # Default rejection reasons if none found
+            
+                if doctor.admin_comment:
+                    # If admin_comment contains multiple reasons separated by newlines or semicolons
+                    if '\n' in doctor.admin_comment:
+                        rejection_reasons = [reason.strip() for reason in doctor.admin_comment.split('\n') if reason.strip()]
+                    elif ';' in doctor.admin_comment:
+                        rejection_reasons = [reason.strip() for reason in doctor.admin_comment.split(';') if reason.strip()]
+                    else:
+                        rejection_reasons = [doctor.admin_comment.strip()]
                 else:
+                    # Default rejection reasons if no admin comment found
                     rejection_reasons = [
                         "Please review and update your submitted documents",
                         "Additional verification required"
                     ]
+                # Default rejection reasons if none found
+                
             
             return Response({
                 'success': True,
@@ -801,7 +790,8 @@ class DoctorVerificationStatusView(APIView):
                     'is_education_done': doctor.is_education_done,
                     'is_certification_done': doctor.is_certification_done,
                     'is_license_done': doctor.is_license_done,
-                    'rejection_reasons': rejection_reasons
+                    'rejection_reasons': rejection_reasons,
+                    'admin_comment': doctor.admin_comment 
                 }
             }, status=status.HTTP_200_OK)
 
@@ -848,24 +838,20 @@ class DoctorVerificationStatusView(APIView):
             # Get rejection reasons for refresh response too
             rejection_reasons = []
             if doctor.verification_status == 'rejected':
-                if hasattr(request.user, 'rejection_reasons') and request.user.rejection_reasons:
-                    if isinstance(request.user.rejection_reasons, list):
-                        rejection_reasons = request.user.rejection_reasons
-                    elif isinstance(request.user.rejection_reasons, str):
-                        try:
-                            import json
-                            rejection_reasons = json.loads(request.user.rejection_reasons)
-                        except:
-                            rejection_reasons = [request.user.rejection_reasons]
-                elif hasattr(doctor, 'rejection_reasons') and doctor.rejection_reasons:
-                    if isinstance(doctor.rejection_reasons, list):
-                        rejection_reasons = doctor.rejection_reasons
-                    elif isinstance(doctor.rejection_reasons, str):
-                        try:
-                            import json
-                            rejection_reasons = json.loads(doctor.rejection_reasons)
-                        except:
-                            rejection_reasons = [doctor.rejection_reasons]
+                if doctor.admin_comment:
+                    # If admin_comment contains multiple reasons separated by newlines or semicolons
+                    if '\n' in doctor.admin_comment:
+                        rejection_reasons = [reason.strip() for reason in doctor.admin_comment.split('\n') if reason.strip()]
+                    elif ';' in doctor.admin_comment:
+                        rejection_reasons = [reason.strip() for reason in doctor.admin_comment.split(';') if reason.strip()]
+                    else:
+                        rejection_reasons = [doctor.admin_comment.strip()]
+                else:
+                    # Default rejection reasons if no admin comment found
+                    rejection_reasons = [
+                        "Please review and update your submitted documents",
+                        "Additional verification required"
+                    ]
             
             return Response({
                 'success': True,
@@ -876,7 +862,8 @@ class DoctorVerificationStatusView(APIView):
                     'is_education_done': doctor.is_education_done,
                     'is_certification_done': doctor.is_certification_done,
                     'is_license_done': doctor.is_license_done,
-                    'rejection_reasons': rejection_reasons
+                    'rejection_reasons': rejection_reasons,
+                    'admin_comment': doctor.admin_comment 
                 }
             }, status=status.HTTP_200_OK)
 

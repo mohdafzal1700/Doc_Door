@@ -24,9 +24,13 @@ import PortalProfile from "./doctor/components/DocProfileEdit"
 import PortalCertification from "./doctor/components/DocCertification"
 import ManageQualifications from "./doctor/components/DocEducation"
 import DoctorProfilePage from "./doctor/components/DocProfile"
+import { ToastProvider } from "./components/ui/Toast"
+
+
 
 function App() {
   return (
+    <ToastProvider>
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -52,9 +56,11 @@ function App() {
         <Route path='/doctor/editProfile'  element={<PortalProfile/>}/>
         <Route path='/doctor/certification'  element={<PortalCertification />}/>
         <Route path='/doctor/education'  element={<ManageQualifications/>}/>
+        
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>
+    </ToastProvider>
   )
 }
 

@@ -2,7 +2,8 @@
 from django.shortcuts import render, get_object_or_404
 from django.core.files.base import ContentFile
 from django.utils import timezone
-
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 # REST framework core imports
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
@@ -154,9 +155,6 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
             
-            
-            
-
 class CustomTokenRefreshView(TokenRefreshView):
     permission_classes = [permissions.AllowAny]
     
@@ -173,7 +171,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            logger.info(f"Refresh token found: {refresh_token[:50]}...")
+            # logger.info(f"Refresh token found: {refresh_token[:50]}...")
                 
             # Create a mutable copy of request.data
             request_data = request.data.copy()
@@ -193,7 +191,7 @@ class CustomTokenRefreshView(TokenRefreshView):
             token = response.data
             access_token = token["access"]
             
-            logger.info(f"New access token generated: {access_token[:50]}...")
+            # logger.info(f"New access token generated: {access_token[:50]}...")
             
             res = Response(status=status.HTTP_200_OK)
             res.data = {"success": True, "message": "Access token refreshed"}
@@ -208,7 +206,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                 max_age=3600
             )
 
-            logger.info("✅ Access token cookie updated")
+            logger.info(" Access token cookie updated")
             return res
             
         except Exception as e:
@@ -219,6 +217,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                 {"success": False, "message": f"Token refresh failed: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
 
 
 class RegisterUserView(generics.CreateAPIView):
@@ -329,7 +328,7 @@ class VerifyForgotPasswordOTPView(generics.GenericAPIView):
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         if serializer.is_valid():
-            # ✅ Just verify, don't delete OTP yet
+            
             return Response({
                 'success': True,
                 'message': 'OTP verified. You can now reset your password.'
@@ -353,7 +352,7 @@ class ResetPasswordView(generics.GenericAPIView):
 
         if serializer.is_valid():
             try:
-                # ✅ This will delete OTP after successful reset
+            
                 serializer.save()
                 return Response({
                     'success': True,
@@ -383,6 +382,19 @@ class CustomLogoutView(APIView):
     
     def post(self, request, *args, **kwargs):
         try:
+            
+            
+            refresh_token = request.COOKIES.get('refresh_token') or request.data.get('refresh_token')
+            
+            if refresh_token:
+                try:
+                    # Blacklist the refresh token
+                    token = RefreshToken(refresh_token)
+                    token.blacklist()
+                except TokenError as e:
+                    # Token might already be blacklisted or invalid
+                    pass
+
             # Create response
             res = Response(
                 {"success": True, "message": "Logout successful"},

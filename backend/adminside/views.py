@@ -395,7 +395,6 @@ class DoctorApplicationDetailView(generics.RetrieveAPIView):
             'doctor_profile__proof'
         )
 
-
 class DoctorApprovalActionView(generics.UpdateAPIView):
     """Simple approve/reject action"""
     
@@ -410,43 +409,77 @@ class DoctorApprovalActionView(generics.UpdateAPIView):
         ).select_related('doctor_profile')
     
     def update(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data=request.data)
+        # Debug logging
+        logger.info(f"PATCH request data: {request.data}")
+        logger.info(f"Request method: {request.method}")
+        logger.info(f"Content type: {request.content_type}")
         
-        if serializer.is_valid():
-            action = request.data.get('action')
+        try:
+            instance = self.get_object()
+            logger.info(f"Found doctor instance: {instance.id}")
+            logger.info(f"Doctor profile status: {instance.doctor_profile.verification_status}")
+        except Exception as e:
+            logger.error(f"Error getting object: {str(e)}")
+            return Response({
+                'error': 'Doctor not found or not eligible for approval.',
+                'detail': str(e)
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Create serializer with the instance and request data
+        serializer = self.get_serializer(instance, data=request.data, partial=True)
+        
+        # Check if serializer is valid
+        if not serializer.is_valid():
+            logger.error(f"Serializer validation errors: {serializer.errors}")
+            return Response({
+                'error': 'Validation failed',
+                'details': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get action for additional validation
+        action = request.data.get('action')
+        logger.info(f"Action requested: {action}")
+        
+        # Validate that doctor completed all steps before approval
+        doctor = instance.doctor_profile
+        if action == 'approve':
+            completion_status = {
+                'profile_setup': doctor.is_profile_setup_done,
+                'education': doctor.is_education_done,
+                'certification': doctor.is_certification_done,
+                'license': doctor.is_license_done
+            }
             
-            # Validate that doctor completed all steps before approval
-            doctor = instance.doctor_profile
-            if action == 'approve':
-                if not all([
-                    doctor.is_profile_setup_done,
-                    doctor.is_education_done,
-                    doctor.is_certification_done,
-                    doctor.is_license_done
-                ]):
-                    return Response({
-                        'error': 'Doctor has not completed all verification steps.',
-                        'completion_status': {
-                            'profile_setup': doctor.is_profile_setup_done,
-                            'education': doctor.is_education_done,
-                            'certification': doctor.is_certification_done,
-                            'license': doctor.is_license_done
-                        }
-                    }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Perform the action
+            if not all(completion_status.values()):
+                logger.error(f"Doctor hasn't completed all steps: {completion_status}")
+                return Response({
+                    'error': 'Doctor has not completed all verification steps.',
+                    'completion_status': completion_status
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Perform the action
+        try:
             updated_instance = serializer.save()
+            logger.info(f"Successfully processed {action} for doctor {instance.id}")
             
             return Response({
                 'success': True,
                 'message': f'Doctor application {action}d successfully.',
                 'doctor_id': str(instance.id),
-                'new_status': updated_instance.doctor_profile.verification_status
+                'new_status': updated_instance.doctor_profile.verification_status,
+                'is_active': updated_instance.is_active
             }, status=status.HTTP_200_OK)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-
+            
+        except Exception as e:
+            logger.error(f"Error during serializer.save(): {str(e)}")
+            return Response({
+                'error': 'Failed to process the action.',
+                'detail': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def patch(self, request, *args, **kwargs):
+        """Override patch to ensure it calls update"""
+        return self.update(request, *args, **kwargs)
 
 # @api_view(['GET'])
 # @permission_classes([IsAdminUser])

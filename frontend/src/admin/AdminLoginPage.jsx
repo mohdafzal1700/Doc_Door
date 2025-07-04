@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff, Shield, User, Lock } from 'lucide-react';
 import { adminLogin ,adminLogout } from '../endpoints/adm'; // Your API endpoints
 import { useNavigate } from 'react-router-dom';
+import { useToast } from '../components/ui/Toast';
 
 const AdminLogin = () => {
     const [formData, setFormData] = useState({
@@ -13,6 +14,7 @@ const AdminLogin = () => {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const navigate=useNavigate()
+    const toast = useToast();
 
     // Check if already authenticated on mount
     useEffect(() => {
@@ -46,7 +48,7 @@ const AdminLogin = () => {
         e.preventDefault();
         
         if (!formData.email || !formData.password) {
-            setError('Please enter both email and password');
+            toast.error('Please enter both email and password');
             return;
         }
 
@@ -66,7 +68,7 @@ const AdminLogin = () => {
             navigate('/dashboard')
 
             console.log('✅ Admin login response:', response.data);
-
+            
             if (response.data) {
                 // Store admin data based on your API response structure
                 const adminData = {
@@ -83,7 +85,9 @@ const AdminLogin = () => {
                 }
                 localStorage.setItem('admin_user_details', JSON.stringify(adminData));
 
-                setSuccess(`Welcome ${adminData.name || adminData.email}! Redirecting to dashboard...`);
+                const welcomeMessage = `Welcome ${adminData.name || adminData.email}! Redirecting to dashboard...`;
+                setSuccess(welcomeMessage);
+                toast.success(welcomeMessage);
                 
                 // Clear form
                 setFormData({ email: '', password: '' });
@@ -118,7 +122,7 @@ const AdminLogin = () => {
                 errorMessage = 'Network error. Please check your connection.';
             }
             
-            setError(errorMessage);
+            toast.error(errorMessage);
         } finally {
             setLoading(false);
         }
@@ -128,9 +132,11 @@ const AdminLogin = () => {
         try {
             // Call your adminLogout endpoint
             await adminLogout();
+            toast.success('Logged out successfully');
         } catch (error) {
             console.error('Logout error:', error);
-            // Continue with cleanup even if API call fails
+            toast.error('Logout failed. Please try again.');
+            
         } finally {
             // Clear stored admin data
             localStorage.removeItem('admin_access_token');

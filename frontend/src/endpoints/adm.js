@@ -3,8 +3,8 @@ import adminAxios from '../AxiosIntersptors/AdminInterceptor';
 // Admin login
 export const adminLogin = (formBody) => adminAxios.post('login/', formBody);
 
-// Admin token refresh (optional, in case you want to trigger it manually)
-export const refreshAdminToken = () => adminAxios.post('token/refresh/');
+
+
 
 // Admin logout
 export const adminLogout = () => adminAxios.post('logout/');
@@ -39,8 +39,10 @@ export const getDoctorApplicationDetail = (doctorId) =>
     adminAxios.get(`doctor-applications/${doctorId}/`);
 
 // Approve or reject a doctor application
-export const doctorApprovalAction = (doctorId, action, adminComments = '') =>
+export const doctorApprovalAction = (doctorId, action, adminComment = '') =>
     adminAxios.patch(`doctor-applications/${doctorId}/action/`, {
         action: action, // 'approve' or 'reject'
-        admin_comments: adminComments
+        admin_comment: adminComment
     });
+
+

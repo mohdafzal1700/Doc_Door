@@ -6,6 +6,7 @@ import { Stethoscope, Clock, AlertCircle, CheckCircle, FileText, User, RefreshCw
 import { getAuthState } from "../../utils/auth" 
 import DocHeader from "../../components/ui/DocHeader"
 import { checkVerificationStatus, refreshVerificationStatus } from "../../endpoints/Doc"
+import DocHe from "../../components/ui/Doc2Header"
 
 export default function PreVerificationView() {
     const navigate = useNavigate()
@@ -106,7 +107,7 @@ export default function PreVerificationView() {
                     alert("Great! All verification steps completed. Your application is now under review.")
                 } else if (data.verification_status === 'approved') {
                     alert("Congratulations! Your verification has been approved. You can now access the doctor dashboard.")
-                    navigate('/doctor-dashboard')
+                    navigate('/doctor/home')
                 } else {
                     alert("Status refreshed successfully!")
                 }
@@ -214,7 +215,7 @@ export default function PreVerificationView() {
 
     return (
         <div className="min-h-screen bg-gray-50">
-            <DocHeader />
+            <DocHe/>
             
             <div className="max-w-4xl mx-auto px-4 py-8">
                 {/* Welcome Header */}
@@ -330,7 +331,7 @@ export default function PreVerificationView() {
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                     {verificationStatus === 'approved' ? (
                         <Button
-                            onClick={() => navigate('/doctor-dashboard')}
+                            onClick={() => navigate('/doctor/home')}
                             className="bg-green-600 hover:bg-green-700 text-white px-8 py-3 rounded-lg font-medium"
                         >
                             Go to Dashboard

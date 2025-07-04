@@ -6,7 +6,9 @@ from cloudinary.models import CloudinaryField
 from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 
+import logging
 
+logger = logging.getLogger(__name__)
 
 class UserManager(BaseUserManager):
     def create_user(self, email, password=None, **extra_fields):
@@ -159,19 +161,19 @@ class Doctor(models.Model):
     
     # ADD THESE NEW FIELDS that your code is expecting:
     license_number = models.CharField(max_length=50, blank=True, null=True)
-    
+    admin_comment = models.TextField(blank=True, null=True)
     consultation_fee = models.DecimalField(max_digits=10, decimal_places=2,null=True, blank=True, default=0.00)
     is_available = models.BooleanField(default=True)
     
     
     def check_verification_completion(self):
         """Check if all verification steps are complete and update status"""
-        print(f"🔍 Checking verification for Doctor {self.id}")
-        print(f"Profile setup: {self.is_profile_setup_done}")
-        print(f"Education: {self.is_education_done}")
-        print(f"Certification: {self.is_certification_done}")
-        print(f"License: {self.is_license_done}")
-        print(f"Current status: {self.verification_status}")
+        logger.debug(f"Checking verification for Doctor {self.id}")
+        logger.debug(f"Profile setup: {self.is_profile_setup_done}")
+        logger.debug(f"Education: {self.is_education_done}")
+        logger.debug(f"Certification: {self.is_certification_done}")
+        logger.debug(f"License: {self.is_license_done}")
+        logger.debug(f"Current status: {self.verification_status}")
         
         if (self.is_profile_setup_done and 
             self.is_education_done and 
@@ -182,11 +184,11 @@ class Doctor(models.Model):
             if self.verification_status == 'incomplete':
                 self.verification_status = 'pending_approval'
                 self.save(update_fields=['verification_status'])
-                print(f"✅ Updated verification status to: {self.verification_status}")
+                logger.info(f"Doctor {self.id} verification status updated to: {self.verification_status}")
             else:
-                print(f"ℹ️ Status already: {self.verification_status}")
+                logger.debug(f"Doctor {self.id} status already: {self.verification_status}")
         else:
-            print("❌ Not all verification steps complete")
+            logger.debug(f"Doctor {self.id} - Not all verification steps complete")
         
         return self.verification_status
     
@@ -210,7 +212,7 @@ class Doctor(models.Model):
         
         if was_complete != self.is_profile_setup_done:
             self.save(update_fields=['is_profile_setup_done'])
-            print(f"✅ Profile completion updated: {self.is_profile_setup_done}")
+            print(f" Profile completion updated: {self.is_profile_setup_done}")
         
         # Check overall verification after updating profile status
         self.check_verification_completion()
@@ -224,7 +226,7 @@ class Doctor(models.Model):
         if has_education != self.is_education_done:
             self.is_education_done = has_education
             self.save(update_fields=['is_education_done'])
-            print(f"✅ Education completion updated: {self.is_education_done}")
+            logger.info(f"Education completion updated for doctor {self.id}: {self.is_education_done}")
             if self.user:
                 self.check_verification_completion()
         
@@ -237,7 +239,7 @@ class Doctor(models.Model):
         if has_certification != self.is_certification_done:
             self.is_certification_done = has_certification
             self.save(update_fields=['is_certification_done'])
-            print(f"✅ Certification completion updated: {self.is_certification_done}")
+            logger.info(f" Certification completion updated: {self.is_certification_done}")
             if self.user:
                 self.check_verification_completion()
         
@@ -250,7 +252,7 @@ class Doctor(models.Model):
         if has_license != self.is_license_done:
             self.is_license_done = has_license
             self.save(update_fields=['is_license_done'])
-            print(f"✅ License completion updated: {self.is_license_done}")
+            logger.info(f" License completion updated: {self.is_license_done}")
             if self.user:
                 self.check_verification_completion()
         
@@ -382,4 +384,32 @@ class DoctorProof(models.Model):
         
         
         
-        
+# class AdminProfile(models.Model):
+#     user = models.OneToOneField(
+#         User, 
+#         on_delete=models.CASCADE, 
+#         related_name='admin_profile'
+#     )
+#     profile_picture = CloudinaryField(
+#         'image',
+#         folder='admin_profiles',
+#         null=True,
+#         blank=True,
+#         transformation=[
+#             {'width': 300, 'height': 300, 'crop': 'fill'},
+#             {'quality': 'auto:best'}
+#         ]
+#     )
+
+#     created_at = models.DateTimeField(default=timezone.now)
+#     updated_at = models.DateTimeField(auto_now=True)
+#     is_profile_setup_done = models.BooleanField(default=False)
+
+#     def __str__(self):
+#         return f"Admin Profile for {self.user.email}"
+
+#     @property
+#     def profile_picture_url(self):
+#         if self.profile_picture:
+#             return self.profile_picture.url
+#         return None

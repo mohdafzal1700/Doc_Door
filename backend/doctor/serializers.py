@@ -420,7 +420,7 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         
         if user_updated:
             instance.save()
-            print("💾 DEBUG: User model saved")
+            print("DEBUG: User model saved")
 
         # Update or create doctor profile (only for doctors)
         if instance.role == 'doctor' and doctor_data:
@@ -455,21 +455,21 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
                 
                 doctor_profile.updated_at = timezone.now()
                 doctor_profile.save()
-                print("💾 DEBUG: Doctor profile saved")
+                print("DEBUG: Doctor profile saved")
                 
                 # Check if profile is complete and update accordingly
                 if self._is_profile_complete(doctor_profile):
                     doctor_profile.is_profile_setup_done = True
                     doctor_profile.save()
-                    print("✅ DEBUG: Profile marked as complete")
+                    print("DEBUG: Profile marked as complete")
                 else:
-                    print("❌ DEBUG: Profile still incomplete")
+                    print("DEBUG: Profile still incomplete")
                     
             except Exception as e:
-                print(f"❌ DEBUG: Error updating doctor profile: {str(e)}")
+                print(f"DEBUG: Error updating doctor profile: {str(e)}")
                 raise serializers.ValidationError(f"Error updating doctor profile: {str(e)}")
         else:
-            print(f"⚠️ DEBUG: Not updating doctor profile. Role: {instance.role}, doctor_data: {bool(doctor_data)}")
+            print(f"DEBUG: Not updating doctor profile. Role: {instance.role}, doctor_data: {bool(doctor_data)}")
 
         return instance
 
@@ -1000,17 +1000,18 @@ class DoctorApprovalActionSerializer(serializers.Serializer):
         if action == 'approve':
             doctor.verification_status = 'approved'
             instance.is_active = True 
+            doctor.admin_comment = admin_comment if admin_comment else ''
             
         elif action == 'reject':
             doctor.verification_status = 'rejected'
-            
+            doctor.admin_comment = admin_comment
         
         # Save both user and doctor
         doctor.save()
         instance.save()
         
         # Log the action
-        print(f"🔍 APPROVAL ACTION: {action.upper()} for Doctor {doctor.id}")
-        print(f"📝 Admin Comment: {admin_comment}")
+        print(f" APPROVAL ACTION: {action.upper()} for Doctor {doctor.id}")
+        print(f"Admin Comment: {admin_comment}")
         
         return instance

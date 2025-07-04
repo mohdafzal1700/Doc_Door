@@ -3,6 +3,7 @@ import { Search, Eye, CheckCircle, XCircle, User, Phone, Mail, Calendar, MapPin,
 import { getDoctorApplications, getDoctorApplicationDetail, doctorApprovalAction } from '../endpoints/adm';
 import AdminHeader from '../components/ui/AdminHeader'; 
 import Sidebar from '../components/ui/Sidebar';
+import { useToast } from '../components/ui/Toast';
 
 const DoctorApplicationsPage = () => {
     const [applications, setApplications] = useState([]);
@@ -16,6 +17,7 @@ const DoctorApplicationsPage = () => {
     const [approvalComment, setApprovalComment] = useState('');
     const [showApprovalModal, setShowApprovalModal] = useState(false);
     const [pendingAction, setPendingAction] = useState(null);
+    const toast = useToast();
 
     // Load applications on component mount
     useEffect(() => {
@@ -42,9 +44,10 @@ const DoctorApplicationsPage = () => {
             setError(null);
             const response = await getDoctorApplications();
             setApplications(response.data);
+            toast.success('Applications loaded successfully');
         } catch (err) {
             setError('Failed to load doctor applications. Please try again.');
-            console.error('Error loading applications:', err);
+            toast.error('Failed to load applications');
         } finally {
             setLoading(false);
         }
@@ -56,9 +59,11 @@ const DoctorApplicationsPage = () => {
             const response = await getDoctorApplicationDetail(application.id);
             setSelectedApplication(response.data);
             setIsModalOpen(true);
+            
         } catch (err) {
             setError('Failed to load application details. Please try again.');
             console.error('Error loading application details:', err);
+            toast.error('Failed to load application details');
         } finally {
             setLoading(false);
         }
@@ -94,6 +99,7 @@ const DoctorApplicationsPage = () => {
         } catch (err) {
             setError(`Failed to ${pendingAction.action} application. Please try again.`);
             console.error('Error processing approval action:', err);
+            toast.error(errorMessage);
         } finally {
             setActionLoading(null);
         }
@@ -163,7 +169,7 @@ const DoctorApplicationsPage = () => {
             <AdminHeader/>
             <Sidebar/>
 
-            <div className="ml-64 p-8">
+            <div className="ml-64 pt-20 px-8 pb-10">
                 {error && (
                     <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-center">
                         <AlertCircle className="h-5 w-5 text-red-400 mr-3" />
