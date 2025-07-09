@@ -10,7 +10,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import AuthenticationFailed
-
+from django.db.models import Q
 # JWT (SimpleJWT) imports
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
@@ -29,6 +29,8 @@ from patients.serializers import (
     VerifyForgotPasswordOTPSerializer,
     UserProfileSerializer
 )
+
+from doctor.serializers import DoctorProfileSerializer
 
 # Cloudinary imports for image handling
 import cloudinary
@@ -877,3 +879,76 @@ class ProfilePictureView(APIView):
             logger.debug(f"Updated user profile URL for user: {user.id}")
         except Exception as e:
             logger.warning(f"Failed to update user profile URL: {e}")
+            
+            
+class PatientDoctorView(APIView):
+    serializer_class = DoctorProfileSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get_object(self, pk):
+        logger.debug(f"Patient fetching doctor object with ID: {pk}")
+        return get_object_or_404(User, pk=pk, role='doctor', is_active=True, doctor_profile__verification_status='approved')
+    
+    def get(self, request, pk=None):
+        try:
+            if pk:
+                logger.info(f"Patient viewing specific doctor with ID: {pk}")
+                user = self.get_object(pk)
+                serialized_data = self.serializer_class(user)
+                return Response(serialized_data.data, status=status.HTTP_200_OK)
+            
+            logger.info('Patient viewing all available doctors')
+            
+            # Only show active AND approved doctors to patients
+            queryset = User.objects.filter(
+                role='doctor',
+                is_active=True,
+                doctor_profile__verification_status='approved'  # Added this crucial filter
+            ).select_related('doctor_profile').prefetch_related(
+                'doctor_profile__educations',
+                'doctor_profile__certifications'
+            )
+            
+            # Optional filtering by specialization
+            specialization = request.GET.get('specialization', '')
+            if specialization:
+                queryset = queryset.filter(doctor_profile__specialization__icontains=specialization)
+            
+            # Optional filtering by location/city
+            location = request.GET.get('location', '')
+            if location:
+                queryset = queryset.filter(doctor_profile__location__icontains=location)
+            
+            # Optional search by name or clinic
+            search = request.GET.get('search', '')
+            if search:
+                queryset = queryset.filter(
+                    Q(first_name__icontains=search) |
+                    Q(last_name__icontains=search) |
+                    Q(doctor_profile__clinic_name__icontains=search)
+                )
+            
+            # Optional ordering
+            ordering = request.GET.get('ordering', 'first_name')
+            if ordering in ['first_name', 'last_name', 'doctor_profile__experience', '-doctor_profile__experience']:
+                queryset = queryset.order_by(ordering)
+            
+            logger.debug(f"Available approved doctors count: {queryset.count()}")
+            
+            # Serialize the queryset for all doctors
+            serialized_data = self.serializer_class(queryset, many=True)
+            return Response(serialized_data.data, status=status.HTTP_200_OK)
+        
+        except ValueError as e:
+            logger.warning(f"Invalid parameter value: {str(e)}")
+            return Response({
+                'error': 'Invalid parameter value',
+                'details': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        except Exception as e:
+            logger.error(f"Error fetching doctors for patient: {str(e)}", exc_info=True)
+            return Response({
+                'error': 'An error occurred while fetching doctors',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

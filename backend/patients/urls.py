@@ -11,7 +11,8 @@ from .views import (
     CustomLogoutView,
     ProfilePictureView,
     AddressManagementView,
-    UserProfileView
+    UserProfileView,
+    PatientDoctorView
     
 )
 
@@ -34,5 +35,6 @@ urlpatterns = [
     path('addresses/', AddressManagementView.as_view(), name='addresses-list'),
     path('addresses/create/', AddressManagementView.as_view(), name='addresses-create'),
     path('addresses/<uuid:address_id>/', AddressManagementView.as_view(), name='addresses-detail'),
-    
+    path('patient_doctor/', PatientDoctorView.as_view(), name='patient_doctor_list'),
+    path('patient_doctor/<uuid:pk>/', PatientDoctorView.as_view(), name='patient_doctor_detail'),
 ]

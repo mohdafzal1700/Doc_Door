@@ -112,3 +112,6 @@ export const updateUserProfileWithAddress = async (data) => {
 
     return profileRes;
 };
+
+export const getPatientDoctors = () => axios.get("patient_doctor/");
+export const getPatientDoctor = (id) => axios.get(`patient_doctor/${id}/`);

@@ -46,11 +46,11 @@ const Header = () => {
     try {
       const isAuth = await isAuthenticated()
       if (isAuth && authState.isLoggedIn) {
-        console.log("✅ Header: User is authenticated, navigating to patient portal")
+        console.log("Header: User is authenticated, navigating to patient portal")
         navigate("/patientportal")
         setIsMenuOpen(false) // Close mobile menu if open
       } else {
-        console.log("❌ Header: User not authenticated, redirecting to login")
+        console.log("Header: User not authenticated, redirecting to login")
         navigate("/login")
         setIsMenuOpen(false) // Close mobile menu if open
       }

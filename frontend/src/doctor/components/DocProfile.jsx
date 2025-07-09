@@ -23,6 +23,8 @@ import { getDoctorProfile } from '../../endpoints/Doc';
 import DocHeader from '../../components/ui/DocHeader';
 import DoctorSidebar from '../../components/ui/DocSide';
 import { useNavigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
+
 
 const DoctorProfilePage = () => {
     const [profile, setProfile] = useState(null);
@@ -72,16 +74,15 @@ const DoctorProfilePage = () => {
         console.log('Edit profile clicked');
     };
 
-    if (isLoading) {
+    if (isLoading ) {
         return (
-            <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-                <div className="flex items-center space-x-2">
-                    <Loader className="w-6 h-6 animate-spin text-purple-600" />
-                    <span className="text-gray-600">Loading profile...</span>
-                </div>
+            <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                <span className="ml-2 text-gray-600">Loading profile...</span>
             </div>
         );
     }
+
 
     if (error) {
         return (

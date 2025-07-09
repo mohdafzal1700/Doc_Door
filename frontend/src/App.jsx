@@ -25,6 +25,9 @@ import PortalCertification from "./doctor/components/DocCertification"
 import ManageQualifications from "./doctor/components/DocEducation"
 import DoctorProfilePage from "./doctor/components/DocProfile"
 import { ToastProvider } from "./components/ui/Toast"
+import ServicePage from "./doctor/pages/service_management"
+import ScheduleManagement from "./doctor/pages/ScheduleManagement"
+import PatientDoctor from "./pages/indvDoctor"
 
 
 
@@ -56,6 +59,10 @@ function App() {
         <Route path='/doctor/editProfile'  element={<PortalProfile/>}/>
         <Route path='/doctor/certification'  element={<PortalCertification />}/>
         <Route path='/doctor/education'  element={<ManageQualifications/>}/>
+        <Route path='/doctor/service'  element={<ServicePage/>}/>
+        <Route path='/doctor/schedule'  element={<ScheduleManagement/>}/>
+        <Route path='/doctor/schedule'  element={<ScheduleManagement/>}/>
+        <Route path='/patient/doctor/:id' element={<PatientDoctor/>}/>
         
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>

@@ -1,4 +1,4 @@
-// PatientPortal.jsx - Updated with improved profile picture upload functionality
+// PatientPortal.jsx - Updated with proper routing paths
 "use client"
 
 import { useState, useEffect, useRef } from "react"
@@ -52,36 +52,42 @@ const PatientPortal = () => {
             name: "My Profile",
             icon: User,
             active: activeSection === "profile",
+            route: "/patient/profile" // Added route for navigation
         },
         {
             id: "appointments",
             name: "My Appointments",
             icon: Calendar,
             active: activeSection === "appointments",
+            route: "/patient/appointments" // Added route for navigation
         },
         {
             id: "records",
             name: "Medical Records",
             icon: FileText,
             active: activeSection === "records",
+            route: "/patient/doctorprofile" // Added route for navigation
         },
         {
             id: "upcoming",
             name: "Upcoming Appointments",
             icon: Clock,
             active: activeSection === "upcoming",
+            route: "/patient/appointments/upcoming" // Added route for navigation
         },
         {
             id: "completed",
             name: "Completed Appointments",
             icon: CheckCircle,
             active: activeSection === "completed",
+            route: "/patient/appointments/completed" // Added route for navigation
         },
         {
             id: "payments",
             name: "Payments",
             icon: CreditCard,
             active: activeSection === "payments",
+            route: "/patient/payments" // Added route for navigation
         },
     ]
 
@@ -295,6 +301,23 @@ const PatientPortal = () => {
         }
     }
 
+    // Handle navigation to specific sections
+    const handleSectionNavigation = (item) => {
+        setActiveSection(item.id)
+        
+        // Navigate to the specific route if it exists
+        if (item.route) {
+            navigate(item.route)
+        }
+        
+        // For testing doctor profile navigation (as mentioned in your requirement)
+        if (item.id === "appointments") {
+            // You can add a test navigation to doctor profile here
+            console.log("🔍 PatientPortal: Navigating to appointments section")
+            // Example: navigate("/patient/doctorprofile") // for testing
+        }
+    }
+
     // Initialize auth state on component mount
     useEffect(() => {
         console.log("🔍 PatientPortal: Component mounted, checking auth...")
@@ -340,32 +363,38 @@ const PatientPortal = () => {
             profile: {
                 icon: User,
                 title: "My Profile",
-                description: "Your profile information will appear here"
+                description: "Your profile information will appear here",
+                route: "/patient/profile"
             },
             appointments: {
                 icon: Calendar,
                 title: "My Appointments",
-                description: "Your appointment history will appear here"
+                description: "Your appointment history will appear here",
+                route: "/patient/appointments"
             },
             records: {
                 icon: FileText,
                 title: "Medical Records",
-                description: "Your medical records will appear here"
+                description: "Your medical records will appear here",
+                route: "/patient/records"
             },
             upcoming: {
                 icon: Clock,
                 title: "Upcoming Appointments",
-                description: "Your upcoming appointments will appear here"
+                description: "Your upcoming appointments will appear here",
+                route: "/patient/appointments/upcoming"
             },
             completed: {
                 icon: CheckCircle,
                 title: "Completed Appointments",
-                description: "Your completed appointments will appear here"
+                description: "Your completed appointments will appear here",
+                route: "/patient/appointments/completed"
             },
             payments: {
                 icon: CreditCard,
                 title: "Payments",
-                description: "Your payment history will appear here"
+                description: "Your payment history will appear here",
+                route: "/patient/payments"
             }
         }
 
@@ -377,6 +406,19 @@ const PatientPortal = () => {
                 <IconComponent className="w-16 h-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-gray-900 mb-2">{section.title}</h3>
                 <p className="text-gray-600">{section.description}</p>
+                
+                {/* Test navigation button for doctor profile */}
+                {activeSection === "appointments" && (
+                    <div className="mt-6">
+                        <button
+                            onClick={() => navigate("/patient/doctorprofile")}
+                            className="inline-flex items-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                        >
+                            <span>View Doctor Profile (Test)</span>
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
+                )}
             </div>
         )
     }
@@ -450,7 +492,7 @@ const PatientPortal = () => {
                                         return (
                                             <li key={item.id}>
                                                 <button
-                                                    onClick={() => setActiveSection(item.id)}
+                                                    onClick={() => handleSectionNavigation(item)}
                                                     className={`w-full flex items-center space-x-3 px-4 py-3 text-left rounded-lg transition-colors ${
                                                         item.active
                                                             ? "bg-purple-600 text-white"
@@ -564,8 +606,6 @@ const PatientPortal = () => {
                                         </div>
                                     )}
 
-                                    {/* Success message for profile picture */}
-                                
                                     {/* User Information */}
                                     <div className="space-y-2 mb-6">
                                         {profileLoading ? (
@@ -603,9 +643,9 @@ const PatientPortal = () => {
 
                                     {/* Action Buttons */}
                                     <div className="flex flex-col sm:flex-row gap-3">
-                                        {/* View Details Button */}
+                                        {/* View Details Button - Updated with proper path */}
                                         <button
-                                            onClick={() => navigate("/patientprofile")}
+                                            onClick={() => navigate("/patient/profile")}
                                             className="inline-flex items-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                             disabled={profileLoading}
                                         >

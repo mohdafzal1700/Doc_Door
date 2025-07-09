@@ -5,6 +5,10 @@ from django.utils import timezone
 from cloudinary.models import CloudinaryField
 from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+from django.utils import timezone
+from datetime import datetime, timedelta
+from django.core.exceptions import ValidationError
+
 
 import logging
 
@@ -413,3 +417,175 @@ class DoctorProof(models.Model):
 #         if self.profile_picture:
 #             return self.profile_picture.url
 #         return None
+
+class Service(models.Model):
+    doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE)
+    service_name = models.CharField(max_length=50)
+    service_mode = models.CharField(max_length=20, choices=[('online', 'Online'), ('offline', 'Offline')])
+    service_fee = models.FloatField()
+    description = models.CharField(max_length=1500)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.service_name
+
+class Schedules(models.Model):
+    doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE)
+    service = models.ForeignKey(Service, on_delete=models.CASCADE)
+    mode = models.CharField(max_length=20, choices=[('online', 'Online'), ('offline', 'Offline')])
+    date = models.DateField(auto_now=False, auto_now_add=False)
+    start_time = models.TimeField()
+    end_time = models.TimeField()
+    slot_duration = models.DurationField()
+    
+    # Break fields
+    break_start_time = models.TimeField(null=True, blank=True, help_text="Start time for break (optional)")
+    break_end_time = models.TimeField(null=True, blank=True, help_text="End time for break (optional)")
+    
+    total_slots = models.PositiveIntegerField(default=0, help_text="Total number of slots available")
+    booked_slots = models.PositiveIntegerField(default=0, help_text="Number of slots already booked")
+    max_patients_per_slot = models.PositiveIntegerField(default=1, help_text="Maximum patients per slot")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+
+    class Meta:
+        verbose_name = "Schedule"
+        verbose_name_plural = "Schedules"
+        ordering = ['date', 'start_time']
+
+    def __str__(self):
+        return f"{self.doctor} - {self.service} on {self.date}"
+
+    def clean(self):
+        """Comprehensive validation for the schedule"""
+        errors = {}
+        
+        # Validate basic time logic
+        if self.start_time and self.end_time:
+            if self.start_time >= self.end_time:
+                errors['end_time'] = "End time must be after start time."
+        
+        # Validate break times
+        if self.break_start_time and self.break_end_time:
+            # Break end must be after break start
+            if self.break_start_time >= self.break_end_time:
+                errors['break_end_time'] = "Break end time must be after break start time."
+            
+            # Break must be within schedule time
+            if self.start_time and self.end_time:
+                if self.break_start_time < self.start_time:
+                    errors['break_start_time'] = "Break start time must be within schedule hours."
+                if self.break_end_time > self.end_time:
+                    errors['break_end_time'] = "Break end time must be within schedule hours."
+        
+        # Validate if only one break time is provided
+        if bool(self.break_start_time) != bool(self.break_end_time):
+            if not self.break_start_time:
+                errors['break_start_time'] = "Break start time is required when break end time is provided."
+            if not self.break_end_time:
+                errors['break_end_time'] = "Break end time is required when break start time is provided."
+        
+        # Validate date is not in the past
+        if self.date and self.date < timezone.now().date():
+            errors['date'] = "Schedule date cannot be in the past."
+        
+        # Validate slot duration
+        if self.slot_duration and self.slot_duration <= timedelta(0):
+            errors['slot_duration'] = "Slot duration must be positive."
+        
+        # Validate booked slots don't exceed total slots
+        if self.booked_slots > self.total_slots:
+            errors['booked_slots'] = "Booked slots cannot exceed total slots."
+        
+        # Validate service mode matches schedule mode
+        # if self.service and self.service.service_mode != self.mode:
+        #     errors['mode'] = f"Schedule mode must match service mode: {self.service.service_mode}"
+        
+        # Validate max patients per slot
+        if self.max_patients_per_slot <= 0:
+            errors['max_patients_per_slot'] = "Maximum patients per slot must be at least 1."
+        
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        """Override save to run validation and calculate total slots"""
+        self.full_clean()
+        
+        # Auto-calculate total slots if not provided
+        if not self.total_slots and self.start_time and self.end_time and self.slot_duration:
+            self.total_slots = self.calculate_total_slots()
+        
+        super().save(*args, **kwargs)
+
+    def calculate_total_slots(self):
+        """Calculate total available slots considering breaks"""
+        if not all([self.start_time, self.end_time, self.slot_duration]):
+            return 0
+        
+        # Convert to datetime for calculation
+        start_dt = datetime.combine(self.date, self.start_time)
+        end_dt = datetime.combine(self.date, self.end_time)
+        
+        # Calculate total working time
+        total_working_time = end_dt - start_dt
+        
+        # Subtract break time if exists
+        if self.break_start_time and self.break_end_time:
+            break_start_dt = datetime.combine(self.date, self.break_start_time)
+            break_end_dt = datetime.combine(self.date, self.break_end_time)
+            break_duration = break_end_dt - break_start_dt
+            total_working_time -= break_duration
+        
+        # Calculate number of slots
+        if total_working_time.total_seconds() <= 0:
+            return 0
+        
+        return int(total_working_time.total_seconds() / self.slot_duration.total_seconds())
+
+    def get_available_slots(self):
+        """Get number of available slots"""
+        return max(0, self.total_slots - self.booked_slots)
+
+    def is_fully_booked(self):
+        """Check if schedule is fully booked"""
+        return self.booked_slots >= self.total_slots
+
+    def can_book_slot(self, requested_slots=1):
+        """Check if requested number of slots can be booked"""
+        return self.get_available_slots() >= requested_slots and self.is_active
+
+    def get_break_duration(self):
+        """Get break duration in minutes"""
+        if self.break_start_time and self.break_end_time:
+            break_start = datetime.combine(self.date, self.break_start_time)
+            break_end = datetime.combine(self.date, self.break_end_time)
+            return (break_end - break_start).total_seconds() / 60
+        return 0
+
+    def get_working_hours(self):
+        """Get total working hours excluding breaks"""
+        if not all([self.start_time, self.end_time]):
+            return 0
+        
+        start_dt = datetime.combine(self.date, self.start_time)
+        end_dt = datetime.combine(self.date, self.end_time)
+        total_time = (end_dt - start_dt).total_seconds() / 3600  # Convert to hours
+        
+        # Subtract break time
+        break_hours = self.get_break_duration() / 60
+        return max(0, total_time - break_hours)
+
+    def validate_booking_time(self, booking_time):
+        """Validate if a booking time is valid (not during break)"""
+        if not self.break_start_time or not self.break_end_time:
+            return True
+        
+        return not (self.break_start_time <= booking_time <= self.break_end_time)
+    
+    
+    

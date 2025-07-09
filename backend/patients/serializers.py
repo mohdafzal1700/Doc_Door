@@ -574,3 +574,132 @@ class BlockUnBlockStatus(serializers.Serializer):
         return instance
     
     
+    
+from doctor.models import DoctorCertification,DoctorEducation
+
+    
+class PatientDoctorEducationSerializer(serializers.ModelSerializer):
+    """Simplified education serializer for patient view"""
+    class Meta:
+        model = DoctorEducation
+        fields = ['degree_name', 'institution_name', 'year_of_completion']
+
+
+class PatientDoctorCertificationSerializer(serializers.ModelSerializer):
+    """Simplified certification serializer for patient view"""
+    class Meta:
+        model = DoctorCertification
+        fields = ['certification_name', 'issued_by', 'year_of_issue']
+
+
+class PatientDoctorViewSerializer(serializers.ModelSerializer):
+    """Specialized serializer for patient view with education and certification"""
+    
+    # Computed Fields
+    full_name = serializers.SerializerMethodField()
+    member_since = serializers.SerializerMethodField()
+    
+    # Doctor profile fields (read-only)
+    doctor_specialization = serializers.SerializerMethodField()
+    doctor_experience = serializers.SerializerMethodField()
+    doctor_bio = serializers.SerializerMethodField()
+    doctor_consultation_fee = serializers.SerializerMethodField()
+    doctor_consultation_mode_online = serializers.SerializerMethodField()
+    doctor_consultation_mode_offline = serializers.SerializerMethodField()
+    doctor_clinic_name = serializers.SerializerMethodField()
+    doctor_location = serializers.SerializerMethodField()
+    doctor_is_available = serializers.SerializerMethodField()
+    profile_picture_url = serializers.SerializerMethodField()
+    has_profile_picture = serializers.SerializerMethodField()
+    doctor_gender = serializers.SerializerMethodField()
+    
+    # Education and Certification data
+    doctor_educations = serializers.SerializerMethodField()
+    doctor_certifications = serializers.SerializerMethodField()
+    
+    # Verification status (patients should see verified doctors)
+    doctor_verification_status = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = User
+        fields = [
+            'id', 'email', 'phone_number', 'full_name', 'member_since',
+            # Doctor profile info
+            'doctor_specialization', 'doctor_experience', 'doctor_bio', 
+            'doctor_consultation_fee', 'doctor_consultation_mode_online',
+            'doctor_consultation_mode_offline', 'doctor_clinic_name', 
+            'doctor_location', 'doctor_is_available', 'doctor_verification_status',
+            'profile_picture_url', 'has_profile_picture', 'doctor_gender',
+            # Education and Certification
+            'doctor_educations', 'doctor_certifications'
+        ]
+    
+    # Reuse your existing methods from DoctorProfileSerializer
+    def get_full_name(self, obj):
+        return f"{obj.first_name or ''} {obj.last_name or ''}".strip() or obj.email or obj.username
+    
+    def get_member_since(self, obj):
+        return obj.date_joined.strftime('%Y-%m-%d') if hasattr(obj, 'date_joined') and obj.date_joined else None
+    
+    def get_doctor_specialization(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "specialization", '')
+    
+    def get_doctor_experience(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "experience", 0)
+    
+    def get_doctor_bio(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "bio", '')
+    
+    def get_doctor_consultation_fee(self, obj):
+        fee = getattr(getattr(obj, "doctor_profile", None), "consultation_fee", 0.00)
+        return float(fee) if fee else 0.00
+    
+    def get_doctor_consultation_mode_online(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "consultation_mode_online", False)
+    
+    def get_doctor_consultation_mode_offline(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "consultation_mode_offline", False)
+    
+    def get_doctor_clinic_name(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "clinic_name", '')
+    
+    def get_doctor_location(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "location", '')
+    
+    def get_doctor_is_available(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "is_available", True)
+    
+    def get_doctor_verification_status(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "verification_status", 'pending')
+    
+    def get_profile_picture_url(self, obj):
+        doctor = getattr(obj, "doctor_profile", None)
+        if doctor and doctor.profile_picture:
+            return doctor.profile_picture.url
+        return None
+    
+    def get_has_profile_picture(self, obj):
+        doctor = getattr(obj, "doctor_profile", None)
+        return bool(doctor and doctor.profile_picture)
+    
+    def get_doctor_gender(self, obj):
+        return getattr(getattr(obj, "doctor_profile", None), "gender", '')
+    
+    def get_doctor_educations(self, obj):
+        """Get doctor's education details"""
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor:
+            return []
+        
+        educations = doctor.educations.all()
+        return PatientDoctorEducationSerializer(educations, many=True).data
+    
+    def get_doctor_certifications(self, obj):
+        """Get doctor's certification details"""
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor:
+            return []
+        
+        certifications = doctor.certifications.all()
+        return PatientDoctorCertificationSerializer(certifications, many=True).data
+

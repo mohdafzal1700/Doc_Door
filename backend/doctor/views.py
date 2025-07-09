@@ -10,8 +10,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-from .serializers import DoctorProfileSerializer,DoctorEducationSerializer,DoctorCertificationSerializer,DoctorProofSerializer,VerificationStatusSerializer
-from .models import Doctor,DoctorEducation,DoctorProof,DoctorCertification
+from .serializers import DoctorProfileSerializer,DoctorEducationSerializer,DoctorCertificationSerializer,DoctorProofSerializer,VerificationStatusSerializer,SchedulesSerializer,ServiceSerializer
+from .models import Doctor,DoctorEducation,DoctorProof,DoctorCertification,Schedules,Service
 import logging
 from rest_framework.views import APIView
 from doctor.serializers import CustomDoctorTokenObtainPairSerializer
@@ -873,5 +873,377 @@ class DoctorVerificationStatusView(APIView):
             return Response({
                 'success': False,
                 'message': 'Failed to refresh verification status',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+
+class ServiceView(APIView):
+    """Handle service operations with doctor-specific filtering"""
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get(self, request):
+        """Get service list filtered by user role"""
+        try:
+            # Check user role and filter accordingly
+            if hasattr(request.user, 'role') and request.user.role == 'doctor':
+                # Get the Doctor instance for this user
+                doctor = get_object_or_404(Doctor, user=request.user)
+                # Now filter using the Doctor instance
+                services = Service.objects.filter(doctor=doctor).order_by('service_name')
+            else:
+                # Admin or other roles see all services
+                services = Service.objects.all().select_related('doctor').order_by('service_name')
+            
+            serializer = ServiceSerializer(services, many=True)
+            
+            return Response({
+                'success': True,
+                'data': serializer.data,
+                'count': services.count()
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch services',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+    def post(self, request):
+        """Create new service (only doctors can create)"""
+        try:
+            # Check if user is a doctor
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Access denied. Only doctors can create services.',
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Get or create doctor profile
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            serializer = ServiceSerializer(data=request.data)
+            
+            if serializer.is_valid():
+                # Auto-assign the doctor to the service
+                service = serializer.save(doctor=doctor)
+                response_serializer = ServiceSerializer(service)
+                
+                return Response({
+                    'success': True,
+                    'message': 'Service created successfully',
+                    'data': response_serializer.data
+                }, status=status.HTTP_201_CREATED)
+            else:
+                return Response({
+                    'success': False,
+                    'field_errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to create service',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def patch(self, request):
+        """Update service (only own services)"""
+        try:
+            service_id = request.data.get('id')
+            if not service_id:
+                return Response({
+                    'success': False,
+                    'message': 'Service ID is required for update'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            service = get_object_or_404(Service, id=service_id)
+            
+            # Check if user has permission to update this service
+            if hasattr(request.user, 'role') and request.user.role == 'doctor':
+                doctor = get_object_or_404(Doctor, user=request.user)
+                if service.doctor != doctor:
+                    return Response({
+                        'success': False,
+                        'message': 'You can only update your own services.'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            
+            serializer = ServiceSerializer(
+                service,
+                data=request.data,
+                partial=True
+            )
+            
+            if serializer.is_valid():
+                updated_service = serializer.save()
+                response_serializer = ServiceSerializer(updated_service)
+                
+                return Response({
+                    'success': True,
+                    'message': 'Service updated successfully',
+                    'data': response_serializer.data
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'success': False,
+                    'field_errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to update service',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request):
+        """Delete service (only own services)"""
+        try:
+            service_id = request.data.get('id')
+            if not service_id:
+                return Response({
+                    'success': False,
+                    'message': 'Service ID is required for deletion'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            service = get_object_or_404(Service, id=service_id)
+            
+            # Check if user has permission to delete this service
+            if hasattr(request.user, 'role') and request.user.role == 'doctor':
+                doctor = get_object_or_404(Doctor, user=request.user)
+                if service.doctor != doctor:
+                    return Response({
+                        'success': False,
+                        'message': 'You can only delete your own services.'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Check if service has associated schedules
+            if service.schedules_set.exists():
+                return Response({
+                    'success': False,
+                    'message': 'Cannot delete service with existing schedules. Please delete schedules first.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            service.delete()
+            
+            return Response({
+                'success': True,
+                'message': 'Service deleted successfully'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to delete service',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class ScheduleView(APIView):
+    """Handle schedule operations with doctor-specific filtering"""
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def get(self, request):
+        """Get schedule list filtered by user role"""
+        try:
+            # Check user role and filter accordingly
+            if hasattr(request.user, 'role') and request.user.role == 'doctor':
+                # Doctor sees only their schedules
+                try:
+                    doctor = Doctor.objects.get(user=request.user)
+                    schedules = Schedules.objects.filter(doctor=doctor).select_related('doctor', 'service')
+                except Doctor.DoesNotExist:
+                    # If doctor profile doesn't exist, return empty list
+                    schedules = Schedules.objects.none()
+            else:
+                # Admin or other roles see all schedules
+                schedules = Schedules.objects.select_related('doctor', 'service').all()
+            
+            schedules = schedules.order_by('date', 'start_time')
+            
+            serializer = SchedulesSerializer(schedules, many=True)
+            
+            return Response({
+                'success': True,
+                'data': serializer.data,
+                'count': schedules.count()
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch schedules',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        """Create new schedule (only doctors can create)"""
+        print("Received data:", request.data)
+        try:
+            # Check if user has doctor role
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Access denied. Only doctors can create schedules.',
+                }, status=status.HTTP_403_FORBIDDEN)
+
+            # Get or create doctor profile
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            # Validate that the service belongs to this doctor
+            service_id = request.data.get('service')
+            if service_id:
+                try:
+                    service = Service.objects.get(id=service_id, doctor=doctor)
+                except Service.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'message': 'You can only create schedules for your own services.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            serializer = SchedulesSerializer(data=request.data)
+            
+            if serializer.is_valid():
+                # Auto-assign the doctor to the schedule
+                schedule = serializer.save(doctor=doctor)
+                response_serializer = SchedulesSerializer(schedule)
+                
+                return Response({
+                    'success': True,
+                    'message': 'Schedule created successfully',
+                    'data': response_serializer.data
+                }, status=status.HTTP_201_CREATED)
+            else:
+                return Response({
+                    'success': False,
+                    'field_errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to create schedule',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def patch(self, request):
+        """Update schedule (only own schedules)"""
+        try:
+            schedule_id = request.data.get('id')
+            if not schedule_id:
+                return Response({
+                    'success': False,
+                    'message': 'Schedule ID is required for update'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            schedule = get_object_or_404(
+                Schedules.objects.select_related('doctor', 'service'), 
+                id=schedule_id
+            )
+            
+            # Check if user has permission to update this schedule
+            if hasattr(request.user, 'role') and request.user.role == 'doctor':
+                doctor = get_object_or_404(Doctor, user=request.user)
+                if schedule.doctor != doctor:
+                    return Response({
+                        'success': False,
+                        'message': 'You can only update your own schedules.'
+                    }, status=status.HTTP_403_FORBIDDEN)
+                
+                # If service is being updated, validate it belongs to this doctor
+                service_id = request.data.get('service')
+                if service_id and service_id != schedule.service.id:
+                    try:
+                        service = Service.objects.get(id=service_id, doctor=doctor)
+                    except Service.DoesNotExist:
+                        return Response({
+                            'success': False,
+                            'message': 'You can only assign your own services to schedules.'
+                        }, status=status.HTTP_400_BAD_REQUEST)
+            
+            serializer = SchedulesSerializer(
+                schedule,
+                data=request.data,
+                partial=True
+            )
+            
+            if serializer.is_valid():
+                updated_schedule = serializer.save()
+                response_serializer = SchedulesSerializer(updated_schedule)
+                
+                return Response({
+                    'success': True,
+                    'message': 'Schedule updated successfully',
+                    'data': response_serializer.data
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'success': False,
+                    'field_errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to update schedule',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request):
+        """Delete schedule (only own schedules)"""
+        try:
+            schedule_id = request.data.get('id')
+            if not schedule_id:
+                return Response({
+                    'success': False,
+                    'message': 'Schedule ID is required for deletion'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            schedule = get_object_or_404(Schedules, id=schedule_id)
+            
+            # Check if user has permission to delete this schedule
+            if hasattr(request.user, 'role') and request.user.role == 'doctor':
+                doctor = get_object_or_404(Doctor, user=request.user)
+                if schedule.doctor != doctor:
+                    return Response({
+                        'success': False,
+                        'message': 'You can only delete your own schedules.'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Check if schedule has bookings (if you have booking model)
+            # if schedule.bookings.exists():
+            #     return Response({
+            #         'success': False,
+            #         'message': 'Cannot delete schedule with existing bookings.'
+            #     }, status=status.HTTP_400_BAD_REQUEST)
+            
+            schedule.delete()
+            
+            return Response({
+                'success': True,
+                'message': 'Schedule deleted successfully'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            return Response({
+                'success': False,
+                'message': 'Failed to delete schedule',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -2,8 +2,10 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
-from .models import User, Doctor, DoctorEducation, DoctorCertification, DoctorProof
-from datetime import datetime,date,timezone
+from .models import User, Doctor, DoctorEducation, DoctorCertification, DoctorProof,Service,Schedules
+from datetime import datetime, timedelta
+from django.utils import timezone
+from datetime import datetime,date
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
@@ -489,6 +491,32 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
             return False
             
         return True
+    
+    def get_doctor_educations(self, obj):
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor:
+            return []
+        
+        educations = doctor.educations.all()
+        return [{
+            'degree_name': edu.degree_name,
+            'institution_name': edu.institution_name,
+            'year_of_completion': edu.year_of_completion
+        } for edu in educations]
+
+    def get_doctor_certifications(self, obj):
+        doctor = getattr(obj, "doctor_profile", None)
+        if not doctor:
+            return []
+        
+        certifications = doctor.certifications.all()
+        return [{
+            'certification_name': cert.certification_name,
+            'issued_by': cert.issued_by,
+            'year_of_issue': cert.year_of_issue
+        } for cert in certifications]
+    
+    
     
 class DoctorEducationSerializer(serializers.ModelSerializer):
     # User fields for education context
@@ -1013,5 +1041,241 @@ class DoctorApprovalActionSerializer(serializers.Serializer):
         # Log the action
         print(f" APPROVAL ACTION: {action.upper()} for Doctor {doctor.id}")
         print(f"Admin Comment: {admin_comment}")
+        
+        return instance
+    
+class ServiceSerializer(serializers.ModelSerializer):
+    """Serializer for Service model"""
+    
+    class Meta:
+        model = Service
+        fields = [
+            'id', 'service_name', 'service_mode', 'service_fee', 
+            'description', 'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate_service_name(self, value):
+        """Validate service name"""
+        if not value or len(value.strip()) < 2:
+            raise serializers.ValidationError("Service name must be at least 2 characters long.")
+        return value.strip()
+
+    def validate_service_fee(self, value):
+        """Validate service fee"""
+        if value < 0:
+            raise serializers.ValidationError("Service fee cannot be negative.")
+        return value
+
+    def validate_description(self, value):
+        """Validate description"""
+        if not value or len(value.strip()) < 10:
+            raise serializers.ValidationError("Description must be at least 10 characters long.")
+        return value.strip()
+
+    def validate_service_mode(self, value):
+        """Validate service mode"""
+        valid_modes = ['online', 'offline']
+        if value not in valid_modes:
+            raise serializers.ValidationError(f"Service mode must be one of {valid_modes}")
+        return value
+
+class SchedulesSerializer(serializers.ModelSerializer):
+    """Serializer for Schedules model with doctor and service details"""
+    
+    # Doctor fields for context
+    doctor_first_name = serializers.CharField(source='doctor.user.first_name', read_only=True)
+    doctor_last_name = serializers.CharField(source='doctor.user.last_name', read_only=True)
+    doctor_phone = serializers.CharField(source='doctor.user.phone_number', read_only=True)
+    doctor_email = serializers.EmailField(source='doctor.user.email', read_only=True)
+    doctor_name = serializers.SerializerMethodField(read_only=True)
+    
+    # Service fields for context
+    service_name = serializers.CharField(source='service.service_name', read_only=True)
+    service_mode = serializers.CharField(source='service.service_mode', read_only=True)
+    service_fee = serializers.FloatField(source='service.service_fee', read_only=True)
+    service_description = serializers.CharField(source='service.description', read_only=True)
+    
+    # Calculated fields
+    available_slots = serializers.SerializerMethodField(read_only=True)
+    is_fully_booked = serializers.SerializerMethodField(read_only=True)
+    working_hours = serializers.SerializerMethodField(read_only=True)
+    break_duration = serializers.SerializerMethodField(read_only=True)
+    available_services = serializers.SerializerMethodField(read_only=True)
+    
+    class Meta:
+        model = Schedules
+        fields = [
+            'id', 'doctor', 'service', 'mode', 'date', 'start_time', 'end_time',
+            'slot_duration', 'break_start_time', 'break_end_time', 'total_slots',
+            'booked_slots', 'max_patients_per_slot', 'is_active', 'created_at', 'updated_at',
+            # Doctor fields (read-only for context)
+            'doctor_first_name', 'doctor_last_name', 'doctor_phone', 'doctor_email', 'doctor_name',
+            # Service fields (read-only for context)
+            'service_name', 'service_mode', 'service_fee', 'service_description', 'available_services',
+            # Calculated fields
+            'available_slots', 'is_fully_booked', 'working_hours', 'break_duration'
+        ]
+        read_only_fields = [
+            'id', 'doctor', 'created_at', 'updated_at', 'doctor_first_name', 'doctor_last_name',
+            'doctor_phone', 'doctor_email', 'doctor_name', 'service_name', 'service_mode',
+            'service_fee', 'service_description', 'available_slots', 'is_fully_booked',
+            'working_hours', 'break_duration', 'available_services', 
+        ]
+
+    def get_doctor_name(self, obj):
+        """Get full doctor name"""
+        if obj.doctor and obj.doctor.user:
+            return f"{obj.doctor.user.first_name} {obj.doctor.user.last_name}".strip()
+        return None
+    
+    def get_available_services(self, obj):
+        """Get all services available to this doctor"""
+        if obj.doctor:
+            services = obj.doctor.service_set.filter(is_active=True)
+            return ServiceSerializer(services, many=True).data
+        return []
+
+    def get_available_slots(self, obj):
+        """Get available slots"""
+        return obj.get_available_slots()
+
+    def get_is_fully_booked(self, obj):
+        """Check if schedule is fully booked"""
+        return obj.is_fully_booked()
+
+    def get_working_hours(self, obj):
+        """Get working hours"""
+        return obj.get_working_hours()
+
+    def get_break_duration(self, obj):
+        """Get break duration in minutes"""
+        return obj.get_break_duration()
+
+    def validate_date(self, value):
+        """Validate date is not in the past"""
+        if value < timezone.now().date():
+            raise serializers.ValidationError("Schedule date cannot be in the past.")
+        return value
+
+    def validate_slot_duration(self, value):
+        """Validate slot duration"""
+        if value <= timedelta(0):
+            raise serializers.ValidationError("Slot duration must be positive.")
+        return value
+
+    def validate_max_patients_per_slot(self, value):
+        """Validate max patients per slot"""
+        if value <= 0:
+            raise serializers.ValidationError("Maximum patients per slot must be at least 1.")
+        return value
+
+    def validate_booked_slots(self, value):
+        """Validate booked slots"""
+        if value < 0:
+            raise serializers.ValidationError("Booked slots cannot be negative.")
+        return value
+
+    def validate_total_slots(self, value):
+        """Validate total slots"""
+        if value < 0:
+            raise serializers.ValidationError("Total slots cannot be negative.")
+        return value
+
+    def validate(self, data):
+        """Cross-field validation"""
+        errors = {}
+        
+        # Validate basic time logic
+        start_time = data.get('start_time')
+        end_time = data.get('end_time')
+        
+        if start_time and end_time:
+            if start_time >= end_time:
+                errors['end_time'] = "End time must be after start time."
+        
+        # Validate break times
+        break_start_time = data.get('break_start_time')
+        break_end_time = data.get('break_end_time')
+        
+        if break_start_time and break_end_time:
+            # Break end must be after break start
+            if break_start_time >= break_end_time:
+                errors['break_end_time'] = "Break end time must be after break start time."
+            
+            # Break must be within schedule time
+            if start_time and end_time:
+                if break_start_time < start_time:
+                    errors['break_start_time'] = "Break start time must be within schedule hours."
+                if break_end_time > end_time:
+                    errors['break_end_time'] = "Break end time must be within schedule hours."
+        
+        # Validate if only one break time is provided
+        if bool(break_start_time) != bool(break_end_time):
+            if not break_start_time:
+                errors['break_start_time'] = "Break start time is required when break end time is provided."
+            if not break_end_time:
+                errors['break_end_time'] = "Break end time is required when break start time is provided."
+        
+        # Validate booked slots don't exceed total slots
+        booked_slots = data.get('booked_slots', 0)
+        total_slots = data.get('total_slots', 0)
+        
+        if booked_slots > total_slots:
+            errors['booked_slots'] = "Booked slots cannot exceed total slots."
+        
+        # Validate service mode matches schedule mode (if both are provided)
+        service = data.get('service')
+        mode = data.get('mode')
+        
+        # if service and mode:
+        #     if service.service_mode.lower() != mode.lower():
+        #         errors['mode'] = f"Schedule mode must match service mode: {service.service_mode}"
+        
+        if errors:
+            raise serializers.ValidationError(errors)
+        
+        return data
+
+    def create(self, validated_data):
+        """Override create to handle auto-calculation of total slots"""
+        instance = super().create(validated_data)
+        
+        # Auto-calculate total slots if not provided but other fields are available
+        if (not instance.total_slots and 
+            instance.start_time and instance.end_time and instance.slot_duration):
+            instance.total_slots = instance.calculate_total_slots()
+            instance.save()
+            
+        # Update doctor's consultation mode
+        doctor = instance.doctor
+        if instance.mode == 'online':
+            doctor.consultation_mode_online = True
+        elif instance.mode == 'offline':
+            doctor.consultation_mode_offline = True
+        doctor.save()
+        
+        return instance
+
+    def update(self, instance, validated_data):
+        """Override update to handle auto-calculation of total slots"""
+        instance = super().update(instance, validated_data)
+        
+        # Recalculate total slots if time-related fields are updated
+        time_fields = ['start_time', 'end_time', 'slot_duration', 'break_start_time', 'break_end_time']
+        if any(field in validated_data for field in time_fields):
+            if (instance.start_time and instance.end_time and instance.slot_duration):
+                calculated_slots = instance.calculate_total_slots()
+                if calculated_slots != instance.total_slots:
+                    instance.total_slots = calculated_slots
+                    instance.save()
+                    
+        # Update doctor's consultation mode
+        doctor = instance.doctor
+        if instance.mode == 'online':
+            doctor.consultation_mode_online = True
+        elif instance.mode == 'offline':
+            doctor.consultation_mode_offline = True
+        doctor.save()
         
         return instance

@@ -58,7 +58,7 @@ const PatientSidebar = ({
                                     <button
                                         onClick={() => setActiveSection(item.id)}
                                         className={`w-full flex items-center space-x-3 px-4 py-3 text-left rounded-lg transition-colors ${
-                                            activeSection === item.id
+                                                    activeSection === item.id
                                                 ? "bg-purple-600 text-white"
                                                 : "text-gray-700 hover:bg-purple-50 hover:text-purple-600"
                                         }`}
