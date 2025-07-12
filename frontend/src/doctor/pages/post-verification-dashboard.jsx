@@ -1,281 +1,539 @@
-"use client"
+import React, { useState, useEffect } from 'react';
+import { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "../../components/ui/card";
+import Button from "../../components/ui/Button";
+import { isDoctorAuthenticated, clearAuthData } from '../../utils/auth';
+import { 
+    MapPin, 
+    Plus, 
+    Edit, 
+    Trash2, 
+    Navigation, 
+    CheckCircle,
+    X,
+    Save,
+    Loader2,
+    AlertTriangle
+} from "lucide-react";
 
-import Button from "../../components/ui/Button"
-import { Card, CardHeader, CardFooter, CardTitle, CardDescription, CardContent } from "../../components/ui/card" 
-import { Calendar, Users, Clock, Plus, Edit, ChevronRight } from "lucide-react"
-import DocHeader from "../../components/ui/DocHeader"
+import DocHeader from '../../components/ui/DocHeader';
+import { 
+    getDoctorLocations,
+    createDoctorLocation, 
+    updateDoctorLocation, 
+    deleteDoctorLocation, 
+    updateCurrentDoctorLocation  
+} from '../../endpoints/Doc';
 
-export default function PostVerificationDashboard({ onToggleVerification }) {
-    const todaysAppointments = [
-        { id: 1, time: "09:00 AM", patient: "John Doe", type: "Consultation", status: "confirmed" },
-        { id: 2, time: "10:30 AM", patient: "Sarah Wilson", type: "Follow-up", status: "pending" },
-        { id: 3, time: "02:00 PM", patient: "Mike Johnson", type: "Check-up", status: "confirmed" },
-    ]
+export default function DoctorLocationManager() {
+    const [locations, setLocations] = useState([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [showAddForm, setShowAddForm] = useState(false);
+    const [editingLocation, setEditingLocation] = useState(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [error, setError] = useState(null);
+    const [formData, setFormData] = useState({
+        name: '',
+        latitude: '',
+        longitude: '',
+        loc_name: '',
+        is_active: true,
+        is_current: false
+    });
 
-    const quickActions = [
-        { icon: Plus, label: "Add New Appointment", color: "bg-blue-500", hoverColor: "hover:bg-blue-600" },
-        { icon: Calendar, label: "View Availability", color: "bg-green-500", hoverColor: "hover:bg-green-600" },
-        { icon: Users, label: "My Patients List", color: "bg-purple-500", hoverColor: "hover:bg-purple-600" },
-        { icon: Edit, label: "Edit Profile", color: "bg-orange-500", hoverColor: "hover:bg-orange-600" },
-    ]
+    // Load locations on component mount
+    useEffect(() => {
+        loadLocations();
+    }, []);
 
-    // Mini calendar data
-    const currentDate = new Date()
-    const currentMonth = currentDate.getMonth()
-    const currentYear = currentDate.getFullYear()
-    const today = currentDate.getDate()
+    const loadLocations = async () => {
+        try {
+            setIsLoading(true);
+            setError(null);
+            
+            // Check if user is authenticated
+            const isAuth = await isDoctorAuthenticated();
+            if (!isAuth) {
+                throw new Error('Authentication required. Please log in again.');
+            }
+        
+            const data = await getDoctorLocations();
+            console.log('API Response:', data); // Debug log
+            
+            // Handle different response formats
+            if (data && Array.isArray(data)) {
+                setLocations(data);
+            } else if (data && data.results && Array.isArray(data.results)) {
+                setLocations(data.results);
+            } else if (data && data.data && Array.isArray(data.data)) {
+                setLocations(data.data);
+            } else {
+                console.warn('Unexpected response format:', data);
+                setLocations([]);
+            }
+            
+        } catch (error) {
+            console.error('Error loading locations:', error);
+            
+            // Set user-friendly error messages
+            if (error.response) {
+                switch (error.response.status) {
+                    case 401:
+                        setError('Authentication failed. Please log in again.');
+                        clearAuthData();
+                        break;
+                    case 403:
+                        setError('Access denied. You may not have permission to view locations.');
+                        break;
+                    case 404:
+                        setError('Doctor profile not found. Please contact support.');
+                        break;
+                    case 500:
+                        setError('Server error. Please try again later.');
+                        break;
+                    default:
+                        setError(`Error loading locations: ${error.response.data?.error || 'Unknown error'}`);
+                }
+            } else if (error.message) {
+                setError(error.message);
+            } else {
+                setError('Failed to load locations. Please check your connection.');
+            }
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
-    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate()
-    const firstDayOfMonth = new Date(currentYear, currentMonth, 1).getDay()
+    const resetForm = () => {
+        setFormData({
+            name: '',
+            latitude: '',
+            longitude: '',
+            loc_name: '',
+            is_active: true,
+            is_current: false
+        });
+        setShowAddForm(false);
+        setEditingLocation(null);
+    };
 
-    const appointmentDays = [5, 12, 18, 23, 28] // Days with appointments
-    const monthNames = [
-        "January",
-        "February",
-        "March",
-        "April",
-        "May",
-        "June",
-        "July",
-        "August",
-        "September",
-        "October",
-        "November",
-        "December",
-    ]
+    const handleInputChange = (e) => {
+        const { name, value, type, checked } = e.target;
+        setFormData(prev => ({
+            ...prev,
+            [name]: type === 'checkbox' ? checked : value
+        }));
+    };
 
-    const renderCalendar = () => {
-        const days = []
-        const totalCells = 42 // 6 rows × 7 days
+    const handleGetCurrentLocation = async () => {
+        try {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        setFormData(prev => ({
+                            ...prev,
+                            latitude: position.coords.latitude.toString(),
+                            longitude: position.coords.longitude.toString()
+                        }));
+                    },
+                    (error) => {
+                        console.error('Geolocation error:', error);
+                        alert('Could not get current location. Please enter manually.');
+                    }
+                );
+            } else {
+                alert('Geolocation is not supported by your browser. Please enter manually.');
+            }
+        } catch (error) {
+            console.error('Error getting location:', error);
+            alert('Could not get current location. Please enter manually.');
+        }
+    };
 
-        // Empty cells for days before the first day of the month
-        for (let i = 0; i < firstDayOfMonth; i++) {
-        days.push(<div key={`empty-${i}`} className="h-8"></div>)
+    const handleSubmit = async () => {
+        if (!formData.name || !formData.latitude || !formData.longitude) {
+            alert('Please fill in all required fields');
+            return;
         }
 
-        // Days of the month
-        for (let day = 1; day <= daysInMonth; day++) {
-        const isToday = day === today
-        const hasAppointment = appointmentDays.includes(day)
+        try {
+            setIsSubmitting(true);
+            
+            const submitData = {
+                ...formData,
+                latitude: parseFloat(formData.latitude),
+                longitude: parseFloat(formData.longitude)
+            };
 
-        days.push(
-            <div
-            key={day}
-            className={`h-8 flex items-center justify-center text-sm relative cursor-pointer hover:bg-blue-50 rounded ${
-                isToday ? "bg-blue-500 text-white font-bold" : "text-gray-700"
-            }`}
-            >
-            {day}
-            {hasAppointment && !isToday && (
-                <div className="absolute bottom-1 left-1/2 transform -translate-x-1/2 w-1 h-1 bg-blue-500 rounded-full"></div>
-            )}
-            </div>,
-        )
+            console.log('Submitting data:', submitData); // Debug log
+
+            if (editingLocation) {
+                // Update existing location
+                const result = await updateDoctorLocation(editingLocation.id, submitData);
+                console.log('Update result:', result); // Debug log
+                
+                // Instead of manually updating state, reload all locations to ensure consistency
+                await loadLocations();
+                
+            } else {
+                // Create new location
+                const result = await createDoctorLocation(submitData);
+                console.log('Create result:', result); // Debug log
+                
+                // Instead of manually adding to state, reload all locations to ensure consistency
+                await loadLocations();
+            }
+
+            resetForm();
+            
+        } catch (error) {
+            console.error('Error saving location:', error);
+            
+            // More specific error handling
+            if (error.response) {
+                const errorMessage = error.response.data?.error || 
+                                   error.response.data?.detail || 
+                                   'Server error occurred';
+                alert(`Error saving location: ${errorMessage}`);
+            } else if (error.message) {
+                alert(`Error saving location: ${error.message}`);
+            } else {
+                alert('Error saving location. Please try again.');
+            }
+        } finally {
+            setIsSubmitting(false);
         }
+    };
 
-        // Fill remaining cells
-        const remainingCells = totalCells - (firstDayOfMonth + daysInMonth)
-        for (let i = 0; i < remainingCells; i++) {
-        days.push(<div key={`empty-end-${i}`} className="h-8"></div>)
+    const handleEdit = (location) => {
+        setEditingLocation(location);
+        setFormData({
+            name: location.name,
+            latitude: location.latitude.toString(),
+            longitude: location.longitude.toString(),
+            loc_name: location.loc_name || '',
+            is_active: location.is_active,
+            is_current: location.is_current
+        });
+        setShowAddForm(true);
+    };
+
+    const handleDelete = async (locationId) => {
+    if (!confirm('Are you sure you want to delete this location?')) {
+        return;
+    }
+
+    try {
+        await deleteDoctorLocation(locationId);
+        await loadLocations();
+    } catch (error) {
+        console.error('Error deleting location:', error);
+        
+        // Show specific error message from backend
+        if (error.response && error.response.data) {
+            const errorMessage = error.response.data.error || 
+                            error.response.data.message || 
+                            error.response.data.detail || 
+                            'Unknown error occurred';
+            alert(`Cannot delete location: ${errorMessage}`);
+        } else {
+            alert('Error deleting location. Please try again.');
         }
+    }
+};
 
-        return days
+    const handleSetCurrent = async (location) => {
+        try {
+            const updateData = {
+                name: location.name,
+                latitude: location.latitude,
+                longitude: location.longitude,
+                loc_name: location.loc_name || '',
+                is_active: location.is_active,
+                is_current: true
+            };
+
+            await updateCurrentDoctorLocation(updateData);
+            
+            // Reload locations to ensure consistency
+            await loadLocations();
+            
+        } catch (error) {
+            console.error('Error setting current location:', error);
+            alert('Error setting current location. Please try again.');
+        }
+    };
+
+    // Loading state
+    if (isLoading) {
+        return (
+            <div className="space-y-6">
+                <DocHeader/>
+                <Card>
+                    <CardContent className="p-6">
+                        <div className="flex items-center justify-center">
+                            <Loader2 className="w-6 h-6 animate-spin mr-2" />
+                            <span>Loading locations...</span>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        );
+    }
+
+    // Error state
+    if (error) {
+        return (
+            <div className="space-y-6">
+                <DocHeader/>
+                <Card>
+                    <CardContent className="p-6">
+                        <div className="flex items-center justify-center flex-col">
+                            <AlertTriangle className="w-8 h-8 text-red-500 mb-4" />
+                            <h3 className="text-lg font-medium text-gray-900 mb-2">Unable to Load Locations</h3>
+                            <p className="text-red-600 text-center mb-4">{error}</p>
+                            <Button 
+                                onClick={loadLocations}
+                                className="bg-blue-600 hover:bg-blue-700"
+                            >
+                                Try Again
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        );
     }
 
     return (
-        <div className="min-h-screen bg-gray-50">
-        <DocHeader/>
-        <div className="max-w-7xl mx-auto px-4 py-8">
-            {/* Top Welcome Header */}
-            <div className="bg-white rounded-lg shadow-sm p-6 mb-8">
-            <div className="flex items-center justify-between">
-                <div>
-                <h1 className="text-3xl font-bold text-gray-900 mb-2">Welcome back, Dr. Smith 👋</h1>
-                <p className="text-gray-600">Here's what's happening today</p>
-                </div>
-                <div className="flex items-center space-x-4">
-                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                    <span className="text-2xl font-bold text-blue-600">DS</span>
-                </div>
-                <Button
-                    variant="outline"
-                    onClick={onToggleVerification}
-                    className="text-red-600 border-red-200 hover:bg-red-50"
-                >
-                    Simulate Unverified
-                </Button>
-                </div>
-            </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Left Column */}
-            <div className="lg:col-span-2 space-y-8">
-                {/* Overview Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
-                    <CardContent className="p-6">
+        <div className="space-y-6">
+            <DocHeader/>
+            
+            {/* Header */}
+            <Card>
+                <CardHeader>
                     <div className="flex items-center justify-between">
                         <div>
-                        <p className="text-blue-100 text-sm font-medium">Appointments Today</p>
-                        <p className="text-4xl font-bold">3</p>
-                        <p className="text-blue-100 text-sm">scheduled</p>
+                            <CardTitle className="flex items-center">
+                                <MapPin className="w-5 h-5 mr-2 text-blue-600" />
+                                My Locations
+                            </CardTitle>
+                            <CardDescription>
+                                Manage your practice locations and set your current location
+                            </CardDescription>
                         </div>
-                        <Calendar className="w-12 h-12 text-blue-200" />
+                        <Button
+                            onClick={() => setShowAddForm(true)}
+                            className="bg-blue-600 hover:bg-blue-700"
+                        >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add Location
+                        </Button>
                     </div>
+                </CardHeader>
+            </Card>
+
+            {/* Add/Edit Form */}
+            {showAddForm && (
+                <Card>
+                    <CardHeader>
+                        <CardTitle>
+                            {editingLocation ? 'Edit Location' : 'Add New Location'}
+                        </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Location Name *
+                                    </label>
+                                    <input
+                                        type="text"
+                                        name="name"
+                                        value={formData.name}
+                                        onChange={handleInputChange}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="e.g., Main Clinic"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Address/Description
+                                    </label>
+                                    <input
+                                        type="text"
+                                        name="loc_name"
+                                        value={formData.loc_name}
+                                        onChange={handleInputChange}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="e.g., Thiruvananthapuram Medical Center"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Latitude *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="any"
+                                        name="latitude"
+                                        value={formData.latitude}
+                                        onChange={handleInputChange}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="e.g., 8.5241"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                                        Longitude *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        step="any"
+                                        name="longitude"
+                                        value={formData.longitude}
+                                        onChange={handleInputChange}
+                                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="e.g., 76.9366"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="flex items-center space-x-4">
+                                <Button
+                                    variant="outline"
+                                    onClick={handleGetCurrentLocation}
+                                    className="flex items-center"
+                                >
+                                    <Navigation className="w-4 h-4 mr-2" />
+                                    Get Current Location
+                                </Button>
+                                
+                                <label className="flex items-center">
+                                    <input
+                                        type="checkbox"
+                                        name="is_current"
+                                        checked={formData.is_current}
+                                        onChange={handleInputChange}
+                                        className="mr-2"
+                                    />
+                                    Set as current location
+                                </label>
+                            </div>
+
+                            <div className="flex justify-end space-x-3">
+                                <Button
+                                    variant="outline"
+                                    onClick={resetForm}
+                                    disabled={isSubmitting}
+                                >
+                                    <X className="w-4 h-4 mr-2" />
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={handleSubmit}
+                                    disabled={isSubmitting}
+                                    className="bg-blue-600 hover:bg-blue-700"
+                                >
+                                    {isSubmitting ? (
+                                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                    ) : (
+                                        <Save className="w-4 h-4 mr-2" />
+                                    )}
+                                    {editingLocation ? 'Update' : 'Save'} Location
+                                </Button>
+                            </div>
+                        </div>
                     </CardContent>
                 </Card>
+            )}
 
-                <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white">
-                    <CardContent className="p-6">
-                    <div className="flex items-center justify-between">
-                        <div>
-                        <p className="text-green-100 text-sm font-medium">Patients to Visit</p>
-                        <p className="text-4xl font-bold">5</p>
-                        <p className="text-green-100 text-sm">total</p>
-                        </div>
-                        <Users className="w-12 h-12 text-green-200" />
-                    </div>
+            {/* Locations List */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {locations.map((location) => (
+                    <Card key={location.id} className={`${location.is_current ? 'ring-2 ring-blue-500' : ''}`}>
+                        <CardHeader className="pb-3">
+                            <div className="flex items-center justify-between">
+                                <CardTitle className="text-lg flex items-center">
+                                    <MapPin className="w-4 h-4 mr-2 text-blue-600" />
+                                    {location.name}
+                                </CardTitle>
+                                {location.is_current && (
+                                    <span className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full flex items-center">
+                                        <CheckCircle className="w-3 h-3 mr-1" />
+                                        Current
+                                    </span>
+                                )}
+                            </div>
+                            {location.loc_name && (
+                                <CardDescription>{location.loc_name}</CardDescription>
+                            )}
+                        </CardHeader>
+                        <CardContent className="pb-3">
+                            <div className="text-sm text-gray-600 space-y-1">
+                                <div>Lat: {location.latitude}</div>
+                                <div>Lng: {location.longitude}</div>
+                                <div className="text-xs text-gray-500">
+                                    Updated: {new Date(location.updated_at).toLocaleDateString()}
+                                </div>
+                            </div>
+                        </CardContent>
+                        <CardFooter className="flex justify-between pt-3">
+                            <div className="flex space-x-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleEdit(location)}
+                                    className="text-blue-600 hover:bg-blue-50"
+                                >
+                                    <Edit className="w-3 h-3 mr-1" />
+                                    Edit
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleDelete(location.id)}
+                                    className="text-red-600 hover:bg-red-50"
+                                >
+                                    <Trash2 className="w-3 h-3 mr-1" />
+                                    Delete
+                                </Button>
+                            </div>
+                            {!location.is_current && (
+                                <Button
+                                    size="sm"
+                                    onClick={() => handleSetCurrent(location)}
+                                    className="bg-green-600 hover:bg-green-700"
+                                >
+                                    Set Current
+                                </Button>
+                            )}
+                        </CardFooter>
+                    </Card>
+                ))}
+            </div>
+
+            {locations.length === 0 && (
+                <Card>
+                    <CardContent className="p-8 text-center">
+                        <MapPin className="w-12 h-12 mx-auto text-gray-400 mb-4" />
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">No locations found</h3>
+                        <p className="text-gray-600 mb-4">
+                            Add your first location to get started managing your practice locations.
+                        </p>
+                        <Button
+                            onClick={() => setShowAddForm(true)}
+                            className="bg-blue-600 hover:bg-blue-700"
+                        >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Add Your First Location
+                        </Button>
                     </CardContent>
                 </Card>
-                </div>
-
-                {/* Today's Appointments */}
-                <Card>
-                <CardHeader>
-                    <CardTitle className="flex items-center justify-between">
-                    <div className="flex items-center">
-                        <Clock className="w-5 h-5 mr-2 text-blue-600" />
-                        Today's Appointments
-                    </div>
-                    <Button variant="outline" size="sm" className="text-blue-600 border-blue-200 hover:bg-blue-50">
-                        View All Appointments
-                        <ChevronRight className="w-4 h-4 ml-1" />
-                    </Button>
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="space-y-4">
-                    {todaysAppointments.map((appointment) => (
-                        <div
-                        key={appointment.id}
-                        className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                        >
-                        <div className="flex items-center space-x-4">
-                            <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
-                            <span className="text-blue-600 font-semibold text-sm">
-                                {appointment.patient
-                                .split(" ")
-                                .map((n) => n[0])
-                                .join("")}
-                            </span>
-                            </div>
-                            <div>
-                            <p className="font-semibold text-gray-900">{appointment.patient}</p>
-                            <p className="text-sm text-gray-600">{appointment.type}</p>
-                            </div>
-                        </div>
-                        <div className="text-right">
-                            <p className="font-semibold text-blue-600">{appointment.time}</p>
-                            <span
-                            className={`inline-block px-2 py-1 rounded-full text-xs font-medium ${
-                                appointment.status === "confirmed"
-                                ? "bg-green-100 text-green-800"
-                                : "bg-yellow-100 text-yellow-800"
-                            }`}
-                            >
-                            {appointment.status}
-                            </span>
-                        </div>
-                        </div>
-                    ))}
-                    </div>
-                </CardContent>
-                </Card>
-
-                {/* Quick Actions */}
-                <Card>
-                <CardHeader>
-                    <CardTitle>Quick Actions</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {quickActions.map((action, index) => {
-                        const Icon = action.icon
-                        return (
-                        <div
-                            key={index}
-                            className={`${action.color} ${action.hoverColor} text-white p-6 rounded-lg cursor-pointer transition-all duration-200 hover:scale-105 hover:shadow-lg`}
-                        >
-                            <div className="text-center">
-                            <Icon className="w-8 h-8 mx-auto mb-3" />
-                            <p className="text-sm font-medium">{action.label}</p>
-                            </div>
-                        </div>
-                        )
-                    })}
-                    </div>
-                </CardContent>
-                </Card>
-            </div>
-
-            {/* Right Column - Mini Calendar */}
-            <div className="space-y-6">
-                <Card>
-                <CardHeader>
-                    <CardTitle className="text-center">
-                    {monthNames[currentMonth]} {currentYear}
-                    </CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid grid-cols-7 gap-1 mb-4">
-                    {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
-                        <div key={day} className="h-8 flex items-center justify-center text-xs font-medium text-gray-500">
-                        {day}
-                        </div>
-                    ))}
-                    </div>
-                    <div className="grid grid-cols-7 gap-1">{renderCalendar()}</div>
-                    <div className="mt-4 flex items-center justify-center space-x-4 text-xs text-gray-600">
-                    <div className="flex items-center">
-                        <div className="w-3 h-3 bg-blue-500 rounded-full mr-2"></div>
-                        Today
-                    </div>
-                    <div className="flex items-center">
-                        <div className="w-2 h-2 bg-blue-500 rounded-full mr-2"></div>
-                        Appointments
-                    </div>
-                    </div>
-                </CardContent>
-                </Card>
-
-                {/* Quick Stats */}
-                <Card>
-                <CardHeader>
-                    <CardTitle className="text-lg">Quick Stats</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between">
-                    <span className="text-gray-600">This Week</span>
-                    <span className="font-semibold">18 appointments</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                    <span className="text-gray-600">This Month</span>
-                    <span className="font-semibold">72 appointments</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Total Patients</span>
-                    <span className="font-semibold">247</span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                    <span className="text-gray-600">Pending Reviews</span>
-                    <span className="font-semibold text-orange-600">3</span>
-                    </div>
-                </CardContent>
-                </Card>
-            </div>
-            </div>
+            )}
         </div>
-        </div>
-    )
-    }
+    );
+}

@@ -1,4 +1,3 @@
-// PatientPortal.jsx - Updated with proper routing paths
 "use client"
 
 import { useState, useEffect, useRef } from "react"
@@ -8,7 +7,6 @@ import {
     Clock, 
     CheckCircle, 
     CreditCard, 
-    LogOut, 
     User, 
     ChevronRight,
     Loader2,
@@ -18,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useNavigate } from "react-router-dom"
 import Header from "../components/home/Header"
+import PatientSidebar from "../components/ui/PatientSidebar"
 import { 
     getUserProfile, 
     uploadProfilePicture, 
@@ -25,7 +24,6 @@ import {
 } from "../endpoints/APIs"
 import { 
     isAuthenticated, 
-    getStoredUserData, 
     clearAuthData, 
     setAuthData, 
     logoutUser,
@@ -45,64 +43,19 @@ const PatientPortal = () => {
     const [pictureUploading, setPictureUploading] = useState(false)
     const [pictureDeleting, setPictureDeleting] = useState(false)
     const [profilePicture, setProfilePicture] = useState(null)
+    const [userProfile, setUserProfile] = useState(null)
 
-    const sidebarItems = [
-        {
-            id: "profile",
-            name: "My Profile",
-            icon: User,
-            active: activeSection === "profile",
-            route: "/patient/profile" // Added route for navigation
-        },
-        {
-            id: "appointments",
-            name: "My Appointments",
-            icon: Calendar,
-            active: activeSection === "appointments",
-            route: "/patient/appointments" // Added route for navigation
-        },
-        {
-            id: "records",
-            name: "Medical Records",
-            icon: FileText,
-            active: activeSection === "records",
-            route: "/patient/doctorprofile" // Added route for navigation
-        },
-        {
-            id: "upcoming",
-            name: "Upcoming Appointments",
-            icon: Clock,
-            active: activeSection === "upcoming",
-            route: "/patient/appointments/upcoming" // Added route for navigation
-        },
-        {
-            id: "completed",
-            name: "Completed Appointments",
-            icon: CheckCircle,
-            active: activeSection === "completed",
-            route: "/patient/appointments/completed" // Added route for navigation
-        },
-        {
-            id: "payments",
-            name: "Payments",
-            icon: CreditCard,
-            active: activeSection === "payments",
-            route: "/patient/payments" // Added route for navigation
-        },
-    ]
-
-    // Check authentication status and fetch profile
-    const checkAuthAndFetchProfile = async () => {
+    // Check authentication status
+    const checkAuthStatus = async () => {
         console.log("🔍 PatientPortal: Checking authentication status...")
         setAuthLoading(true)
         
         try {
             const authenticated = await isAuthenticated()
-            console.log("Auth status:", authenticated)
             
             if (authenticated && authState.isLoggedIn) {
                 console.log("✅ PatientPortal: User is authenticated")
-                // Fetch fresh profile data
+                // Fetch user profile for main content area
                 await fetchUserProfile()
             } else {
                 console.log("❌ PatientPortal: Not authenticated, redirecting to login...")
@@ -115,6 +68,7 @@ const PatientPortal = () => {
             // If we have stored user data as fallback, use it
             if (authState.user && (authState.user.id || authState.user.user_id)) {
                 console.log("🔄 PatientPortal: Using stored user data as fallback")
+                setUserProfile(authState.user)
                 setAuthLoading(false)
             } else {
                 console.log("❌ PatientPortal: No valid user data, redirecting to login...")
@@ -125,7 +79,7 @@ const PatientPortal = () => {
         }
     }
 
-    // Fetch user profile from API
+    // Fetch user profile for main content area
     const fetchUserProfile = async () => {
         setProfileLoading(true)
         try {
@@ -133,30 +87,29 @@ const PatientPortal = () => {
             const response = await getUserProfile()
             
             if (response.data && response.data.data) {
-                console.log("✅ PatientPortal: Profile fetched successfully:", response.data.data)
-                
-                // Update profile picture state with various possible field names
                 const profileData = response.data.data
+                setUserProfile(profileData)
+                
+                // Set profile picture
                 const profilePictureUrl = profileData.profile_picture || 
                                         profileData.profile_picture_url || 
                                         profileData.image || 
                                         null
                 
-                if (profilePictureUrl) {
-                    setProfilePicture(profilePictureUrl)
-                    console.log("✅ Profile picture URL found:", profilePictureUrl)
-                } else {
-                    setProfilePicture(null)
-                    console.log("ℹ️ No profile picture found in response")
-                }
+                setProfilePicture(profilePictureUrl)
                 
-                // Update localStorage with fresh data (tokens remain unchanged)
+                // Update localStorage with fresh data
                 const currentTokens = {
                     access: localStorage.getItem("access_token"),
                     refresh: localStorage.getItem("refresh_token")
                 }
                 
-                setAuthData(response.data.data, currentTokens, authState.userType || 'patient')
+                setAuthData(profileData, currentTokens, authState.userType || 'patient')
+                
+                // Notify sidebar about profile update
+                window.dispatchEvent(new CustomEvent('profileUpdate', {
+                    detail: { type: 'profile_update', data: profileData }
+                }))
             }
         } catch (error) {
             console.error("❌ PatientPortal: Failed to fetch profile:", error)
@@ -167,8 +120,15 @@ const PatientPortal = () => {
                 clearAuthData()
                 navigate("/login")
             } else {
-                // For other errors, we can continue with stored data
-                console.log("⚠️ PatientPortal: Profile fetch failed but continuing with stored data")
+                // For other errors, use stored data
+                if (authState.user) {
+                    setUserProfile(authState.user)
+                    const fallbackPicture = authState.user.profile_picture || 
+                                          authState.user.profile_picture_url || 
+                                          authState.user.image || 
+                                          null
+                    setProfilePicture(fallbackPicture)
+                }
             }
         } finally {
             setProfileLoading(false)
@@ -200,47 +160,37 @@ const PatientPortal = () => {
             const formData = new FormData()
             formData.append('profile_picture', file)
             
-            console.log("🔍 PatientPortal: Uploading profile picture...")
             const response = await uploadProfilePicture(formData)
             
             if (response.data) {
-                console.log("✅ PatientPortal: Profile picture uploaded successfully", response.data)
-                
-                // Extract profile picture URL from response (check multiple possible field names)
-                let newProfilePictureUrl = null
-                
-                if (response.data.profile_picture) {
-                    newProfilePictureUrl = response.data.profile_picture
-                } else if (response.data.data?.profile_picture) {
-                    newProfilePictureUrl = response.data.data.profile_picture
-                } else if (response.data.profile_picture_url) {
-                    newProfilePictureUrl = response.data.profile_picture_url
-                } else if (response.data.data?.profile_picture_url) {
-                    newProfilePictureUrl = response.data.data.profile_picture_url
-                } else if (response.data.image) {
-                    newProfilePictureUrl = response.data.image
-                } else if (response.data.data?.image) {
-                    newProfilePictureUrl = response.data.data.image
-                }
+                // Extract profile picture URL from response
+                let newProfilePictureUrl = response.data.profile_picture || 
+                                         response.data.data?.profile_picture || 
+                                         response.data.profile_picture_url || 
+                                         response.data.data?.profile_picture_url || 
+                                         response.data.image || 
+                                         response.data.data?.image || 
+                                         null
                 
                 if (newProfilePictureUrl) {
                     setProfilePicture(newProfilePictureUrl)
-                    console.log("✅ Profile picture URL updated:", newProfilePictureUrl)
                     
-                    // Update auth state with new profile picture
-                    const updatedUser = { ...authState.user, profile_picture: newProfilePictureUrl, profile_picture_url: newProfilePictureUrl }
+                    // Update auth state
+                    const updatedUser = { ...authState.user, profile_picture: newProfilePictureUrl }
                     const currentTokens = {
                         access: localStorage.getItem("access_token"),
                         refresh: localStorage.getItem("refresh_token")
                     }
                     setAuthData(updatedUser, currentTokens, authState.userType || 'patient')
+                    
+                    // Notify sidebar about profile update
+                    window.dispatchEvent(new CustomEvent('profileUpdate', {
+                        detail: { type: 'profile_picture_update', profilePicture: newProfilePictureUrl }
+                    }))
                 }
                 
-                // Refresh profile data to get any other updated info
-                setTimeout(() => {
-                    fetchUserProfile()
-                }, 1000)
-                
+                // Refresh profile data
+                setTimeout(fetchUserProfile, 1000)
                 alert('Profile picture updated successfully!')
             }
         } catch (error) {
@@ -252,7 +202,6 @@ const PatientPortal = () => {
             alert(errorMessage)
         } finally {
             setPictureUploading(false)
-            // Reset file input
             if (fileInputRef.current) {
                 fileInputRef.current.value = ''
             }
@@ -269,25 +218,25 @@ const PatientPortal = () => {
         setPictureDeleting(true)
         
         try {
-            console.log("🔍 PatientPortal: Deleting profile picture...")
             await deleteProfilePicture()
             
-            console.log("✅ PatientPortal: Profile picture deleted successfully")
             setProfilePicture(null)
             
-            // Update auth state to remove profile picture
-            const updatedUser = { ...authState.user, profile_picture: null, profile_picture_url: null }
+            // Update auth state
+            const updatedUser = { ...authState.user, profile_picture: null }
             const currentTokens = {
                 access: localStorage.getItem("access_token"),
                 refresh: localStorage.getItem("refresh_token")
             }
             setAuthData(updatedUser, currentTokens, authState.userType || 'patient')
             
-            // Refresh profile data to get updated info
-            setTimeout(() => {
-                fetchUserProfile()
-            }, 1000)
+            // Notify sidebar about profile update
+            window.dispatchEvent(new CustomEvent('profileUpdate', {
+                detail: { type: 'profile_picture_delete' }
+            }))
             
+            // Refresh profile data
+            setTimeout(fetchUserProfile, 1000)
             alert('Profile picture deleted successfully!')
         } catch (error) {
             console.error("❌ PatientPortal: Profile picture delete failed:", error)
@@ -310,52 +259,49 @@ const PatientPortal = () => {
             navigate(item.route)
         }
         
-        // For testing doctor profile navigation (as mentioned in your requirement)
         if (item.id === "appointments") {
-            // You can add a test navigation to doctor profile here
             console.log("🔍 PatientPortal: Navigating to appointments section")
-            // Example: navigate("/patient/doctorprofile") // for testing
         }
     }
 
-    // Initialize auth state on component mount
-    useEffect(() => {
-        console.log("🔍 PatientPortal: Component mounted, checking auth...")
-        checkAuthAndFetchProfile()
-    }, [])
-
-    // Watch for auth state changes
-    useEffect(() => {
-        if (!authState.isLoggedIn && !authLoading) {
-            console.log("❌ PatientPortal: Auth state changed to logged out, redirecting...")
-            navigate("/login")
-        }
-    }, [authState.isLoggedIn, authLoading, navigate])
-
-    // Update profile picture when user data changes
-    useEffect(() => {
-        if (authState.user) {
-            const profilePictureUrl = authState.user.profile_picture || 
-                                    authState.user.profile_picture_url || 
-                                    authState.user.image || 
-                                    null
-            if (profilePictureUrl) {
-                setProfilePicture(profilePictureUrl)
-            }
-        }
-    }, [authState.user])
-
+    // Handle logout
     const handleLogout = async () => {
         console.log("🔍 PatientPortal: Logout clicked")
+        
+        if (authLoading) return
+        
         try {
-            await logoutUser()
-            console.log("✅ PatientPortal: Logout successful")
+            setAuthLoading(true)
+            
+            // Call logout API with timeout
+            const logoutPromise = logoutUser()
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Logout timeout')), 5000)
+            )
+            
+            await Promise.race([logoutPromise, timeoutPromise])
         } catch (error) {
-            console.error("PatientPortal: Logout failed:", error)
-        } finally {
-            console.log("✅ PatientPortal: Logout complete, navigating to login")
-            navigate("/login")
+            console.error("❌ PatientPortal: Logout API failed:", error)
         }
+        
+        // Clear auth data
+        clearAuthData()
+        
+        // Clear localStorage
+        const keysToRemove = [
+            "access_token", "refresh_token", "user_data", "user_type",
+            "authState", "patient_data", "login_data"
+        ]
+        
+        keysToRemove.forEach(key => localStorage.removeItem(key))
+        sessionStorage.clear()
+        
+        // Navigate to login
+        navigate("/login", { replace: true })
+        
+        setTimeout(() => {
+            window.location.replace("/login")
+        }, 200)
     }
 
     const renderSectionContent = () => {
@@ -364,7 +310,7 @@ const PatientPortal = () => {
                 icon: User,
                 title: "My Profile",
                 description: "Your profile information will appear here",
-                route: "/patient/profile"
+                route: "/patientprofile"
             },
             appointments: {
                 icon: Calendar,
@@ -423,6 +369,18 @@ const PatientPortal = () => {
         )
     }
 
+    // Initialize on component mount
+    useEffect(() => {
+        checkAuthStatus()
+    }, [])
+
+    // Watch for auth state changes
+    useEffect(() => {
+        if (!authState.isLoggedIn && !authLoading) {
+            navigate("/login")
+        }
+    }, [authState.isLoggedIn, authLoading, navigate])
+
     // Loading state
     if (authLoading) {
         return (
@@ -452,11 +410,10 @@ const PatientPortal = () => {
         )
     }
 
-    const { user } = authState
+    const user = userProfile || authState.user
 
     return (
         <div className="min-h-screen bg-gray-50">
-            {/* Header */}
             <Header />
 
             {/* Hidden file input for profile picture upload */}
@@ -471,55 +428,12 @@ const PatientPortal = () => {
             {/* Main Content */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 <div className="flex flex-col lg:flex-row gap-8">
-                    {/* Sidebar */}
-                    <div className="lg:w-80">
-                        <div className="bg-white rounded-lg shadow-sm border border-gray-200">
-                            {/* Patient Portal Header */}
-                            <div className="p-6 border-b border-gray-200">
-                                <div className="flex items-center space-x-3">
-                                    <div className="w-10 h-10 bg-purple-600 rounded-full flex items-center justify-center">
-                                        <User className="w-6 h-6 text-white" />
-                                    </div>
-                                    <h2 className="text-lg font-semibold text-gray-900">Patient Portal</h2>
-                                </div>
-                            </div>
-
-                            {/* Navigation Menu */}
-                            <nav className="p-4">
-                                <ul className="space-y-2">
-                                    {sidebarItems.map((item) => {
-                                        const IconComponent = item.icon
-                                        return (
-                                            <li key={item.id}>
-                                                <button
-                                                    onClick={() => handleSectionNavigation(item)}
-                                                    className={`w-full flex items-center space-x-3 px-4 py-3 text-left rounded-lg transition-colors ${
-                                                        item.active
-                                                            ? "bg-purple-600 text-white"
-                                                            : "text-gray-700 hover:bg-purple-50 hover:text-purple-600"
-                                                    }`}
-                                                >
-                                                    <IconComponent size={20} />
-                                                    <span className="font-medium">{item.name}</span>
-                                                </button>
-                                            </li>
-                                        )
-                                    })}
-
-                                    {/* Logout Button */}
-                                    <li className="pt-4 border-t border-gray-200">
-                                        <button
-                                            onClick={handleLogout}
-                                            className="w-full flex items-center space-x-3 px-4 py-3 text-left rounded-lg text-red-600 hover:bg-red-50 transition-colors"
-                                        >
-                                            <LogOut size={20} />
-                                            <span className="font-medium">Logout</span>
-                                        </button>
-                                    </li>
-                                </ul>
-                            </nav>
-                        </div>
-                    </div>
+                    {/* PatientSidebar now handles its own data */}
+                    <PatientSidebar
+                        activeSection={activeSection}
+                        onSectionNavigation={handleSectionNavigation}
+                        onLogout={handleLogout}
+                    />
 
                     {/* Main Content */}
                     <div className="flex-1">
@@ -527,7 +441,7 @@ const PatientPortal = () => {
                             {/* Profile Section */}
                             <div className="p-8">
                                 <div className="flex flex-col items-center text-center">
-                                    {/* Profile Avatar with Upload/Delete Controls - Updated styling */}
+                                    {/* Profile Avatar with Upload/Delete Controls */}
                                     <div className="relative mb-6 group">
                                         <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center shadow-2xl ring-4 ring-white ring-opacity-50 overflow-hidden">
                                             {profilePicture ? (
@@ -548,7 +462,6 @@ const PatientPortal = () => {
                                         {/* Upload/Delete Overlay */}
                                         <div className="absolute inset-0 rounded-full bg-black bg-opacity-50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
                                             <div className="flex space-x-2">
-                                                {/* Upload Button */}
                                                 <button
                                                     onClick={() => fileInputRef.current?.click()}
                                                     disabled={pictureUploading || pictureDeleting}
@@ -562,7 +475,6 @@ const PatientPortal = () => {
                                                     )}
                                                 </button>
 
-                                                {/* Delete Button - Only show if profile picture exists */}
                                                 {profilePicture && (
                                                     <button
                                                         onClick={handleProfilePictureDelete}
@@ -580,7 +492,6 @@ const PatientPortal = () => {
                                             </div>
                                         </div>
 
-                                        {/* Status indicator */}
                                         <div className="absolute bottom-2 right-2">
                                             <div className="w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center border-2 border-white">
                                                 <User className="w-4 h-4 text-white" />
@@ -588,7 +499,7 @@ const PatientPortal = () => {
                                         </div>
                                     </div>
 
-                                    {/* Upload Instructions */}
+                                    {/* Upload Status */}
                                     {(pictureUploading || pictureDeleting) && (
                                         <div className="mb-4 text-sm text-gray-600">
                                             {pictureUploading && (
@@ -606,6 +517,7 @@ const PatientPortal = () => {
                                         </div>
                                     )}
 
+
                                     {/* User Information */}
                                     <div className="space-y-2 mb-6">
                                         {profileLoading ? (
@@ -617,9 +529,9 @@ const PatientPortal = () => {
                                             <>
                                                 <h2 className="text-2xl font-bold text-gray-900">
                                                     {user.name || 
-                                                     `${user.first_name || ''} ${user.last_name || ''}`.trim() || 
-                                                     user.username || 
-                                                     "Welcome"}
+                                                    `${user.first_name || ''} ${user.last_name || ''}`.trim() || 
+                                                    user.username || 
+                                                    "Welcome"}
                                                 </h2>
                                                 <p className="text-gray-600">
                                                     {user.email || "No email provided"}
@@ -645,7 +557,7 @@ const PatientPortal = () => {
                                     <div className="flex flex-col sm:flex-row gap-3">
                                         {/* View Details Button - Updated with proper path */}
                                         <button
-                                            onClick={() => navigate("/patient/profile")}
+                                            onClick={() => navigate("/patientprofile")}
                                             className="inline-flex items-center space-x-2 bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                                             disabled={profileLoading}
                                         >

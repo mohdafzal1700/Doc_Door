@@ -7,7 +7,9 @@ from django.utils import timezone
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from django.utils import timezone
 from datetime import datetime, timedelta
+from decimal import Decimal
 from django.core.exceptions import ValidationError
+from math import radians, cos, sin, asin, sqrt
 
 
 import logging
@@ -79,6 +81,11 @@ class User(AbstractBaseUser, PermissionsMixin):
     def name(self):
         """Property to get full name for compatibility"""
         return f"{self.first_name} {self.last_name}".strip()
+    
+    def get_full_name(self):
+        """Return the full name for the user."""
+        full_name = f"{self.first_name} {self.last_name}".strip()
+        return full_name if full_name else self.username or self.email
     
     def check_and_update_verification_status(self):
         """Check if all verification steps are complete and update status"""
@@ -277,6 +284,12 @@ class Patient(models.Model):
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, null=True, blank=True)
     def __str__(self):
         return f"{self.user.email} - Patient"
+    
+    def name(self):
+        """Return patient's name from user model"""
+        if self.user:
+            return self.user.name
+        return f"Patient {self.id}"
 
 
 
@@ -388,35 +401,7 @@ class DoctorProof(models.Model):
         
         
         
-# class AdminProfile(models.Model):
-#     user = models.OneToOneField(
-#         User, 
-#         on_delete=models.CASCADE, 
-#         related_name='admin_profile'
-#     )
-#     profile_picture = CloudinaryField(
-#         'image',
-#         folder='admin_profiles',
-#         null=True,
-#         blank=True,
-#         transformation=[
-#             {'width': 300, 'height': 300, 'crop': 'fill'},
-#             {'quality': 'auto:best'}
-#         ]
-#     )
 
-#     created_at = models.DateTimeField(default=timezone.now)
-#     updated_at = models.DateTimeField(auto_now=True)
-#     is_profile_setup_done = models.BooleanField(default=False)
-
-#     def __str__(self):
-#         return f"Admin Profile for {self.user.email}"
-
-#     @property
-#     def profile_picture_url(self):
-#         if self.profile_picture:
-#             return self.profile_picture.url
-#         return None
 
 class Service(models.Model):
     doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE)
@@ -587,5 +572,177 @@ class Schedules(models.Model):
         
         return not (self.break_start_time <= booking_time <= self.break_end_time)
     
+
+class DoctorLocation(models.Model):
+    doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE)
+    name = models.CharField(max_length=100)  # "Main Clinic", "Home Office"
+    latitude = models.DecimalField(max_digits=10, decimal_places=8)
+    longitude = models.DecimalField(max_digits=11, decimal_places=8)
+    loc_name = models.CharField(max_length=100, null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_current = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['name']
+    
+    def __str__(self):
+        return f"{self.doctor.user.username} - {self.name}"
+    
+    def calculate_distance_to(self, lat, lng):
+        """Calculate distance to given coordinates in km"""
+        lat1, lng1, lat2, lng2 = map(radians, [float(self.latitude), float(self.longitude), lat, lng])
+        dlng = lng2 - lng1
+        dlat = lat2 - lat1
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlng/2)**2
+        c = 2 * asin(sqrt(a))
+        r = 6371  # Earth's radius in km
+        return c * r
     
     
+class PatientLocation(models.Model):
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE)
+    latitude = models.DecimalField(max_digits=10, decimal_places=8)
+    longitude = models.DecimalField(max_digits=11, decimal_places=8)
+    loc_name = models.CharField(max_length=100, null=True, blank=True)
+    is_current = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        unique_together = ['patient', 'is_current']
+        ordering = ['-updated_at']
+    
+    def __str__(self):
+        return f"{self.patient.user.username} - {self.address}"
+    
+    
+
+    
+class Medical_Record(models.Model):
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    patient = models.OneToOneField(Patient, on_delete=models.CASCADE, related_name='medical_record')
+    chronic_diseases = models.TextField(blank=True, help_text="List chronic diseases (e.g., diabetes, asthma)")
+    allergies = models.TextField(blank=True, help_text="List any allergies (e.g., dust, peanuts, penicillin)")
+
+    medications = models.TextField(blank=True, help_text="Current medications with dosage")
+    surgeries = models.TextField(blank=True, help_text="Past surgeries and approximate dates")
+    
+    lifestyle = models.TextField(blank=True, help_text="Smoking, alcohol, diet, exercise habits")
+
+    vaccination_history = models.TextField(blank=True, help_text="Mention vaccines taken (e.g., COVID, Tetanus)")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+
+class Appointment(models.Model):
+    
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='appointments')
+    doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE, related_name='appointments')
+    schedule = models.ForeignKey('Schedules', on_delete=models.CASCADE, related_name='appointments')
+    service = models.ForeignKey('Service', on_delete=models.SET_NULL, null=True, blank=True)
+    
+    appointment_date = models.DateField()  
+    slot_time = models.TimeField()  
+    mode = models.CharField(max_length=20, choices=[('online', 'Online'), ('offline', 'Offline')])
+    
+    address = models.ForeignKey('Address', on_delete=models.SET_NULL, null=True, blank=True, related_name='appointments')
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('confirmed', 'Confirmed'),
+        ('cancelled', 'Cancelled'),
+        ('completed', 'Completed'),
+    ]
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    medical_record = models.ForeignKey('Medical_Record', on_delete=models.SET_NULL, null=True, blank=True, related_name='appointments')
+    total_fee = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)  # Auto-calculated
+    is_paid = models.BooleanField(default=False)
+
+    notes = models.TextField(blank=True, null=True)
+    
+    doctor_location = models.ForeignKey(DoctorLocation, on_delete=models.SET_NULL, null=True, blank=True)
+    patient_latitude = models.DecimalField(max_digits=10, decimal_places=8, null=True, blank=True)
+    patient_longitude = models.DecimalField(max_digits=11, decimal_places=8, null=True, blank=True)
+    patient_address = models.CharField(max_length=255, blank=True)
+    distance_km = models.FloatField(null=True, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+        # Auto-calculate total_fee
+        if self.service:
+            # Convert to Decimal to ensure consistent types
+            service_fee = Decimal(str(self.service.service_fee or 0))
+            consultation_fee = Decimal(str(self.doctor.consultation_fee or 0))
+            self.total_fee = service_fee + consultation_fee
+        else:
+            # If no service, just use doctor's consultation fee
+            self.total_fee = Decimal(str(self.doctor.consultation_fee or 0))
+        
+        super().save(*args, **kwargs)
+        
+        
+    def update_patient_location(self):
+        """Update patient location from their current location"""
+        current_location = PatientLocation.objects.filter(
+            patient=self.patient, 
+            is_current=True
+        ).first()
+        
+        if current_location:
+            self.patient_latitude = current_location.latitude
+            self.patient_longitude = current_location.longitude
+            self.patient_address = current_location.address
+            
+            # Calculate distance if doctor location is set
+            if self.doctor_location:
+                self.distance_km = self.doctor_location.calculate_distance_to(
+                    float(self.patient_latitude), 
+                    float(self.patient_longitude)
+                )
+            self.save()
+
+    def __str__(self):
+        return f"Appointment: {self.patient.user.email} with {self.doctor.user.email} on {self.appointment_date} at {self.slot_time}"
+    
+    
+
+
+class Payment(models.Model):
+    PAYMENT_METHOD_CHOICES = [
+        ('cash', 'Cash'),
+        ('card', 'Card'),
+        ('upi', 'UPI'),
+        ('bank_transfer', 'Bank Transfer'),
+    ]
+
+    PAYMENT_STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    appointment = models.OneToOneField('Appointment', on_delete=models.CASCADE, related_name='payment')
+    
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+    status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
+
+    remarks = models.TextField(blank=True, null=True)
+
+    paid_at = models.DateTimeField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Payment for {self.appointment} - {self.status}"
+    
+    
+
+
+

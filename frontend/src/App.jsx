@@ -27,7 +27,13 @@ import DoctorProfilePage from "./doctor/components/DocProfile"
 import { ToastProvider } from "./components/ui/Toast"
 import ServicePage from "./doctor/pages/service_management"
 import ScheduleManagement from "./doctor/pages/ScheduleManagement"
-import PatientDoctor from "./pages/indvDoctor"
+import PatientDoctor from "./pages/PatientDoctorpage"
+import MedicalRecordForm from "./pages/medical_records"
+import AppointmentBooking from "./pages/BookAppointmentPage "
+import MyAppointments from "./pages/MyAppoinments"
+import AppointmentRequestsPage from "./doctor/pages/appointment-requests"
+import DoctorDashboard from "./doctor/pages/appoinment-page"
+
 
 
 
@@ -63,6 +69,14 @@ function App() {
         <Route path='/doctor/schedule'  element={<ScheduleManagement/>}/>
         <Route path='/doctor/schedule'  element={<ScheduleManagement/>}/>
         <Route path='/patient/doctor/:id' element={<PatientDoctor/>}/>
+        <Route path="/patient/medical_record" element={<MedicalRecordForm />} />
+        <Route path='/patient/appointmentBooking/:id' element={<AppointmentBooking />} />
+        <Route path='/patient/myAppointments' element={<MyAppointments />} />
+        <Route path='/doctor/appointmentsRequest' element={<AppointmentRequestsPage/>} />
+        <Route path='/doctor/appointmentsPage' element={<DoctorDashboard/>} />
+
+        
+        
         
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>

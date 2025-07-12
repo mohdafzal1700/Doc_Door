@@ -2,7 +2,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
-from .models import User, Doctor, DoctorEducation, DoctorCertification, DoctorProof,Service,Schedules
+from .models import User, Doctor, DoctorEducation, DoctorCertification, DoctorProof,Service,Schedules,DoctorLocation
 from datetime import datetime, timedelta
 from django.utils import timezone
 from datetime import datetime,date
@@ -1046,14 +1046,15 @@ class DoctorApprovalActionSerializer(serializers.Serializer):
     
 class ServiceSerializer(serializers.ModelSerializer):
     """Serializer for Service model"""
+    total_fee = serializers.SerializerMethodField()
     
     class Meta:
         model = Service
         fields = [
             'id', 'service_name', 'service_mode', 'service_fee', 
-            'description', 'is_active', 'created_at', 'updated_at'
+            'description', 'is_active', 'created_at', 'updated_at','total_fee'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at','total_fee']
 
     def validate_service_name(self, value):
         """Validate service name"""
@@ -1079,6 +1080,12 @@ class ServiceSerializer(serializers.ModelSerializer):
         if value not in valid_modes:
             raise serializers.ValidationError(f"Service mode must be one of {valid_modes}")
         return value
+    
+    def get_total_fee(self, obj):
+        """Calculate total fee (service fee + doctor consultation fee)"""
+        doctor_fee = obj.doctor.consultation_fee or 0
+        service_fee = obj.service_fee or 0
+        return float(doctor_fee) + float(service_fee)
 
 class SchedulesSerializer(serializers.ModelSerializer):
     """Serializer for Schedules model with doctor and service details"""
@@ -1279,3 +1286,66 @@ class SchedulesSerializer(serializers.ModelSerializer):
         doctor.save()
         
         return instance
+    
+class DoctorLocationSerializer(serializers.ModelSerializer):
+    doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
+    distance = serializers.FloatField(read_only=True)
+    
+    class Meta:
+        model = DoctorLocation
+        fields = ['id', 'name', 'latitude', 'longitude', 'loc_name', 'is_active',
+                  'is_current', 'doctor_name', 'distance', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate_latitude(self, value):
+        if not (-90 <= value <= 90):
+            raise serializers.ValidationError("Latitude must be between -90 and 90 degrees")
+        return value
+    
+    def validate_longitude(self, value):
+        if not (-180 <= value <= 180):
+            raise serializers.ValidationError("Longitude must be between -180 and 180 degrees")
+        return value
+
+
+class DoctorLocationCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DoctorLocation
+        fields = ['name', 'latitude', 'longitude', 'loc_name', 'is_active', 'is_current']
+        extra_kwargs = {
+            'latitude': {'required': True},
+            'longitude': {'required': True},
+            'name': {'required': True},
+        }
+    
+    def validate_latitude(self, value):
+        if not (-90 <= value <= 90):
+            raise serializers.ValidationError("Latitude must be between -90 and 90 degrees")
+        return value
+    
+    def validate_longitude(self, value):
+        if not (-180 <= value <= 180):
+            raise serializers.ValidationError("Longitude must be between -180 and 180 degrees")
+        return value
+
+
+class DoctorLocationUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating doctor location"""
+    
+    class Meta:
+        model = DoctorLocation
+        fields = ['name', 'latitude', 'longitude', 'loc_name', 'is_active', 'is_current']
+        extra_kwargs = {
+            'latitude': {'required': True},
+            'longitude': {'required': True},
+        }
+    
+    def validate_latitude(self, value):
+        if not (-90 <= value <= 90):
+            raise serializers.ValidationError("Latitude must be between -90 and 90 degrees")
+        return value
+    
+    def validate_longitude(self, value):
+        if not (-180 <= value <= 180):
+            raise serializers.ValidationError("Longitude must be between -180 and 180 degrees")
+        return value

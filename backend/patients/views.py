@@ -1,24 +1,47 @@
-# Django imports
+from datetime import timedelta
+from io import BytesIO
+import logging
+
 from django.shortcuts import render, get_object_or_404
-from django.core.files.base import ContentFile
 from django.utils import timezone
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError
-# REST framework core imports
+from django.core.files.base import ContentFile
+from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Q
+
+from datetime import datetime
+
+from django.http import Http404
+from django.db import transaction
+
+# REST Framework
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import AuthenticationFailed
-from django.db.models import Q
-# JWT (SimpleJWT) imports
-from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 
-# Project-specific models and serializers
-from doctor.models import User, EmailOTP, Patient, Address
+
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
+
+
+import cloudinary
+import cloudinary.uploader
+from cloudinary.exceptions import Error as CloudinaryError
+
+
+from PIL import Image
+
+
+from doctor.models import User, EmailOTP, Patient, Address, Medical_Record,Appointment,Payment,Schedules,Doctor,PatientLocation,DoctorLocation
+from doctor.serializers import DoctorProfileSerializer
+
 from patients.serializers import (
     ProfilePictureSerializer,
     CustomTokenObtainPairSerializer,
+    ScheduleDetailSerializer,
     AddressSerializer,
     AddressListSerializer,
     CustomUserCreateSerializer,
@@ -27,21 +50,17 @@ from patients.serializers import (
     ResetPasswordSerializer,
     ForgotPasswordSerializer,
     VerifyForgotPasswordOTPSerializer,
-    UserProfileSerializer
+    UserProfileSerializer,
+    AppointmentSerializer,
+    MedicalRecordSerializer,
+    BookingDoctorDetailSerializer,
+    PaymentSerializer,
+    AppointmentLocationSerializer,
+    PatientLocationSerializer,
+    DoctorLocationSerializer,
+    PatientLocationUpdateSerializer,
+    PatientLocationSerializer,
 )
-
-from doctor.serializers import DoctorProfileSerializer
-
-# Cloudinary imports for image handling
-import cloudinary
-import cloudinary.uploader
-from cloudinary.exceptions import Error as CloudinaryError
-
-# Other utilities
-from datetime import timedelta
-from PIL import Image
-from io import BytesIO
-import logging
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -952,3 +971,810 @@ class PatientDoctorView(APIView):
                 'error': 'An error occurred while fetching doctors',
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
+
+class MedicalRecordManagementView(APIView):
+    """
+    Medical record management for patient portal
+    Patient can only access their own medical record
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """Get medical record for the authenticated patient"""
+        try:
+            # Enhanced logging for debugging
+            logger.info(f"🔍 Medical record request started for user: {request.user.id}")
+            logger.info(f"📧 User email: {request.user.email}")
+            logger.info(f"👤 User type: {type(request.user)}")
+            
+            # Print to console for immediate debugging
+            print(f"\n=== MEDICAL RECORD DEBUG ===")
+            print(f"🔍 Request user ID: {request.user.id}")
+            print(f"📧 User email: {request.user.email}")
+            print(f"👤 User object: {request.user}")
+            print(f"🔐 Is authenticated: {request.user.is_authenticated}")
+            
+            # Check if user has patient profile
+            try:
+                patient = request.user.patient_profile
+                logger.info(f"✅ Patient profile found: {patient.id}")
+                print(f"✅ Patient profile found: {patient.id}")
+                print(f"🏥 Patient object: {patient}")
+                
+            except Patient.DoesNotExist:
+                logger.error(f"❌ Patient profile not found for user {request.user.id}")
+                print(f"❌ Patient profile not found for user {request.user.id}")
+                print(f"🔍 Available user attributes: {dir(request.user)}")
+                
+                # Check if there are any patient profiles in the system
+                total_patients = Patient.objects.count()
+                print(f"📊 Total patients in system: {total_patients}")
+                
+                # Check if this user has any related patient profiles
+                try:
+                    related_patients = Patient.objects.filter(user=request.user)
+                    print(f"🔗 Related patients for this user: {related_patients.count()}")
+                    for rp in related_patients:
+                        print(f"   - Patient: {rp.id}, User: {rp.user}")
+                except Exception as e:
+                    print(f"❌ Error checking related patients: {e}")
+                
+                return Response({
+                    'success': False,
+                    'message': 'Patient profile not found',
+                    'debug_info': {
+                        'user_id': str(request.user.id),
+                        'user_email': request.user.email,
+                        'total_patients': Patient.objects.count()
+                    }
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            except AttributeError as e:
+                logger.error(f"❌ AttributeError accessing patient_profile: {str(e)}")
+                print(f"❌ AttributeError: {str(e)}")
+                print(f"🔍 User model fields: {[f.name for f in request.user._meta.fields]}")
+                print(f"🔍 User related objects: {[rel.get_accessor_name() for rel in request.user._meta.related_objects]}")
+                
+                return Response({
+                    'success': False,
+                    'message': 'Error accessing patient profile',
+                    'debug_info': {
+                        'error': str(e),
+                        'user_fields': [f.name for f in request.user._meta.fields],
+                        'related_objects': [rel.get_accessor_name() for rel in request.user._meta.related_objects]
+                    }
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+            # Try to get medical record
+            try:
+                medical_record = Medical_Record.objects.get(patient=patient)
+                logger.info(f"✅ Medical record found: {medical_record.id}")
+                print(f"✅ Medical record found: {medical_record.id}")
+                print(f"📋 Medical record object: {medical_record}")
+                
+                serializer = MedicalRecordSerializer(medical_record)
+                logger.info(f"✅ Medical record serialized successfully")
+                print(f"✅ Serialized data keys: {list(serializer.data.keys())}")
+                print(f"=== END DEBUG ===\n")
+                
+                return Response({
+                    'success': True,
+                    'data': serializer.data
+                }, status=status.HTTP_200_OK)
+
+            except Medical_Record.DoesNotExist:
+                logger.info(f"ℹ️ Medical record not found for patient {patient.id}")
+                print(f"ℹ️ Medical record not found for patient {patient.id}")
+                
+                # Check if there are any medical records in the system
+                total_records = Medical_Record.objects.count()
+                print(f"📊 Total medical records in system: {total_records}")
+                
+                # List all medical records for debugging
+                all_records = Medical_Record.objects.all()[:5]  # Limit to first 5
+                print(f"🔍 Sample medical records:")
+                for record in all_records:
+                    print(f"   - Record ID: {record.id}, Patient: {record.patient.id}")
+                
+                print(f"=== END DEBUG ===\n")
+                
+                return Response({
+                    'success': False,
+                    'message': 'Medical record not found',
+                    'debug_info': {
+                        'patient_id': str(patient.id),
+                        'total_medical_records': total_records
+                    }
+                }, status=status.HTTP_404_NOT_FOUND)
+
+        except Exception as e:
+            logger.error(f"❌ Unexpected error in medical record view: {str(e)}")
+            logger.error(f"❌ Error type: {type(e)}")
+            logger.error(f"❌ Error args: {e.args}")
+            
+            print(f"\n❌ UNEXPECTED ERROR ❌")
+            print(f"Error: {str(e)}")
+            print(f"Error type: {type(e)}")
+            print(f"Error args: {e.args}")
+            
+            # Print stack trace
+            import traceback
+            traceback.print_exc()
+            print(f"=== END DEBUG ===\n")
+            
+            return Response({
+                'success': False,
+                'message': 'Failed to retrieve medical record',
+                'error': str(e),
+                'debug_info': {
+                    'error_type': str(type(e)),
+                    'user_id': str(request.user.id) if hasattr(request, 'user') else 'N/A'
+                }
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
+    def post(self, request):
+        """Create medical record for the authenticated patient"""
+        try:
+            with transaction.atomic():
+                # Get the patient profile for the logged-in user
+                try:
+                    patient = request.user.patient_profile
+                except Patient.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'message': 'Patient profile not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+
+                # Check if patient already has a medical record
+                if Medical_Record.objects.filter(patient=patient).exists():
+                    return Response({
+                        'success': False,
+                        'message': 'You already have a medical record'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Prepare data with patient
+                data = request.data.copy()
+                data['patient'] = patient.id
+
+                serializer = MedicalRecordSerializer(data=data)
+
+                if serializer.is_valid():
+                    medical_record = serializer.save()
+                    logger.info(f"Medical record created for patient {patient.name}")
+
+                    return Response({
+                        'success': True,
+                        'message': 'Medical record created successfully',
+                        'data': MedicalRecordSerializer(medical_record).data
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    return Response({
+                        'success': False,
+                        'field_errors': serializer.errors
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        except ValidationError as e:
+            return Response({
+                'success': False,
+                'message': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error creating medical record for user {request.user.id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to create medical record',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def patch(self, request):
+        """Update medical record for the authenticated patient"""
+        try:
+            with transaction.atomic():
+                # Get the patient profile for the logged-in user
+                try:
+                    patient = request.user.patient_profile
+                except Patient.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'message': 'Patient profile not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+
+                # Get medical record
+                try:
+                    medical_record = Medical_Record.objects.get(patient=patient)
+                except Medical_Record.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'message': 'Medical record not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+
+                serializer = MedicalRecordSerializer(
+                    medical_record,
+                    data=request.data,
+                    partial=True
+                )
+
+                if serializer.is_valid():
+                    updated_record = serializer.save()
+                    logger.info(f"Medical record updated for patient {patient.name}")
+
+                    return Response({
+                        'success': True,
+                        'message': 'Medical record updated successfully',
+                        'data': MedicalRecordSerializer(updated_record).data
+                    }, status=status.HTTP_200_OK)
+                else:
+                    return Response({
+                        'success': False,
+                        'field_errors': serializer.errors
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        except ValidationError as e:
+            return Response({
+                'success': False,
+                'message': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            logger.error(f"Error updating medical record for user {request.user.id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to update medical record',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request):
+        """Delete medical record for the authenticated patient"""
+        try:
+            # Get the patient profile for the logged-in user
+            try:
+                patient = request.user.patient_profile
+            except Patient.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'message': 'Patient profile not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            # Get medical record
+            try:
+                medical_record = Medical_Record.objects.get(patient=patient)
+            except Medical_Record.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'message': 'Medical record not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+
+            patient_name = patient.name
+            medical_record.delete()
+            logger.info(f"Medical record deleted for patient {patient_name}")
+
+            return Response({
+                'success': True,
+                'message': 'Medical record deleted successfully'
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Error deleting medical record for user {request.user.id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to delete medical record',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    
+class AppointmentManagementView(APIView):
+    """
+    Comprehensive appointment management for patient portal
+    Handles CRUD operations for patient appointments
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get_patient_profile(self, user):
+        """Get patient profile with proper error handling"""
+        try:
+            return user.patient_profile
+        except AttributeError:
+            # Try alternative attribute name
+            try:
+                return user.patient
+            except AttributeError:
+                return None
+        except Exception:
+            return None
+
+    def get(self, request):
+        """Get all appointments for the authenticated patient"""
+        patient = self.get_patient_profile(request.user)
+        if not patient:
+            return Response({
+                'success': False,
+                'message': 'Patient profile not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            appointments = Appointment.objects.filter(
+                patient=patient
+            ).select_related('doctor__user', 'service', 'schedule').order_by('-created_at')
+            
+            serializer = AppointmentSerializer(appointments, many=True)
+            
+            return Response({
+                'success': True,
+                'data': serializer.data,
+                'count': appointments.count()
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Error getting appointments for user {request.user.id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to retrieve appointments'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def post(self, request):
+        """Create new appointment for the authenticated patient"""
+        patient = self.get_patient_profile(request.user)
+        if not patient:
+            return Response({
+                'success': False,
+                'message': 'Patient profile not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            with transaction.atomic():
+                # Prepare data
+                data = request.data.copy()
+                data['patient'] = patient.id
+
+                # Debug logging
+                logger.info(f"Creating appointment with data: {data}")
+
+                # Validate and create appointment
+                serializer = AppointmentSerializer(data=data)
+                if serializer.is_valid():
+                    appointment = serializer.save()
+                    
+                    # Create payment record if fee exists
+                    if appointment.total_fee > 0:
+                        Payment.objects.create(
+                            appointment=appointment,
+                            amount=appointment.total_fee,
+                            method='pending',
+                            status='pending'
+                        )
+                    
+                    logger.info(f"Appointment created successfully for patient {patient.user.email}")
+                    return Response({
+                        'success': True,
+                        'message': 'Appointment booked successfully',
+                        'data': AppointmentSerializer(appointment).data
+                    }, status=status.HTTP_201_CREATED)
+                else:
+                    # Log validation errors for debugging
+                    logger.error(f"Validation errors: {serializer.errors}")
+                    return Response({
+                        'success': False,
+                        'message': 'Validation failed',
+                        'field_errors': serializer.errors
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            logger.error(f"Error creating appointment for user {request.user.id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': f'Failed to book appointment: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class AppointmentDetailView(APIView):
+    """
+    Individual appointment management
+    Handles get, update, and cancel operations
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get_appointment(self, user, appointment_id):
+        """Get appointment with proper authorization"""
+        try:
+            patient = user.patient_profile
+        except AttributeError:
+            try:
+                patient = user.patient
+            except AttributeError:
+                return None
+        
+        try:
+            return Appointment.objects.get(id=appointment_id, patient=patient)
+        except Appointment.DoesNotExist:
+            return None
+
+    def get(self, request, appointment_id):
+        """Get specific appointment details"""
+        appointment = self.get_appointment(request.user, appointment_id)
+        if not appointment:
+            return Response({
+                'success': False,
+                'message': 'Appointment not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        try:
+            serializer = AppointmentSerializer(appointment)
+            return Response({
+                'success': True,
+                'data': serializer.data
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error getting appointment {appointment_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to retrieve appointment'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def patch(self, request, appointment_id):
+        """Update appointment details"""
+        appointment = self.get_appointment(request.user, appointment_id)
+        if not appointment:
+            return Response({
+                'success': False,
+                'message': 'Appointment not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if appointment can be updated
+        if appointment.status in ['cancelled', 'completed']:
+            return Response({
+                'success': False,
+                'message': 'Cannot update cancelled or completed appointments'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                serializer = AppointmentSerializer(
+                    appointment, 
+                    data=request.data, 
+                    partial=True
+                )
+                
+                if serializer.is_valid():
+                    updated_appointment = serializer.save()
+                    logger.info(f"Appointment {appointment_id} updated")
+                    
+                    return Response({
+                        'success': True,
+                        'message': 'Appointment updated successfully',
+                        'data': AppointmentSerializer(updated_appointment).data
+                    }, status=status.HTTP_200_OK)
+                else:
+                    logger.error(f"Update validation errors: {serializer.errors}")
+                    return Response({
+                        'success': False,
+                        'message': 'Validation failed',
+                        'field_errors': serializer.errors
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+        except Exception as e:
+            logger.error(f"Error updating appointment {appointment_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to update appointment'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def delete(self, request, appointment_id):
+        """Cancel appointment"""
+        appointment = self.get_appointment(request.user, appointment_id)
+        if not appointment:
+            return Response({
+                'success': False,
+                'message': 'Appointment not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if appointment can be cancelled
+        if appointment.status in ['cancelled', 'completed']:
+            return Response({
+                'success': False,
+                'message': 'Cannot cancel this appointment'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            appointment.status = 'cancelled'
+            appointment.save()
+            logger.info(f"Appointment {appointment_id} cancelled")
+            
+            return Response({
+                'success': True,
+                'message': 'Appointment cancelled successfully'
+            }, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.error(f"Error cancelling appointment {appointment_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to cancel appointment'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class DoctorBookingDetailView(APIView):
+    """Doctor details for booking page"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, pk):
+        print(f"🔍 DoctorBookingDetailView called with pk: {pk}")
+        print(f"🔍 Request user: {request.user}")
+        print(f"🔍 Request user authenticated: {request.user.is_authenticated}")
+        
+
+        try:
+            doctor = get_object_or_404(
+                User,
+                pk=pk,
+                role='doctor',
+                is_active=True,
+                doctor_profile__verification_status='approved'
+            )
+            print(f"🔍 Doctor found: {doctor}")
+            serializer = BookingDoctorDetailSerializer(doctor)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            print(f"❌ Error: {e}")
+            return Response({
+                'error': 'Doctor not found or not available',
+                'details': str(e)
+            }, status=status.HTTP_404_NOT_FOUND)
+
+
+class DoctorSchedulesView(APIView):
+    """Doctor schedules with time slot availability - Alternative approach"""
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, doctor_id):
+        try:
+            # Validate required parameters
+            date = request.GET.get('date')
+            if not date:
+                return Response({
+                    'error': 'Date parameter is required'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            try:
+                date_obj = datetime.strptime(date, '%Y-%m-%d').date()
+            except ValueError:
+                return Response({
+                    'error': 'Invalid date format. Use YYYY-MM-DD'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Direct Doctor query approach - More efficient
+            doctor = get_object_or_404(
+                Doctor,
+                user__id=doctor_id,
+                user__role='doctor',
+                user__is_active=True,
+                verification_status='approved'
+            )
+
+            # Build query filters
+            mode = request.GET.get('mode', 'online')
+            service_id = request.GET.get('service_id')
+            
+            schedules_query = Schedules.objects.filter(
+                doctor=doctor,
+                date=date_obj,
+                mode=mode,
+                is_active=True
+            ).select_related('service')
+
+            if service_id:
+                schedules_query = schedules_query.filter(service_id=service_id)
+
+            schedules = schedules_query.all()
+
+            serializer = ScheduleDetailSerializer(schedules, many=True)
+            return Response({
+                'schedules': serializer.data,
+                'date': date,
+                'mode': mode,
+                'doctor_id': doctor_id
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            # Add more detailed error logging
+            import traceback
+            print(f"Error in DoctorSchedulesView: {str(e)}")
+            traceback.print_exc()
+            return Response({
+                'error': 'Failed to fetch schedules',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PaymentView(APIView):
+    """Payment processing for appointments"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, appointment_id):
+        try:
+            appointment = get_object_or_404(
+                Appointment,
+                id=appointment_id,
+                patient__user=request.user
+            )
+
+            # Get or create payment record
+            payment, created = Payment.objects.get_or_create(
+                appointment=appointment,
+                defaults={
+                    'amount': appointment.total_fee,
+                    'method': request.data.get('method', 'card'),
+                    'status': 'pending'
+                }
+            )
+
+            # Update payment details
+            payment.method = request.data.get('method', payment.method)
+            payment.status = request.data.get('status', 'success')
+            payment.remarks = request.data.get('remarks', '')
+
+            if payment.status == 'success':
+                payment.paid_at = timezone.now()
+                appointment.is_paid = True
+                appointment.status = 'confirmed'
+                appointment.save()
+
+            payment.save()
+
+            serializer = PaymentSerializer(payment)
+            return Response({
+                'message': 'Payment processed successfully',
+                'payment': serializer.data
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({
+                'error': 'Payment processing failed',
+                'details': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+
+class UpdatePatientLocationView(generics.CreateAPIView):
+    """POST /patients/location/update/"""
+    serializer_class = PatientLocationUpdateSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_patient(self):
+        """Get the patient instance for the authenticated user"""
+        return self.request.user.patient_profile 
+    
+    def perform_create(self, serializer):
+        patient = self.get_patient()
+        location_data = serializer.validated_data
+        
+        with transaction.atomic():
+            # Check if location with same coordinates already exists
+            existing_location = PatientLocation.objects.filter(
+                patient=patient,
+                latitude=location_data.get('latitude'),
+                longitude=location_data.get('longitude'),
+                # Add other identifying fields if needed
+                # address=location_data.get('address'),
+            ).first()
+            
+            if existing_location:
+                # Update existing location to current and update other fields
+                PatientLocation.objects.filter(
+                    patient=patient, 
+                    is_current=True
+                ).update(is_current=False)
+                
+                # Update the existing location
+                for field, value in location_data.items():
+                    setattr(existing_location, field, value)
+                existing_location.is_current = True
+                existing_location.save()
+            else:
+                # Set all existing locations to not current
+                PatientLocation.objects.filter(
+                    patient=patient, 
+                    is_current=True
+                ).update(is_current=False)
+                
+                # Create new location
+                serializer.save(patient=patient)
+
+
+class PatientLocationHistoryView(generics.ListAPIView):
+    """GET /patients/location/history/"""
+    serializer_class = PatientLocationSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        try:
+            patient = self.request.user.patient_profile  
+        except Patient.DoesNotExist:
+            return PatientLocation.objects.none()
+            
+        return PatientLocation.objects.filter(patient=patient)
+
+class CurrentPatientLocationView(generics.RetrieveAPIView):
+    """GET /patients/location/current/"""
+    serializer_class = PatientLocationSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self):
+        try:
+            patient = self.request.user.patient_profile  
+        except Patient.DoesNotExist:
+            raise Http404("Patient profile not found for this user")
+            
+        location = PatientLocation.objects.filter(
+            patient=patient,
+            is_current=True
+        ).first()
+        
+        if not location:
+            raise Http404("No current location found for this patient")
+            
+        return location
+
+# Alternative approach using get_object_or_404 (cleaner)
+class CurrentPatientLocationViewAlternative(generics.RetrieveAPIView):
+    """GET /patients/location/current/ - Alternative implementation"""
+    serializer_class = PatientLocationSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self):
+        # Get patient or raise 404
+        patient = get_object_or_404(Patient, user=self.request.user)
+        
+        # Get current location or raise 404
+        location = get_object_or_404(
+            PatientLocation,
+            patient=patient,
+            is_current=True
+        )
+        
+        return location
+    
+class SearchNearbyDoctorsView(generics.ListAPIView):
+    """GET /search/nearby-doctors/?latitude=...&longitude=...&radius=..."""
+    serializer_class = DoctorLocationSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def list(self, request, *args, **kwargs):
+        latitude = float(request.GET.get('latitude'))
+        longitude = float(request.GET.get('longitude'))
+        radius = float(request.GET.get('radius', 10))
+        
+        # Get all active doctor locations
+        doctor_locations = DoctorLocation.objects.filter(
+            is_active=True,
+            doctor__is_active=True
+        )
+        
+        # Calculate distances and filter by radius
+        nearby_locations = []
+        for location in doctor_locations:
+            distance = location.calculate_distance_to(latitude, longitude)
+            if distance <= radius:
+                location.distance = distance
+                nearby_locations.append(location)
+        
+        # Sort by distance
+        nearby_locations.sort(key=lambda x: x.distance)
+        
+        serializer = self.get_serializer(nearby_locations, many=True)
+        return Response({
+            'count': len(nearby_locations),
+            'results': serializer.data
+        })
+
+class AppointmentLocationDetailView(generics.RetrieveAPIView):
+    """GET /appointments/<int:pk>/location/"""
+    serializer_class = AppointmentLocationSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self):
+        appointment = get_object_or_404(Appointment, pk=self.kwargs['pk'])
+        
+        # Check permission
+        if (self.request.user.patient == appointment.patient or 
+            self.request.user.doctor == appointment.doctor):
+            return appointment
+        
+        return None

@@ -471,57 +471,365 @@
         }
     };
 
-
-    export const updateSchedule = async (data) => {
-        try {
-            if (!data.id) {
-                throw new Error('Schedule ID is required for update');
-            }
-
-            const payload = {
-                id: data.id,
-                service: data.service,
-                mode: data.mode,
-                date: data.date,
-                start_time: data.start_time,
-                end_time: data.end_time,
-                slot_duration: data.slot_duration,
-                break_start_time: data.break_start_time,
-                break_end_time: data.break_end_time,
-                total_slots: data.total_slots ? parseInt(data.total_slots) : null,
-                booked_slots: data.booked_slots ? parseInt(data.booked_slots) : null,
-                max_patients_per_slot: data.max_patients_per_slot ? parseInt(data.max_patients_per_slot) : null,
-                is_active: data.is_active,
-            };
-
-            // Remove empty values except for id
-            Object.keys(payload).forEach(key => {
-                if (key !== 'id' && (payload[key] === undefined || payload[key] === '')) {
-                    delete payload[key];
-                }
-            });
-
-            const response = await axios.patch('scheduleView/', payload);
-            return response;
-        } catch (error) {
-            console.error("Error updating schedule:", error);
-            throw error;
+export const updateSchedule = async (scheduleId, data) => {
+    try {
+        if (!scheduleId) {
+            throw new Error('Schedule ID is required for update');
         }
-    };
 
+        const payload = {
+            id: scheduleId, // Include the ID in the payload
+            service: data.service,
+            mode: data.mode,
+            date: data.date,
+            start_time: data.start_time,
+            end_time: data.end_time,
+            slot_duration: data.slot_duration,
+            break_start_time: data.break_start_time,
+            break_end_time: data.break_end_time,
+            total_slots: data.total_slots ? parseInt(data.total_slots) : null,
+            booked_slots: data.booked_slots !== undefined && data.booked_slots !== null && data.booked_slots !== '' 
+        ? parseInt(data.booked_slots) 
+        : 0,
+            max_patients_per_slot: data.max_patients_per_slot ? parseInt(data.max_patients_per_slot) : null,
+            is_active: data.is_active,
+        };
 
-    export const deleteSchedule = async (scheduleId) => {
-        try {
-            if (!scheduleId) {
-                throw new Error('Schedule ID is required for deletion');
+        // Remove empty values except for id
+        Object.keys(payload).forEach(key => {
+            if (key !== 'id' && (payload[key] === undefined || payload[key] === '')) {
+                delete payload[key];
             }
+        });
 
-            const response = await axios.delete('scheduleView/', {
-                data: { id: scheduleId }
-            });
-            return response;
-        } catch (error) {
-            console.error("Error deleting schedule:", error);
-            throw error;
+        console.log('Updating schedule with payload:', payload);
+        const response = await axios.patch('scheduleView/', payload);
+        return response;
+    } catch (error) {
+        console.error("Error updating schedule:", error);
+        throw error;
+    }
+};
+
+export const deleteSchedule = async (scheduleId) => {
+    try {
+        if (!scheduleId) {
+            throw new Error('Schedule ID is required for deletion');
         }
-    };
+
+        const response = await axios.delete('scheduleView/', {
+            data: { id: scheduleId }
+        });
+        return response;
+    } catch (error) {
+        console.error("Error deleting schedule:", error);
+        throw error;
+    }
+};
+
+
+export const getDoctorLocations = async () => {
+    try {
+        const response = await axios.get('location/list/');
+        return response.data; // Return data instead of full response object
+    } catch (error) {
+        console.error("Error fetching doctor locations:", error);
+        throw error;
+    }
+};
+
+// Get current doctor location
+export const getCurrentDoctorLocation = async () => {
+    try {
+        const response = await axios.get('location/current/');
+        return response.data; // Return data instead of full response object
+    } catch (error) {
+        console.error("Error fetching current doctor location:", error);
+        throw error;
+    }
+};
+
+// Create new doctor location
+export const createDoctorLocation = async (data) => {
+    try {
+        // Input validation
+        if (!data) {
+            throw new Error('Location data is required');
+        }
+
+        const payload = {
+            name: data.name,
+            latitude: data.latitude,
+            longitude: data.longitude,
+            loc_name: data.loc_name,
+            is_active: data.is_active !== undefined ? data.is_active : true,
+            is_current: data.is_current !== undefined ? data.is_current : false,
+        };
+
+        // Remove empty values (but keep false/0 values)
+        Object.keys(payload).forEach(key => {
+            if (payload[key] === undefined || payload[key] === '' || payload[key] === null) {
+                delete payload[key];
+            }
+        });
+
+        const response = await axios.post('location/create/', payload);
+        return response.data; // Return data instead of full response object
+    } catch (error) {
+        console.error("Error creating doctor location:", error);
+        throw error;
+    }
+};
+
+// Update doctor location (specific location by ID)
+export const updateDoctorLocation = async (locationId, data) => {
+    try {
+        if (!locationId) {
+            throw new Error('Location ID is required for update');
+        }
+
+        if (!data) {
+            throw new Error('Location data is required for update');
+        }
+
+        const payload = {
+            name: data.name,
+            latitude: data.latitude,
+            longitude: data.longitude,
+            loc_name: data.loc_name,
+            is_active: data.is_active,
+            is_current: data.is_current,
+        };
+
+        // Remove empty values (but keep false/0 values)
+        Object.keys(payload).forEach(key => {
+            if (payload[key] === undefined || payload[key] === '') {
+                delete payload[key];
+            }
+        });
+
+        console.log('Updating doctor location with payload:', payload);
+        const response = await axios.patch(`location/update/${locationId}/`, payload);
+        return response.data; // Return data instead of full response object
+    } catch (error) {
+        console.error("Error updating doctor location:", error);
+        throw error;
+    }
+};
+
+// Update current doctor location (similar to patient location update)
+export const updateCurrentDoctorLocation = async (data) => {
+    try {
+        // Input validation
+        if (!data) {
+            throw new Error('Location data is required');
+        }
+
+        const payload = {
+            name: data.name,
+            latitude: data.latitude,
+            longitude: data.longitude,
+            loc_name: data.loc_name,
+            is_active: data.is_active !== undefined ? data.is_active : true,
+            is_current: true, // Always set to current when using this endpoint
+        };
+
+        // Remove empty values but keep required fields and false/0 values
+        Object.keys(payload).forEach(key => {
+            if (key !== 'latitude' && key !== 'longitude' && key !== 'is_current' && 
+                (payload[key] === undefined || payload[key] === '' || payload[key] === null)) {
+                delete payload[key];
+            }
+        });
+
+        console.log('Updating current doctor location with payload:', payload);
+        const response = await axios.post('location/update/', payload);
+        return response.data; // Return data instead of full response object
+    } catch (error) {
+        console.error("Error updating current doctor location:", error);
+        throw error;
+    }
+};
+
+// Delete doctor location (soft delete)
+export const deleteDoctorLocation = async (locationId) => {
+    try {
+        if (!locationId) {
+            throw new Error('Location ID is required for deletion');
+        }
+
+        const response = await axios.delete(`location/delete/${locationId}/`);
+        return response.data; // Return data instead of full response object
+    } catch (error) {
+        console.error("Error deleting doctor location:", error);
+        throw error;
+    }
+};
+
+export const getDoctorAppointments = async () => {
+    try {
+        const response = await axios.get('appointments/');
+        return response;
+    } catch (error) {
+        console.error("Error fetching doctor appointments:", error);
+        throw error;
+    }
+};
+
+// Get pending appointment requests
+export const getPendingAppointmentRequests = async () => {
+    try {
+        const response = await axios.get('appointments/requests/');
+        return response;
+    } catch (error) {
+        console.error("Error fetching pending appointment requests:", error);
+        throw error;
+    }
+};
+
+// Get today's appointments for doctor
+export const getDoctorTodayAppointments = async () => {
+    try {
+        const response = await axios.get('appointments/today/');
+        return response;
+    } catch (error) {
+        console.error("Error fetching today's appointments:", error);
+        throw error;
+    }
+};
+
+// Get upcoming appointments for doctor
+export const getDoctorUpcomingAppointments = async () => {
+    try {
+        const response = await axios.get('appointments/upcoming/');
+        return response;
+    } catch (error) {
+        console.error("Error fetching upcoming appointments:", error);
+        throw error;
+    }
+};
+
+// Get specific appointment details
+export const getDoctorAppointmentDetail = async (appointmentId) => {
+    try {
+        if (!appointmentId) {
+            throw new Error('Appointment ID is required');
+        }
+        const response = await axios.get(`appointments/${appointmentId}/`);
+        return response;
+    } catch (error) {
+        console.error("Error fetching appointment detail:", error);
+        throw error;
+    }
+};
+
+// Handle appointment request action (approve/reject)
+export const appointmentRequestAction = async (appointmentId, data) => {
+    try {
+        if (!appointmentId) {
+            throw new Error('Appointment ID is required');
+        }
+
+        const payload = {
+            action: data.action, // 'approve' or 'reject'
+            reason: data.reason, // Optional reason for rejection
+            ...data // Include any other fields
+        };
+
+        // Remove empty values
+        Object.keys(payload).forEach(key => {
+            if (payload[key] === undefined || payload[key] === '' || payload[key] === null) {
+                delete payload[key];
+            }
+        });
+
+        const response = await axios.post(`appointments/${appointmentId}/action/`, payload);
+        return response;
+    } catch (error) {
+        console.error("Error processing appointment request action:", error);
+        throw error;
+    }
+};
+
+// Bulk appointment request action
+export const bulkAppointmentRequestAction = async (data) => {
+    try {
+        const payload = {
+            appointment_ids: data.appointment_ids, // Array of appointment IDs
+            action: data.action, // 'approve' or 'reject'
+            reason: data.reason, // Optional reason for bulk action
+            ...data // Include any other fields
+        };
+
+        // Remove empty values
+        Object.keys(payload).forEach(key => {
+            if (payload[key] === undefined || payload[key] === '' || payload[key] === null) {
+                delete payload[key];
+            }
+        });
+
+        const response = await axios.post('appointments/bulk-action/', payload);
+        return response;
+    } catch (error) {
+        console.error("Error processing bulk appointment action:", error);
+        throw error;
+    }
+};
+
+// Update appointment status
+export const updateAppointmentStatus = async (appointmentId, data) => {
+    try {
+        if (!appointmentId) {
+            throw new Error('Appointment ID is required');
+        }
+
+        const payload = {
+            status: data.status, // New status
+            notes: data.notes, // Optional notes
+            ...data // Include any other fields
+        };
+
+        // Remove empty values
+        Object.keys(payload).forEach(key => {
+            if (payload[key] === undefined || payload[key] === '' || payload[key] === null) {
+                delete payload[key];
+            }
+        });
+
+        const response = await axios.patch(`appointments/${appointmentId}/status/`, payload);
+        return response;
+    } catch (error) {
+        console.error("Error updating appointment status:", error);
+        throw error;
+    }
+};
+
+// Reschedule appointment
+export const rescheduleAppointment = async (appointmentId, data) => {
+    try {
+        if (!appointmentId) {
+            throw new Error('Appointment ID is required');
+        }
+
+        const payload = {
+            new_date: data.new_date,
+            new_time: data.new_time,
+            new_slot_id: data.new_slot_id, 
+            reason: data.reason, 
+            ...data 
+        };
+
+    
+        Object.keys(payload).forEach(key => {
+            if (payload[key] === undefined || payload[key] === '' || payload[key] === null) {
+                delete payload[key];
+            }
+        });
+
+        const response = await axios.patch(`appointments/${appointmentId}/reschedule/`, payload);
+        return response;
+    } catch (error) {
+        console.error("Error rescheduling appointment:", error);
+        throw error;
+    }
+};

@@ -115,3 +115,60 @@ export const updateUserProfileWithAddress = async (data) => {
 
 export const getPatientDoctors = () => axios.get("patient_doctor/");
 export const getPatientDoctor = (id) => axios.get(`patient_doctor/${id}/`);
+
+
+export const getMedicalRecord = () => axios.get("medical_records/");
+export const createMedicalRecord = (data) => axios.post("medical_records/", data);
+export const updateMedicalRecord = (data) => axios.patch("medical_records/", data);
+export const deleteMedicalRecord = () => axios.delete("medical_records/");
+
+
+export const getAppointments = () => axios.get("appointments/");
+
+export const createAppointment = (data) => axios.post("appointments/", data);
+
+export const getAppointmentDetail = (appointmentId) => axios.get(`appointments/${appointmentId}/`);
+
+export const updateAppointment = (appointmentId, data) => axios.patch(`appointments/${appointmentId}/`, data);
+
+export const cancelAppointment = (appointmentId) => axios.delete(`appointments/${appointmentId}/`);
+
+export const getDoctorBookingDetail = (id) => axios.get(`booking/doctor/${id}/`);
+
+export const getDoctorSchedules = (doctorId, params = {}) => {
+    return axios.get(`booking/doctor/${doctorId}/schedules/`, { params });
+};
+
+export const getDoctorSchedulesWithParams = (doctorId, date, mode = 'online', serviceId = null) => {
+    const params = { date, mode };
+    if (serviceId) {
+        params.service_id = serviceId;
+    }
+    return axios.get(`booking/doctor/${doctorId}/schedules/`, { params });
+};
+
+export const processPayment = (appointmentId, paymentData) => {
+    return axios.post(`appointments/${appointmentId}/payment/`, paymentData);
+};
+
+export const getAppointmentsWithFilters = (filters = {}) => {
+    return axios.get("appointments/", { params: filters });
+};
+
+export const getAppointmentsByStatus = (status) => {
+    return axios.get("appointments/", { params: { status } });
+};
+
+export const updatePatientLocation = (data) => axios.post("patients/location/update/", data);
+
+export const getPatientLocationHistory = () => axios.get("patients/location/history/");
+
+export const getCurrentPatientLocation = () => axios.get("patients/location/current/");
+
+export const searchNearbyDoctors = (latitude, longitude, radius = 10) => {
+    const params = { latitude, longitude, radius };
+    return axios.get("search/nearby-doctors/", { params });
+};
+
+export const getAppointmentLocationDetail = (appointmentId) => 
+    axios.get(`appointments/${appointmentId}/location/`);
