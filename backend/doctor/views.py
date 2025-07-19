@@ -1,42 +1,43 @@
-from django.shortcuts import render
-from rest_framework.permissions import AllowAny
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework.exceptions import AuthenticationFailed
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework import generics, status
-from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError
-from django.shortcuts import get_object_or_404
-from .serializers import DoctorProfileSerializer,DoctorEducationSerializer,DoctorCertificationSerializer,DoctorProofSerializer,VerificationStatusSerializer,SchedulesSerializer,ServiceSerializer
-from .models import Doctor,DoctorEducation,DoctorProof,DoctorCertification,Schedules,Service
+# Standard library imports
 import logging
-from rest_framework.views import APIView
-from doctor.serializers import CustomDoctorTokenObtainPairSerializer
-# Create your views here.
-logger = logging.getLogger(__name__)
-from .models import DoctorLocation
-from .serializers import DoctorLocationSerializer, DoctorLocationUpdateSerializer
+from decimal import Decimal
+from datetime import datetime, date, timedelta
 
-
-from rest_framework.generics import ListAPIView, UpdateAPIView
-from django.shortcuts import get_object_or_404
-from django.db.models import Q
+# Django imports
+from django.shortcuts import render, get_object_or_404
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
-from datetime import datetime, date
-from .models import Appointment, Doctor
+from django.db import transaction
+from django.db.models import Q
+
+# DRF imports
+from rest_framework import generics, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.generics import ListAPIView, UpdateAPIView
+from rest_framework.exceptions import (
+    AuthenticationFailed, NotFound, ValidationError
+)
+from rest_framework_simplejwt.views import TokenObtainPairView
+
+# App-specific imports
+from .models import (
+    Doctor, DoctorEducation, DoctorCertification, DoctorProof,
+    Schedules, Service, DoctorLocation, Appointment
+)
+from .serializers import (
+    DoctorProfileSerializer, DoctorEducationSerializer,
+    DoctorCertificationSerializer, DoctorProofSerializer,
+    VerificationStatusSerializer, SchedulesSerializer,
+    ServiceSerializer, DoctorLocationSerializer,
+    DoctorLocationUpdateSerializer
+)
+from doctor.serializers import CustomDoctorTokenObtainPairSerializer
 from patients.serializers import AppointmentSerializer
 
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
-from django.db import transaction
 import logging
 
 logger = logging.getLogger(__name__)
@@ -1243,11 +1244,11 @@ class ScheduleView(APIView):
                     }, status=status.HTTP_403_FORBIDDEN)
             
             # Check if schedule has bookings (if you have booking model)
-            # if schedule.bookings.exists():
-            #     return Response({
-            #         'success': False,
-            #         'message': 'Cannot delete schedule with existing bookings.'
-            #     }, status=status.HTTP_400_BAD_REQUEST)
+            if schedule.bookings.exists():
+                return Response({
+                    'success': False,
+                    'message': 'Cannot delete schedule with existing bookings.'
+                }, status=status.HTTP_400_BAD_REQUEST)
             
             schedule.delete()
             
@@ -1264,20 +1265,6 @@ class ScheduleView(APIView):
                 'message': 'Failed to delete schedule',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-import logging
-from decimal import Decimal
-
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.response import Response
-from rest_framework.exceptions import ValidationError, NotFound, PermissionDenied
-from django.core.exceptions import ObjectDoesNotExist
-from django.db.models import Q
-
-# Configure logger
-logger = logging.getLogger(__name__)
-
-# Custom exception for better error handling
 
 
 class DoctorLocationCreateView(generics.CreateAPIView):
@@ -1783,290 +1770,270 @@ def debug_doctor_locations(request):
             {'error': 'Debug endpoint failed', 'detail': str(e)},
             status=status.HTTP_500_INTERNAL_SERVER_ERROR
         )
-        
-        
-# views.py - Doctor Appointment Management Views (Enhanced with Request Handling)
-
-import logging
-from datetime import datetime, date, timedelta
-from django.shortcuts import get_object_or_404
-from django.db.models import Q
-from django.utils import timezone
-from rest_framework import status
-from rest_framework.views import APIView
-from rest_framework.generics import ListAPIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
 
 
-
-class DoctorAppointmentsView(ListAPIView):
+class DoctorAppointmentDashboardView(APIView):
     """
-    List all appointments for the logged-in doctor
-    Supports filtering by status, date, and search
+    Main dashboard view with appointment statistics and overview
     """
-    serializer_class = AppointmentSerializer
     permission_classes = [IsAuthenticated]
     
-    def get_queryset(self):
+    def get(self, request):
         try:
-            # Debug: Log user info
-            logger.info(f"DoctorAppointmentsView - User: {self.request.user.id}, Has role: {hasattr(self.request.user, 'role')}")
-            
             # Ensure user is a doctor
-            if not hasattr(self.request.user, 'role') or self.request.user.role != 'doctor':
-                logger.warning(f"Access denied - User {self.request.user.id} role: {getattr(self.request.user, 'role', 'No role')}")
-                return Appointment.objects.none()
-            
-            # Get doctor instance - Updated to use doctor_profile
-            try:
-                doctor = self.request.user.doctor_profile
-                logger.info(f"Doctor profile found: {doctor.id}")
-            except AttributeError:
-                logger.error(f"Doctor profile not found for user {self.request.user.id}")
-                # Debug: Check what attributes the user has
-                user_attrs = [attr for attr in dir(self.request.user) if not attr.startswith('_')]
-                logger.debug(f"User attributes: {user_attrs}")
-                return Appointment.objects.none()
-            
-            # Base queryset - appointments for this doctor
-            queryset = Appointment.objects.filter(doctor=doctor).select_related(
-                'patient__user', 'doctor__user', 'service', 'schedule'
-            ).order_by('-appointment_date', '-slot_time')
-            
-            logger.info(f"Base queryset count: {queryset.count()}")
-            
-            # Debug: Log query parameters
-            query_params = dict(self.request.query_params)
-            logger.debug(f"Query parameters: {query_params}")
-            
-            # Filter by status
-            status_filter = self.request.query_params.get('status', None)
-            if status_filter:
-                original_count = queryset.count()
-                queryset = queryset.filter(status=status_filter)
-                logger.debug(f"Status filter '{status_filter}': {original_count} -> {queryset.count()}")
-            
-            # Filter by date
-            date_filter = self.request.query_params.get('date', None)
-            if date_filter:
-                try:
-                    filter_date = datetime.strptime(date_filter, '%Y-%m-%d').date()
-                    original_count = queryset.count()
-                    queryset = queryset.filter(appointment_date=filter_date)
-                    logger.debug(f"Date filter '{date_filter}': {original_count} -> {queryset.count()}")
-                except ValueError:
-                    logger.warning(f"Invalid date format in filter: {date_filter}")
-            
-            # Filter by date range
-            date_from = self.request.query_params.get('date_from', None)
-            date_to = self.request.query_params.get('date_to', None)
-            
-            if date_from:
-                try:
-                    from_date = datetime.strptime(date_from, '%Y-%m-%d').date()
-                    original_count = queryset.count()
-                    queryset = queryset.filter(appointment_date__gte=from_date)
-                    logger.debug(f"Date from filter '{date_from}': {original_count} -> {queryset.count()}")
-                except ValueError:
-                    logger.warning(f"Invalid date_from format: {date_from}")
-            
-            if date_to:
-                try:
-                    to_date = datetime.strptime(date_to, '%Y-%m-%d').date()
-                    original_count = queryset.count()
-                    queryset = queryset.filter(appointment_date__lte=to_date)
-                    logger.debug(f"Date to filter '{date_to}': {original_count} -> {queryset.count()}")
-                except ValueError:
-                    logger.warning(f"Invalid date_to format: {date_to}")
-            
-            # Search by patient name or email
-            search = self.request.query_params.get('search', None)
-            if search:
-                original_count = queryset.count()
-                queryset = queryset.filter(
-                    Q(patient__user__first_name__icontains=search) |
-                    Q(patient__user__last_name__icontains=search) |
-                    Q(patient__user__email__icontains=search)
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response(
+                    {'error': 'Only doctors can access this dashboard'},
+                    status=status.HTTP_403_FORBIDDEN
                 )
-                logger.debug(f"Search filter '{search}': {original_count} -> {queryset.count()}")
             
-            logger.info(f"Final queryset count: {queryset.count()}")
-            return queryset
+            # Get doctor instance
+            try:
+                doctor = request.user.doctor_profile
+            except AttributeError:
+                return Response(
+                    {'error': 'Doctor profile not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
             
-        except Exception as e:
-            logger.error(f"Error in DoctorAppointmentsView.get_queryset: {str(e)}", exc_info=True)
-            return Appointment.objects.none()
-    
-    def list(self, request, *args, **kwargs):
-        """Override list to add summary statistics"""
-        try:
-            logger.info(f"DoctorAppointmentsView.list called by user {request.user.id}")
-            queryset = self.get_queryset()
-            
-            # Debug: Check if queryset is empty
-            if not queryset.exists():
-                logger.warning("No appointments found for this doctor")
+            # Get all appointments for statistics
+            all_appointments = Appointment.objects.filter(doctor=doctor)
             
             # Calculate statistics
-            total_appointments = queryset.count()
-            pending_count = queryset.filter(status='pending').count()
-            confirmed_count = queryset.filter(status='confirmed').count()
-            completed_count = queryset.filter(status='completed').count()
-            cancelled_count = queryset.filter(status='cancelled').count()
+            today = date.today()
+            
+            # Total counts by status
+            total_appointments = all_appointments.count()
+            pending_count = all_appointments.filter(status='pending').count()
+            confirmed_count = all_appointments.filter(status='confirmed').count()
+            completed_count = all_appointments.filter(status='completed').count()
+            cancelled_count = all_appointments.filter(status='cancelled').count()
             
             # Today's appointments
-            today = date.today()
-            today_appointments = queryset.filter(appointment_date=today).count()
+            today_appointments = all_appointments.filter(appointment_date=today)
+            today_total = today_appointments.count()
+            today_pending = today_appointments.filter(status='pending').count()
+            today_confirmed = today_appointments.filter(status='confirmed').count()
+            today_completed = today_appointments.filter(status='completed').count()
             
-            # Debug: Log statistics
-            stats = {
-                'total': total_appointments,
-                'pending': pending_count,
-                'confirmed': confirmed_count,
-                'completed': completed_count,
-                'cancelled': cancelled_count,
-                'today': today_appointments
+            # Upcoming appointments (from tomorrow onwards)
+            tomorrow = today + timedelta(days=1)
+            upcoming_appointments = all_appointments.filter(
+                appointment_date__gte=tomorrow,
+                status__in=['pending', 'confirmed']
+            ).count()
+            
+            # This week's appointments
+            week_end = today + timedelta(days=7)
+            this_week_appointments = all_appointments.filter(
+                appointment_date__gte=today,
+                appointment_date__lt=week_end
+            ).count()
+            
+            # Recent appointments (last 7 days)
+            week_ago = today - timedelta(days=7)
+            recent_appointments = all_appointments.filter(
+                appointment_date__gte=week_ago,
+                appointment_date__lt=today
+            ).count()
+            
+            # Mode-wise statistics
+            online_appointments = all_appointments.filter(mode='online').count()
+            offline_appointments = all_appointments.filter(mode='offline').count()
+            
+            dashboard_data = {
+                'overview': {
+                    'total_appointments': total_appointments,
+                    'pending': pending_count,
+                    'confirmed': confirmed_count,
+                    'completed': completed_count,
+                    'cancelled': cancelled_count,
+                    'online_appointments': online_appointments,
+                    'offline_appointments': offline_appointments,
+                },
+                'today': {
+                    'total': today_total,
+                    'pending': today_pending,
+                    'confirmed': today_confirmed,
+                    'completed': today_completed,
+                },
+                'upcoming': {
+                    'total_upcoming': upcoming_appointments,
+                    'this_week': this_week_appointments,
+                },
+                'recent': {
+                    'last_week': recent_appointments,
+                }
             }
-            logger.debug(f"Appointment statistics: {stats}")
             
-            # Get paginated results
-            page = self.paginate_queryset(queryset)
-            if page is not None:
-                logger.debug(f"Using pagination, page size: {len(page)}")
-                serializer = self.get_serializer(page, many=True)
-                return self.get_paginated_response({
-                    'results': serializer.data,
-                    'statistics': stats
-                })
-            
-            serializer = self.get_serializer(queryset, many=True)
-            logger.info(f"Returning {len(serializer.data)} appointments")
-            return Response({
-                'results': serializer.data,
-                'statistics': stats
-            })
+            return Response(dashboard_data)
             
         except Exception as e:
-            logger.error(f"Error in DoctorAppointmentsView.list: {str(e)}", exc_info=True)
+            logger.error(f"Error in DoctorAppointmentDashboardView: {str(e)}", exc_info=True)
             return Response(
-                {'error': 'Unable to fetch appointments', 'details': str(e)},
+                {'error': 'Unable to fetch dashboard data'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
-class PendingAppointmentRequestsView(ListAPIView):
+class DoctorAppointmentsListView(ListAPIView):
     """
-    List all pending appointment requests for the logged-in doctor
-    These are new appointments that need doctor's approval
+    List all appointments for the doctor with basic filtering
     """
     serializer_class = AppointmentSerializer
     permission_classes = [IsAuthenticated]
     
     def get_queryset(self):
         try:
-            logger.info(f"PendingAppointmentRequestsView - User: {self.request.user.id}")
-            
             # Ensure user is a doctor
             if not hasattr(self.request.user, 'role') or self.request.user.role != 'doctor':
-                logger.warning(f"Non-doctor user {self.request.user.id} trying to access pending appointments")
                 return Appointment.objects.none()
             
-            # Get doctor instance - Updated to use doctor_profile
+            # Get doctor instance
             try:
                 doctor = self.request.user.doctor_profile
-                logger.info(f"Doctor profile found: {doctor.id}")
             except AttributeError:
-                logger.error(f"Doctor profile not found for user {self.request.user.id}")
                 return Appointment.objects.none()
             
-            # Only pending appointments (new requests)
-            queryset = Appointment.objects.filter(
+            # Base queryset
+            queryset = Appointment.objects.filter(doctor=doctor).select_related(
+                'patient__user', 'doctor__user', 'service', 'schedule'
+            ).order_by('-appointment_date', '-slot_time')
+            
+            # Simple filters (let frontend handle complex filtering)
+            status_filter = self.request.query_params.get('status')
+            if status_filter:
+                queryset = queryset.filter(status=status_filter)
+            
+            mode_filter = self.request.query_params.get('mode')
+            if mode_filter:
+                queryset = queryset.filter(mode=mode_filter)
+            
+            return queryset
+            
+        except Exception as e:
+            logger.error(f"Error in DoctorAppointmentsListView: {str(e)}", exc_info=True)
+            return Appointment.objects.none()
+
+
+class PendingAppointmentsView(ListAPIView):
+    """
+    List only pending appointments that need doctor's approval
+    """
+    serializer_class = AppointmentSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        try:
+            # Ensure user is a doctor
+            if not hasattr(self.request.user, 'role') or self.request.user.role != 'doctor':
+                return Appointment.objects.none()
+            
+            # Get doctor instance
+            try:
+                doctor = self.request.user.doctor_profile
+            except AttributeError:
+                return Appointment.objects.none()
+            
+            # Only pending appointments
+            return Appointment.objects.filter(
                 doctor=doctor,
                 status='pending'
             ).select_related(
                 'patient__user', 'doctor__user', 'service', 'schedule'
             ).order_by('appointment_date', 'slot_time')
             
-            logger.info(f"Pending appointments count: {queryset.count()}")
-            return queryset
-            
         except Exception as e:
-            logger.error(f"Error in PendingAppointmentRequestsView.get_queryset: {str(e)}", exc_info=True)
+            logger.error(f"Error in PendingAppointmentsView: {str(e)}", exc_info=True)
             return Appointment.objects.none()
+
+
+class TodayAppointmentsView(ListAPIView):
+    """
+    Get today's appointments for the doctor
+    """
+    serializer_class = AppointmentSerializer
+    permission_classes = [IsAuthenticated]
     
-    def list(self, request, *args, **kwargs):
-        """Override to add count of pending requests"""
+    def get_queryset(self):
         try:
-            logger.info(f"PendingAppointmentRequestsView.list called by user {request.user.id}")
-            queryset = self.get_queryset()
+            # Ensure user is a doctor
+            if not hasattr(self.request.user, 'role') or self.request.user.role != 'doctor':
+                return Appointment.objects.none()
             
-            # Count by urgency/date
+            # Get doctor instance
+            try:
+                doctor = self.request.user.doctor_profile
+            except AttributeError:
+                return Appointment.objects.none()
+            
+            # Today's appointments
             today = date.today()
-            urgent_count = queryset.filter(appointment_date=today).count()
-            
-            # Calculate this week's appointments
-            this_week_count = queryset.filter(
-                appointment_date__gte=today,
-                appointment_date__lt=today + timedelta(days=7)
-            ).count()
-            
-            # Debug: Log summary stats
-            summary = {
-                'total_pending': queryset.count(),
-                'urgent_today': urgent_count,
-                'this_week': this_week_count
-            }
-            logger.debug(f"Pending appointments summary: {summary}")
-            
-            # Get paginated results
-            page = self.paginate_queryset(queryset)
-            if page is not None:
-                serializer = self.get_serializer(page, many=True)
-                return self.get_paginated_response({
-                    'results': serializer.data,
-                    'summary': summary
-                })
-            
-            serializer = self.get_serializer(queryset, many=True)
-            logger.info(f"Returning {len(serializer.data)} pending appointments")
-            return Response({
-                'results': serializer.data,
-                'summary': summary
-            })
+            return Appointment.objects.filter(
+                doctor=doctor,
+                appointment_date=today
+            ).select_related(
+                'patient__user', 'doctor__user', 'service', 'schedule'
+            ).order_by('slot_time')
             
         except Exception as e:
-            logger.error(f"Error in PendingAppointmentRequestsView.list: {str(e)}", exc_info=True)
-            return Response(
-                {'error': 'Unable to fetch pending appointment requests', 'details': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
+            logger.error(f"Error in TodayAppointmentsView: {str(e)}", exc_info=True)
+            return Appointment.objects.none()
 
 
-class AppointmentRequestActionView(APIView):
+class UpcomingAppointmentsView(ListAPIView):
     """
-    Handle appointment request actions (approve/reject)
+    Get upcoming appointments (from tomorrow onwards)
+    """
+    serializer_class = AppointmentSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        try:
+            # Ensure user is a doctor
+            if not hasattr(self.request.user, 'role') or self.request.user.role != 'doctor':
+                return Appointment.objects.none()
+            
+            # Get doctor instance
+            try:
+                doctor = self.request.user.doctor_profile
+            except AttributeError:
+                return Appointment.objects.none()
+            
+            # Upcoming appointments
+            tomorrow = date.today() + timedelta(days=1)
+            return Appointment.objects.filter(
+                doctor=doctor,
+                appointment_date__gte=tomorrow,
+                status__in=['pending', 'confirmed']
+            ).select_related(
+                'patient__user', 'doctor__user', 'service', 'schedule'
+            ).order_by('appointment_date', 'slot_time')
+            
+        except Exception as e:
+            logger.error(f"Error in UpcomingAppointmentsView: {str(e)}", exc_info=True)
+            return Appointment.objects.none()
+
+
+class AppointmentDetailView(APIView):
+    """
+    Get detailed information about a specific appointment
     """
     permission_classes = [IsAuthenticated]
     
-    def post(self, request, appointment_id):
+    def get(self, request, appointment_id):
         try:
-            logger.info(f"AppointmentRequestActionView - User: {request.user.id}, Appointment: {appointment_id}")
-            
             # Ensure user is a doctor
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
-                logger.warning(f"Non-doctor user {request.user.id} trying to handle appointment request")
                 return Response(
-                    {'error': 'Only doctors can handle appointment requests'},
+                    {'error': 'Only doctors can view appointment details'},
                     status=status.HTTP_403_FORBIDDEN
                 )
             
-            # Get doctor instance - Updated to use doctor_profile
+            # Get doctor instance
             try:
                 doctor = request.user.doctor_profile
-                logger.info(f"Doctor profile found: {doctor.id}")
             except AttributeError:
-                logger.error(f"Doctor profile not found for user {request.user.id}")
                 return Response(
                     {'error': 'Doctor profile not found'},
                     status=status.HTTP_404_NOT_FOUND
@@ -2074,29 +2041,65 @@ class AppointmentRequestActionView(APIView):
             
             # Get appointment
             appointment = get_object_or_404(
-                Appointment, 
-                id=appointment_id, 
+                Appointment,
+                id=appointment_id,
                 doctor=doctor
             )
             
-            logger.info(f"Appointment found: {appointment.id}, Status: {appointment.status}")
+            serializer = AppointmentSerializer(appointment)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            logger.error(f"Error in AppointmentDetailView: {str(e)}", exc_info=True)
+            return Response(
+                {'error': 'Unable to fetch appointment details'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class HandleAppointmentRequestView(APIView):
+    """
+    Handle individual appointment request (approve/reject)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, appointment_id):
+        try:
+            # Ensure user is a doctor
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response(
+                    {'error': 'Only doctors can handle appointment requests'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Get doctor instance
+            try:
+                doctor = request.user.doctor_profile
+            except AttributeError:
+                return Response(
+                    {'error': 'Doctor profile not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Get appointment
+            appointment = get_object_or_404(
+                Appointment,
+                id=appointment_id,
+                doctor=doctor
+            )
             
             # Only allow actions on pending appointments
             if appointment.status != 'pending':
-                logger.warning(f"Trying to handle non-pending appointment {appointment.id}, status: {appointment.status}")
                 return Response(
                     {'error': 'Can only handle pending appointment requests'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Get action and reason
+            # Get action
             action = request.data.get('action')  # 'approve' or 'reject'
             reason = request.data.get('reason', '')
             
-            logger.info(f"Action: {action}, Reason: {reason}")
-            
             if action not in ['approve', 'reject']:
-                logger.warning(f"Invalid action: {action}")
                 return Response(
                     {'error': 'Action must be either "approve" or "reject"'},
                     status=status.HTTP_400_BAD_REQUEST
@@ -2104,7 +2107,6 @@ class AppointmentRequestActionView(APIView):
             
             # Check for time conflicts when approving
             if action == 'approve':
-                # Check if this time slot is already confirmed for another appointment
                 conflicting_appointment = Appointment.objects.filter(
                     doctor=doctor,
                     appointment_date=appointment.appointment_date,
@@ -2113,24 +2115,20 @@ class AppointmentRequestActionView(APIView):
                 ).exclude(id=appointment.id).first()
                 
                 if conflicting_appointment:
-                    logger.warning(f"Time conflict detected for appointment {appointment.id}")
                     return Response(
                         {
                             'error': 'Time slot conflict detected',
-                            'message': f'You already have a confirmed appointment at {appointment.appointment_date} {appointment.slot_time}',
-                            'conflicting_appointment_id': conflicting_appointment.id
+                            'message': f'You already have a confirmed appointment at {appointment.appointment_date} {appointment.slot_time}'
                         },
                         status=status.HTTP_409_CONFLICT
                     )
-                else:
-                    logger.info(f"No time conflicts found for appointment {appointment.id}")
             
             # Update appointment status
             new_status = 'confirmed' if action == 'approve' else 'cancelled'
             appointment.status = new_status
             
             # Add action note
-            doctor_name = doctor.user.get_full_name() if doctor.user else 'Unknown Doctor'
+            doctor_name = doctor.user.get_full_name() if doctor.user else 'Doctor'
             action_note = f"[{timezone.now().strftime('%Y-%m-%d %H:%M')}] Request {action}d by Dr. {doctor_name}"
             if reason:
                 action_note += f" - Reason: {reason}"
@@ -2141,13 +2139,10 @@ class AppointmentRequestActionView(APIView):
                 appointment.notes = action_note
             
             appointment.save()
-            logger.info(f"Appointment {appointment.id} status updated to {new_status}")
             
-            # Prepare response message
+            message = f"Appointment request {action}d successfully"
             if action == 'approve':
-                message = f"Appointment request approved and confirmed for {appointment.appointment_date} at {appointment.slot_time}"
-            else:
-                message = f"Appointment request rejected"
+                message += f" and confirmed for {appointment.appointment_date} at {appointment.slot_time}"
             
             serializer = AppointmentSerializer(appointment)
             return Response({
@@ -2156,38 +2151,32 @@ class AppointmentRequestActionView(APIView):
             })
             
         except Exception as e:
-            logger.error(f"Error in AppointmentRequestActionView.post: {str(e)}", exc_info=True)
+            logger.error(f"Error in HandleAppointmentRequestView: {str(e)}", exc_info=True)
             return Response(
-                {'error': 'Unable to process appointment request', 'details': str(e)},
+                {'error': 'Unable to process appointment request'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
 class UpdateAppointmentStatusView(APIView):
     """
-    Update appointment status (confirm, complete, cancel)
-    Only the assigned doctor can update their appointments
+    Update appointment status (complete, cancel, etc.)
     """
     permission_classes = [IsAuthenticated]
     
     def put(self, request, appointment_id):
         try:
-            logger.info(f"UpdateAppointmentStatusView - User: {request.user.id}, Appointment: {appointment_id}")
-            
             # Ensure user is a doctor
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
-                logger.warning(f"Non-doctor user {request.user.id} trying to update appointment status")
                 return Response(
                     {'error': 'Only doctors can update appointment status'},
                     status=status.HTTP_403_FORBIDDEN
                 )
             
-            # Get doctor instance - Updated to use doctor_profile
+            # Get doctor instance
             try:
                 doctor = request.user.doctor_profile
-                logger.info(f"Doctor profile found: {doctor.id}")
             except AttributeError:
-                logger.error(f"Doctor profile not found for user {request.user.id}")
                 return Response(
                     {'error': 'Doctor profile not found'},
                     status=status.HTTP_404_NOT_FOUND
@@ -2195,32 +2184,25 @@ class UpdateAppointmentStatusView(APIView):
             
             # Get appointment
             appointment = get_object_or_404(
-                Appointment, 
-                id=appointment_id, 
+                Appointment,
+                id=appointment_id,
                 doctor=doctor
             )
             
-            logger.info(f"Appointment found: {appointment.id}, Current status: {appointment.status}")
-            
-            # Get new status from request
+            # Get new status
             new_status = request.data.get('status')
             notes = request.data.get('notes', '')
-            
-            logger.info(f"Requested status change to: {new_status}")
             
             # Validate status
             valid_statuses = ['pending', 'confirmed', 'cancelled', 'completed']
             if new_status not in valid_statuses:
-                logger.warning(f"Invalid status: {new_status}")
                 return Response(
                     {'error': f'Invalid status. Must be one of: {valid_statuses}'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Business logic for status transitions
-            current_status = appointment.status
-            
             # Define allowed transitions
+            current_status = appointment.status
             allowed_transitions = {
                 'pending': ['confirmed', 'cancelled'],
                 'confirmed': ['completed', 'cancelled'],
@@ -2229,7 +2211,6 @@ class UpdateAppointmentStatusView(APIView):
             }
             
             if new_status not in allowed_transitions.get(current_status, []):
-                logger.warning(f"Invalid transition from {current_status} to {new_status}")
                 return Response(
                     {
                         'error': f'Cannot change status from {current_status} to {new_status}',
@@ -2237,25 +2218,6 @@ class UpdateAppointmentStatusView(APIView):
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            # Additional validation for completing appointments
-            if new_status == 'completed':
-                # Check if appointment date/time has passed
-                if appointment.appointment_date and appointment.slot_time:
-                    appointment_datetime = datetime.combine(
-                        appointment.appointment_date, 
-                        appointment.slot_time
-                    )
-                    appointment_datetime = timezone.make_aware(appointment_datetime)
-                    
-                    logger.debug(f"Appointment datetime: {appointment_datetime}, Current time: {timezone.now()}")
-                    
-                    if appointment_datetime > timezone.now():
-                        logger.warning(f"Trying to complete future appointment {appointment.id}")
-                        return Response(
-                            {'error': 'Cannot complete future appointments'},
-                            status=status.HTTP_400_BAD_REQUEST
-                        )
             
             # Update appointment
             appointment.status = new_status
@@ -2266,12 +2228,9 @@ class UpdateAppointmentStatusView(APIView):
                     appointment.notes += f"\n{note_text}"
                 else:
                     appointment.notes = note_text
-                logger.debug(f"Added note: {note_text}")
             
             appointment.save()
-            logger.info(f"Appointment {appointment.id} status updated from {current_status} to {new_status}")
             
-            # Serialize and return updated appointment
             serializer = AppointmentSerializer(appointment)
             return Response({
                 'message': f'Appointment status updated to {new_status}',
@@ -2279,37 +2238,32 @@ class UpdateAppointmentStatusView(APIView):
             })
             
         except Exception as e:
-            logger.error(f"Error in UpdateAppointmentStatusView.put: {str(e)}", exc_info=True)
+            logger.error(f"Error in UpdateAppointmentStatusView: {str(e)}", exc_info=True)
             return Response(
-                {'error': 'Unable to update appointment status', 'details': str(e)},
+                {'error': 'Unable to update appointment status'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
 
-class DoctorAppointmentDetailView(APIView):
+class RescheduleAppointmentView(APIView):
     """
-    Get detailed information about a specific appointment
+    Reschedule an appointment to a new date/time
     """
     permission_classes = [IsAuthenticated]
     
-    def get(self, request, appointment_id):
+    def post(self, request, appointment_id):
         try:
-            logger.info(f"DoctorAppointmentDetailView - User: {request.user.id}, Appointment: {appointment_id}")
-            
             # Ensure user is a doctor
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
-                logger.warning(f"Non-doctor user {request.user.id} trying to view appointment details")
                 return Response(
-                    {'error': 'Only doctors can view appointment details'},
+                    {'error': 'Only doctors can reschedule appointments'},
                     status=status.HTTP_403_FORBIDDEN
                 )
             
-            # Get doctor instance - Updated to use doctor_profile
+            # Get doctor instance
             try:
                 doctor = request.user.doctor_profile
-                logger.info(f"Doctor profile found: {doctor.id}")
             except AttributeError:
-                logger.error(f"Doctor profile not found for user {request.user.id}")
                 return Response(
                     {'error': 'Doctor profile not found'},
                     status=status.HTTP_404_NOT_FOUND
@@ -2317,164 +2271,39 @@ class DoctorAppointmentDetailView(APIView):
             
             # Get appointment
             appointment = get_object_or_404(
-                Appointment, 
-                id=appointment_id, 
+                Appointment,
+                id=appointment_id,
                 doctor=doctor
             )
             
-            logger.info(f"Appointment found: {appointment.id}, Status: {appointment.status}")
+            # Check if appointment can be rescheduled
+            if appointment.status not in ['pending', 'confirmed']:
+                return Response(
+                    {'error': 'Cannot reschedule cancelled or completed appointments'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
-            serializer = AppointmentSerializer(appointment)
-            return Response(serializer.data)
+            # Get new date and time
+            new_date = request.data.get('appointment_date')
+            new_time = request.data.get('slot_time')
+            reason = request.data.get('reason', '')
             
-        except Exception as e:
-            logger.error(f"Error in DoctorAppointmentDetailView.get: {str(e)}", exc_info=True)
-            return Response(
-                {'error': 'Unable to fetch appointment details', 'details': str(e)},
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
-# Additional utility function for debugging
-def debug_user_permissions(user):
-    """Helper function to debug user permissions and attributes"""
-    debug_info = {
-        'user_id': user.id,
-        'username': user.username,
-        'is_authenticated': user.is_authenticated,
-        'has_role': hasattr(user, 'role'),
-        'role': getattr(user, 'role', None),
-        'has_doctor_profile': hasattr(user, 'doctor_profile'),
-        'user_type': type(user).__name__,
-        'user_attributes': [attr for attr in dir(user) if not attr.startswith('_')]
-    }
-    
-    try:
-        if hasattr(user, 'doctor_profile'):
-            debug_info['doctor_profile_id'] = user.doctor_profile.id
-    except AttributeError:
-        debug_info['doctor_profile_error'] = 'AttributeError when accessing doctor_profile'
-    
-    logger.debug(f"User debug info: {debug_info}")
-    return debug_info
-
-
+            if not new_date or not new_time:
+                return Response(
+                    {'error': 'Both new date and time are required'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
-class DoctorTodayAppointmentsView(ListAPIView):
-    """
-    Get today's appointments for the logged-in doctor
-    """
-    serializer_class = AppointmentSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        # Ensure user is a doctor
-        if self.request.user.role != 'doctor':
-            return Appointment.objects.none()
-        
-        # Get doctor instance
-        try:
-            doctor = Doctor.objects.get(user=self.request.user)
-        except Doctor.DoesNotExist:
-            return Appointment.objects.none()
-        
-        # Today's appointments
-        today = date.today()
-        return Appointment.objects.filter(
-            doctor=doctor,
-            appointment_date=today
-        ).select_related(
-            'patient__user', 'doctor__user', 'service', 'schedule'
-        ).order_by('slot_time')
-
-
-class DoctorUpcomingAppointmentsView(ListAPIView):
-    """
-    Get upcoming appointments for the logged-in doctor
-    """
-    serializer_class = AppointmentSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
-        # Ensure user is a doctor
-        if self.request.user.role != 'doctor':
-            return Appointment.objects.none()
-        
-        # Get doctor instance
-        try:
-            doctor = Doctor.objects.get(user=self.request.user)
-        except Doctor.DoesNotExist:
-            return Appointment.objects.none()
-        
-        # Upcoming appointments (today and future)
-        today = date.today()
-        return Appointment.objects.filter(
-            doctor=doctor,
-            appointment_date__gte=today,
-            status__in=['pending', 'confirmed']
-        ).select_related(
-            'patient__user', 'doctor__user', 'service', 'schedule'
-        ).order_by('appointment_date', 'slot_time')
-
-
-class RescheduleAppointmentView(APIView):
-    """
-    Reschedule an appointment (doctor side)
-    """
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request, appointment_id):
-        # Ensure user is a doctor
-        if request.user.role != 'doctor':
-            return Response(
-                {'error': 'Only doctors can reschedule appointments'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        # Get doctor instance
-        try:
-            doctor = Doctor.objects.get(user=request.user)
-        except Doctor.DoesNotExist:
-            return Response(
-                {'error': 'Doctor profile not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # Get appointment
-        appointment = get_object_or_404(
-            Appointment, 
-            id=appointment_id, 
-            doctor=doctor
-        )
-        
-        # Check if appointment can be rescheduled
-        if appointment.status not in ['pending', 'confirmed']:
-            return Response(
-                {'error': 'Cannot reschedule cancelled or completed appointments'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        # Get new date and time
-        new_date = request.data.get('appointment_date')
-        new_time = request.data.get('slot_time')
-        reason = request.data.get('reason', '')
-        
-        if not new_date or not new_time:
-            return Response(
-                {'error': 'Both new date and time are required'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        try:
-            # Parse new date
-            new_date = datetime.strptime(new_date, '%Y-%m-%d').date()
-            
-            # Parse new time
-            if isinstance(new_time, str):
-                if 'AM' in new_time.upper() or 'PM' in new_time.upper():
-                    new_time = datetime.strptime(new_time, '%I:%M %p').time()
-                else:
+            # Parse new date and time
+            try:
+                new_date = datetime.strptime(new_date, '%Y-%m-%d').date()
+                if isinstance(new_time, str):
                     new_time = datetime.strptime(new_time, '%H:%M').time()
+            except ValueError as e:
+                return Response(
+                    {'error': f'Invalid date/time format: {str(e)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
             # Validate new datetime is in the future
             new_datetime = datetime.combine(new_date, new_time)
@@ -2525,123 +2354,9 @@ class RescheduleAppointmentView(APIView):
                 'appointment': serializer.data
             })
             
-        except ValueError as e:
-            return Response(
-                {'error': f'Invalid date/time format: {str(e)}'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
         except Exception as e:
+            logger.error(f"Error in RescheduleAppointmentView: {str(e)}", exc_info=True)
             return Response(
-                {'error': f'Error rescheduling appointment: {str(e)}'},
+                {'error': 'Unable to reschedule appointment'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            
-
-class BulkAppointmentRequestActionView(APIView):
-    """
-    Handle multiple appointment requests at once
-    """
-    permission_classes = [IsAuthenticated]
-    
-    def post(self, request):
-        # Ensure user is a doctor
-        if request.user.role != 'doctor':
-            return Response(
-                {'error': 'Only doctors can handle appointment requests'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
-        # Get doctor instance
-        try:
-            doctor = Doctor.objects.get(user=request.user)
-        except Doctor.DoesNotExist:
-            return Response(
-                {'error': 'Doctor profile not found'},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # Get bulk actions data
-        actions = request.data.get('actions', [])
-        # Expected format: [{'appointment_id': 1, 'action': 'approve', 'reason': 'optional'}, ...]
-        
-        if not actions:
-            return Response(
-                {'error': 'No actions provided'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        results = []
-        conflicts = []
-        
-        for action_data in actions:
-            appointment_id = action_data.get('appointment_id')
-            action = action_data.get('action')
-            reason = action_data.get('reason', '')
-            
-            try:
-                appointment = Appointment.objects.get(
-                    id=appointment_id, 
-                    doctor=doctor,
-                    status='pending'
-                )
-                
-                # Check for conflicts if approving
-                if action == 'approve':
-                    conflicting = Appointment.objects.filter(
-                        doctor=doctor,
-                        appointment_date=appointment.appointment_date,
-                        slot_time=appointment.slot_time,
-                        status='confirmed'
-                    ).exclude(id=appointment.id).exists()
-                    
-                    if conflicting:
-                        conflicts.append({
-                            'appointment_id': appointment_id,
-                            'error': 'Time slot conflict',
-                            'date': str(appointment.appointment_date),
-                            'time': str(appointment.slot_time)
-                        })
-                        continue
-                
-                # Update appointment
-                new_status = 'confirmed' if action == 'approve' else 'cancelled'
-                appointment.status = new_status
-                
-                # Add note
-                action_note = f"[{timezone.now().strftime('%Y-%m-%d %H:%M')}] Request {action}d by Dr. {doctor.user.get_full_name()}"
-                if reason:
-                    action_note += f" - Reason: {reason}"
-                
-                if appointment.notes:
-                    appointment.notes += f"\n{action_note}"
-                else:
-                    appointment.notes = action_note
-                
-                appointment.save()
-                
-                results.append({
-                    'appointment_id': appointment_id,
-                    'action': action,
-                    'status': 'success',
-                    'new_status': new_status
-                })
-                
-            except Appointment.DoesNotExist:
-                results.append({
-                    'appointment_id': appointment_id,
-                    'action': action,
-                    'status': 'error',
-                    'error': 'Appointment not found or not pending'
-                })
-        
-        return Response({
-            'message': f'Processed {len(results)} appointment requests',
-            'results': results,
-            'conflicts': conflicts,
-            'summary': {
-                'total_processed': len(results),
-                'successful': len([r for r in results if r['status'] == 'success']),
-                'failed': len([r for r in results if r['status'] == 'error']),
-                'conflicts': len(conflicts)
-            }
-        })

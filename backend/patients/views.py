@@ -9,6 +9,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 
+
+from math import radians, cos, sin, asin, sqrt
 from datetime import datetime
 
 from django.http import Http404
@@ -20,6 +22,10 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import AuthenticationFailed
+
+
+
+import traceback
 
 
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -55,11 +61,11 @@ from patients.serializers import (
     MedicalRecordSerializer,
     BookingDoctorDetailSerializer,
     PaymentSerializer,
-    AppointmentLocationSerializer,
+    
     PatientLocationSerializer,
     DoctorLocationSerializer,
     PatientLocationUpdateSerializer,
-    PatientLocationSerializer,
+    
 )
 
 # Logger setup
@@ -451,7 +457,7 @@ class UserProfileView(APIView):
     
     def get(self, request):
         try:
-            print("🔍 Request User:", request.user)
+            print(" Request User:", request.user)
             serializer = UserProfileSerializer(request.user)
             return Response({
                 'success': True,
@@ -1632,6 +1638,12 @@ class PaymentView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
 
+
+
+
+# Set up logger
+logger = logging.getLogger(__name__)
+
 class UpdatePatientLocationView(generics.CreateAPIView):
     """POST /patients/location/update/"""
     serializer_class = PatientLocationUpdateSerializer
@@ -1639,57 +1651,119 @@ class UpdatePatientLocationView(generics.CreateAPIView):
     
     def get_patient(self):
         """Get the patient instance for the authenticated user"""
-        return self.request.user.patient_profile 
+        logger.debug(f"Getting patient for user: {self.request.user.id}")
+        try:
+            patient = self.request.user.patient_profile
+            logger.debug(f"Patient found: {patient.id}")
+            return patient
+        except Exception as e:
+            logger.error(f"Error getting patient: {str(e)}")
+            raise
     
     def perform_create(self, serializer):
+        logger.debug("Starting perform_create")
         patient = self.get_patient()
-        location_data = serializer.validated_data
         
-        with transaction.atomic():
-            # Check if location with same coordinates already exists
-            existing_location = PatientLocation.objects.filter(
-                patient=patient,
-                latitude=location_data.get('latitude'),
-                longitude=location_data.get('longitude'),
-                # Add other identifying fields if needed
-                # address=location_data.get('address'),
-            ).first()
-            
-            if existing_location:
-                # Update existing location to current and update other fields
-                PatientLocation.objects.filter(
-                    patient=patient, 
-                    is_current=True
-                ).update(is_current=False)
-                
-                # Update the existing location
-                for field, value in location_data.items():
-                    setattr(existing_location, field, value)
-                existing_location.is_current = True
-                existing_location.save()
-            else:
-                # Set all existing locations to not current
-                PatientLocation.objects.filter(
-                    patient=patient, 
-                    is_current=True
-                ).update(is_current=False)
-                
-                # Create new location
-                serializer.save(patient=patient)
-
-
-class PatientLocationHistoryView(generics.ListAPIView):
-    """GET /patients/location/history/"""
-    serializer_class = PatientLocationSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_queryset(self):
         try:
-            patient = self.request.user.patient_profile  
-        except Patient.DoesNotExist:
-            return PatientLocation.objects.none()
+            with transaction.atomic():
+                # Get existing location
+                existing_location = PatientLocation.objects.filter(patient=patient).first()
+                
+                if existing_location:
+                    logger.debug(f"Found existing location for patient {patient.id}, updating it")
+                    # Update existing location instead of creating new one
+                    for field, value in serializer.validated_data.items():
+                        setattr(existing_location, field, value)
+                    existing_location.save()
+                    self._updated_location = existing_location
+                    logger.debug(f"Updated existing location with ID: {existing_location.id}")
+                else:
+                    # Create new location
+                    logger.debug(f"Creating new location with data: {serializer.validated_data}")
+                    new_location = serializer.save(patient=patient)
+                    logger.debug(f"New location created with ID: {new_location.id}")
+                    self._updated_location = new_location
+                
+        except Exception as e:
+            logger.error(f"Error in perform_create: {str(e)}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            raise
+    
+    def create(self, request, *args, **kwargs):
+        """Override create to provide custom response messages"""
+        logger.debug("="*50)
+        logger.debug("UpdatePatientLocationView.create() called")
+        logger.debug(f"User: {request.user.id} ({request.user.username})")
+        logger.debug(f"Request data: {request.data}")
+        
+        try:
+            # Check if user is authenticated
+            if not request.user.is_authenticated:
+                logger.error("User is not authenticated")
+                return Response({
+                    'message': 'Authentication required.',
+                    'data': None
+                }, status=status.HTTP_401_UNAUTHORIZED)
             
-        return PatientLocation.objects.filter(patient=patient)
+            # Check if user has patient profile
+            try:
+                patient = request.user.patient_profile
+                logger.debug(f"Patient profile found: {patient.id}")
+            except Exception as e:
+                logger.error(f"No patient profile found: {str(e)}")
+                return Response({
+                    'message': 'Patient profile not found for this user.',
+                    'data': None
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Validate serializer
+            logger.debug("Validating serializer data...")
+            serializer = self.get_serializer(data=request.data)
+            
+            if not serializer.is_valid():
+                logger.error(f"Serializer validation failed: {serializer.errors}")
+                return Response({
+                    'message': 'Invalid data provided.',
+                    'data': None,
+                    'errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            logger.debug(f"Serializer validated. Clean data: {serializer.validated_data}")
+            
+            # Perform the create logic
+            logger.debug("Calling perform_create...")
+            self.perform_create(serializer)
+            
+            # Get the location data for response
+            logger.debug("Preparing response data...")
+            location_data = PatientLocationSerializer(self._updated_location).data
+            logger.debug(f"Location data prepared: {location_data}")
+            
+            response_data = {
+                'message': 'Location updated successfully.',
+                'data': location_data
+            }
+            
+            logger.debug(f"Success! Returning response: {response_data}")
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except ValidationError as e:
+            logger.error(f"Validation error: {str(e)}")
+            return Response({
+                'message': 'Validation error occurred.',
+                'data': None,
+                'errors': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in create(): {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return Response({
+                'message': 'An unexpected error occurred.',
+                'data': None,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class CurrentPatientLocationView(generics.RetrieveAPIView):
     """GET /patients/location/current/"""
@@ -1697,84 +1771,200 @@ class CurrentPatientLocationView(generics.RetrieveAPIView):
     permission_classes = [IsAuthenticated]
     
     def get_object(self):
+        logger.debug("Getting current location object")
         try:
-            patient = self.request.user.patient_profile  
-        except Patient.DoesNotExist:
+            patient = self.request.user.patient_profile
+            logger.debug(f"Patient found: {patient.id}")
+        except Exception as e:
+            logger.error(f"Patient profile not found: {str(e)}")
             raise Http404("Patient profile not found for this user")
-            
-        location = PatientLocation.objects.filter(
-            patient=patient,
-            is_current=True
-        ).first()
+        
+        location = PatientLocation.objects.filter(patient=patient).first()
         
         if not location:
-            raise Http404("No current location found for this patient")
+            logger.warning(f"No location found for patient {patient.id}")
+            raise Http404("No location found for this patient")
+        
+        logger.debug(f"Location found: {location.id}")
+        return location
+    
+    def retrieve(self, request, *args, **kwargs):
+        """Override retrieve to provide custom response format"""
+        logger.debug("="*50)
+        logger.debug("CurrentPatientLocationView.retrieve() called")
+        logger.debug(f"User: {request.user.id} ({request.user.username})")
+        
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance)
             
-        return location
+            response_data = {
+                'message': 'Current location retrieved successfully.',
+                'data': serializer.data
+            }
+            
+            logger.debug(f"Success! Returning: {response_data}")
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Http404 as e:
+            logger.warning(f"404 error: {str(e)}")
+            return Response({
+                'message': str(e),
+                'data': None
+            }, status=status.HTTP_404_NOT_FOUND)
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in retrieve(): {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return Response({
+                'message': 'An unexpected error occurred.',
+                'data': None,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-# Alternative approach using get_object_or_404 (cleaner)
-class CurrentPatientLocationViewAlternative(generics.RetrieveAPIView):
-    """GET /patients/location/current/ - Alternative implementation"""
-    serializer_class = PatientLocationSerializer
-    permission_classes = [IsAuthenticated]
-    
-    def get_object(self):
-        # Get patient or raise 404
-        patient = get_object_or_404(Patient, user=self.request.user)
-        
-        # Get current location or raise 404
-        location = get_object_or_404(
-            PatientLocation,
-            patient=patient,
-            is_current=True
-        )
-        
-        return location
-    
+
 class SearchNearbyDoctorsView(generics.ListAPIView):
-    """GET /search/nearby-doctors/?latitude=...&longitude=...&radius=..."""
+    """GET /search/nearby-doctors/ - Find nearby doctors based on patient location"""
     serializer_class = DoctorLocationSerializer
     permission_classes = [IsAuthenticated]
     
-    def list(self, request, *args, **kwargs):
-        latitude = float(request.GET.get('latitude'))
-        longitude = float(request.GET.get('longitude'))
-        radius = float(request.GET.get('radius', 10))
-        
-        # Get all active doctor locations
-        doctor_locations = DoctorLocation.objects.filter(
-            is_active=True,
-            doctor__is_active=True
-        )
-        
-        # Calculate distances and filter by radius
-        nearby_locations = []
-        for location in doctor_locations:
-            distance = location.calculate_distance_to(latitude, longitude)
-            if distance <= radius:
-                location.distance = distance
-                nearby_locations.append(location)
-        
-        # Sort by distance
-        nearby_locations.sort(key=lambda x: x.distance)
-        
-        serializer = self.get_serializer(nearby_locations, many=True)
-        return Response({
-            'count': len(nearby_locations),
-            'results': serializer.data
-        })
-
-class AppointmentLocationDetailView(generics.RetrieveAPIView):
-    """GET /appointments/<int:pk>/location/"""
-    serializer_class = AppointmentLocationSerializer
-    permission_classes = [IsAuthenticated]
+    def calculate_distance(self, lat1, lng1, lat2, lng2):
+        """Calculate distance between two coordinates using Haversine formula"""
+        try:
+            lat1, lng1, lat2, lng2 = map(radians, [float(lat1), float(lng1), float(lat2), float(lng2)])
+            dlng = lng2 - lng1
+            dlat = lat2 - lat1
+            a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlng/2)**2
+            c = 2 * asin(sqrt(a))
+            r = 6371  # Earth's radius in km
+            return c * r
+        except (ValueError, TypeError) as e:
+            logger.error(f"Error in distance calculation: {str(e)}")
+            return float('inf')
     
-    def get_object(self):
-        appointment = get_object_or_404(Appointment, pk=self.kwargs['pk'])
+    def list(self, request, *args, **kwargs):
+        logger.debug("SearchNearbyDoctorsView.list() called")
+        logger.debug(f"User: {request.user.id} ({request.user.username})")
         
-        # Check permission
-        if (self.request.user.patient == appointment.patient or 
-            self.request.user.doctor == appointment.doctor):
-            return appointment
-        
-        return None
+        try:
+            # Get patient's current location
+            try:
+                patient = request.user.patient_profile
+                patient_location = PatientLocation.objects.filter(patient=patient).first()
+                
+                if not patient_location:
+                    logger.warning(f"No location found for patient {patient.id}")
+                    return Response({
+                        'message': 'Please update your location first to find nearby doctors.',
+                        'data': [],
+                        'count': 0
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                patient_lat = float(patient_location.latitude)
+                patient_lng = float(patient_location.longitude)
+                logger.debug(f"Patient location: {patient_lat}, {patient_lng}")
+                
+            except Patient.DoesNotExist:
+                logger.error("Patient profile not found")
+                return Response({
+                    'message': 'Patient profile not found.',
+                    'data': [],
+                    'count': 0
+                }, status=status.HTTP_404_NOT_FOUND)
+            except Exception as e:
+                logger.error(f"Error getting patient location: {str(e)}")
+                return Response({
+                    'message': 'Unable to get your location. Please update your location first.',
+                    'data': [],
+                    'count': 0,
+                    'error': str(e)
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get radius parameter
+            try:
+                radius = float(request.GET.get('radius', 10))
+                if radius <= 0:
+                    radius = 10
+            except (ValueError, TypeError):
+                radius = 10
+            
+            logger.debug(f"Searching within {radius}km radius")
+            
+            
+            try:
+                doctor_locations = DoctorLocation.objects.filter(
+                    doctor__user__is_active=True  # Filter by user's active status
+                ).select_related('doctor', 'doctor__user')
+                
+                
+                
+            except Exception as query_error:
+                logger.error(f"Error in doctor query: {str(query_error)}")
+                # Fallback to even simpler query
+                doctor_locations = DoctorLocation.objects.select_related(
+                    'doctor', 'doctor__user'
+                )
+            
+            logger.debug(f"Found {doctor_locations.count()} total doctor locations")
+            
+            # Calculate distances and filter by radius
+            nearby_locations = []
+            for location in doctor_locations:
+                try:
+                    # Skip if doctor or user is None
+                    if not location.doctor or not location.doctor.user:
+                        continue
+                    
+                    # Skip if user is not active
+                    if not location.doctor.user.is_active:
+                        continue
+                        
+                    distance = self.calculate_distance(
+                        patient_lat, patient_lng,
+                        location.latitude, location.longitude
+                    )
+                    
+                    if distance <= radius:
+                        location.distance = round(distance, 2)
+                        nearby_locations.append(location)
+                        logger.debug(f"Doctor {location.doctor.user.username} - {distance:.2f}km away")
+                    else:
+                        logger.debug(f"Doctor {location.doctor.user.username} - {distance:.2f}km away (outside radius)")
+                        
+                except Exception as e:
+                    logger.error(f"Error calculating distance for doctor {location.id}: {str(e)}")
+                    continue
+            
+            # Sort by distance
+            nearby_locations.sort(key=lambda x: getattr(x, 'distance', float('inf')))
+            
+            logger.debug(f"Found {len(nearby_locations)} doctors within {radius}km")
+            
+            # Serialize the data
+            serializer = self.get_serializer(nearby_locations, many=True)
+            
+            response_data = {
+                'message': f'Found {len(nearby_locations)} doctors within {radius}km of your location.',
+                'count': len(nearby_locations),
+                'radius': radius,
+                'patient_location': {
+                    'latitude': patient_lat,
+                    'longitude': patient_lng
+                },
+                'data': serializer.data
+            }
+            
+            logger.debug(f"Success! Returning {len(nearby_locations)} nearby doctors")
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Unexpected error in SearchNearbyDoctorsView: {str(e)}")
+            logger.error(f"Full traceback: {traceback.format_exc()}")
+            return Response({
+                'message': 'An unexpected error occurred while searching for nearby doctors.',
+                'data': [],
+                'count': 0,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+                

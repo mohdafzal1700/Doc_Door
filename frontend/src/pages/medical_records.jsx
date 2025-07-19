@@ -35,6 +35,7 @@ const MedicalRecordForm = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasExistingRecord, setHasExistingRecord] = useState(false);
+  const [medicalRecordId, setMedicalRecordId] = useState(null); // Add this state
 
   // Field configuration
   const fieldConfig = [
@@ -85,10 +86,14 @@ const MedicalRecordForm = () => {
       const response = await getMedicalRecord();
       if (response.data?.data) {
         setHasExistingRecord(true);
+        setMedicalRecordId(response.data.data.id); // Store the UUID
         setFormData(prev => ({
           ...prev,
           ...response.data.data
         }));
+        
+        // Store in localStorage for other components to access
+        localStorage.setItem('medicalRecordId', response.data.data.id);
       }
     } catch (error) {
       if (error.response?.status !== 404) {
@@ -129,13 +134,20 @@ const MedicalRecordForm = () => {
         cleanedData[field.id] = (formData[field.id] || '').trim();
       });
 
+      let response;
       if (hasExistingRecord) {
-        await updateMedicalRecord(cleanedData);
+        response = await updateMedicalRecord(cleanedData);
         showToast('success', 'Success', 'Medical record updated successfully');
       } else {
-        await createMedicalRecord(cleanedData);
+        response = await createMedicalRecord(cleanedData);
         showToast('success', 'Success', 'Medical record created successfully');
         setHasExistingRecord(true);
+        
+        // Store the new medical record ID
+        if (response.data?.data?.id) {
+          setMedicalRecordId(response.data.data.id);
+          localStorage.setItem('medicalRecordId', response.data.data.id);
+        }
       }
     } catch (error) {
       const errorMsg = error.response?.data?.message || 

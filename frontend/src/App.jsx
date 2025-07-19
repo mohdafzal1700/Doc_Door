@@ -33,6 +33,8 @@ import AppointmentBooking from "./pages/BookAppointmentPage "
 import MyAppointments from "./pages/MyAppoinments"
 import AppointmentRequestsPage from "./doctor/pages/appointment-requests"
 import DoctorDashboard from "./doctor/pages/appoinment-page"
+import FindDoctorPage from "./pages/FindDoctorPage"
+import NearbyDoctorFinder from "./doctor/pages/NearbyDoctorFinder "
 
 
 
@@ -74,6 +76,8 @@ function App() {
         <Route path='/patient/myAppointments' element={<MyAppointments />} />
         <Route path='/doctor/appointmentsRequest' element={<AppointmentRequestsPage/>} />
         <Route path='/doctor/appointmentsPage' element={<DoctorDashboard/>} />
+        <Route path='/patient/findDoctor' element={<FindDoctorPage/>} />
+        <Route path='/patient/nearbyDoctorFinder' element={<NearbyDoctorFinder/>} />
 
         
         

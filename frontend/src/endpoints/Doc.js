@@ -666,9 +666,21 @@ export const deleteDoctorLocation = async (locationId) => {
     }
 };
 
-export const getDoctorAppointments = async () => {
+
+export const getDoctorAppointmentDashboard = async () => {
     try {
-        const response = await axios.get('appointments/');
+        const response = await axios.get('appointments/dashboard/');
+        return response;
+    } catch (error) {
+        console.error("Error fetching doctor appointment dashboard:", error);
+        throw error;
+    }
+};
+
+// Get doctor appointments list
+export const getDoctorAppointments = async (params = {}) => {
+    try {
+        const response = await axios.get('appointments/', { params });
         return response;
     } catch (error) {
         console.error("Error fetching doctor appointments:", error);
@@ -679,7 +691,7 @@ export const getDoctorAppointments = async () => {
 // Get pending appointment requests
 export const getPendingAppointmentRequests = async () => {
     try {
-        const response = await axios.get('appointments/requests/');
+        const response = await axios.get('appointments/pending/');
         return response;
     } catch (error) {
         console.error("Error fetching pending appointment requests:", error);
@@ -743,35 +755,10 @@ export const appointmentRequestAction = async (appointmentId, data) => {
             }
         });
 
-        const response = await axios.post(`appointments/${appointmentId}/action/`, payload);
+        const response = await axios.post(`appointments/${appointmentId}/handle/`, payload);
         return response;
     } catch (error) {
         console.error("Error processing appointment request action:", error);
-        throw error;
-    }
-};
-
-// Bulk appointment request action
-export const bulkAppointmentRequestAction = async (data) => {
-    try {
-        const payload = {
-            appointment_ids: data.appointment_ids, // Array of appointment IDs
-            action: data.action, // 'approve' or 'reject'
-            reason: data.reason, // Optional reason for bulk action
-            ...data // Include any other fields
-        };
-
-        // Remove empty values
-        Object.keys(payload).forEach(key => {
-            if (payload[key] === undefined || payload[key] === '' || payload[key] === null) {
-                delete payload[key];
-            }
-        });
-
-        const response = await axios.post('appointments/bulk-action/', payload);
-        return response;
-    } catch (error) {
-        console.error("Error processing bulk appointment action:", error);
         throw error;
     }
 };
@@ -796,7 +783,7 @@ export const updateAppointmentStatus = async (appointmentId, data) => {
             }
         });
 
-        const response = await axios.patch(`appointments/${appointmentId}/status/`, payload);
+        const response = await axios.put(`appointments/${appointmentId}/status/`, payload);
         return response;
     } catch (error) {
         console.error("Error updating appointment status:", error);
@@ -812,21 +799,20 @@ export const rescheduleAppointment = async (appointmentId, data) => {
         }
 
         const payload = {
-            new_date: data.new_date,
-            new_time: data.new_time,
-            new_slot_id: data.new_slot_id, 
-            reason: data.reason, 
+            appointment_date: data.appointment_date, // Updated field name to match backend
+            slot_time: data.slot_time, // Updated field name to match backend
+            reason: data.reason, // Optional reason for reschedule
             ...data 
         };
 
-    
+        // Remove empty values
         Object.keys(payload).forEach(key => {
             if (payload[key] === undefined || payload[key] === '' || payload[key] === null) {
                 delete payload[key];
             }
         });
 
-        const response = await axios.patch(`appointments/${appointmentId}/reschedule/`, payload);
+        const response = await axios.post(`appointments/${appointmentId}/reschedule/`, payload);
         return response;
     } catch (error) {
         console.error("Error rescheduling appointment:", error);

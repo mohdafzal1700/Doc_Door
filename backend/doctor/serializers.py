@@ -166,6 +166,7 @@ class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
             logger.error(f"Error generating token for user {user.email}: {str(e)}")
             raise
         
+        
 class DoctorProfileSerializer(serializers.ModelSerializer):
     """Serializer for doctor profile (User + Doctor)"""
 

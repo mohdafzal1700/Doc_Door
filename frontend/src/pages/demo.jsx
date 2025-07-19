@@ -1,428 +1,331 @@
-// import { useState, useEffect, useCallback } from "react"
-// import { ArrowLeft, Save, X, User, Mail, Phone, MapPin, Calendar, Heart } from 'lucide-react'
-// import Button from "../components/ui/Button"
-// import Header from "../components/home/Header"
-// import { useNavigate, useLocation } from "react-router-dom"
-// import { getUserProfile, updateUserProfile } from "../endpoints/APIs"
-
-// const EditProfile = () => {
-//     const navigate = useNavigate()
-//     const location = useLocation()
-//     const [user, setUser] = useState(null)
-//     const [loading, setLoading] = useState(true)
-//     const [error, setError] = useState(null)
-//     const [updateLoading, setUpdateLoading] = useState(false)
-//     const [formData, setFormData] = useState({
-//         first_name: '',
-//         last_name: '',
-//         email: '',
-//         phone: '',
-//         gender: '',
-//         age: '',
-//         bloodGroup: '',
-//         address: {
-//             street1: '',
-//             street2: '',
-//             city: '',
-//             state: '',
-//             zipCode: '',
-//             country: ''
-//         }
-//     })
-
-//     // Initialize form data from location state or fetch from API
-//     useEffect(() => {
-//         const initializeData = async () => {
-//             try {
-//                 setLoading(true)
-//                 setError(null)
+// class UpdatePatientLocationView(generics.CreateAPIView):
+//     """POST /patients/location/update/"""
+//     serializer_class = PatientLocationUpdateSerializer
+//     permission_classes = [IsAuthenticated]
+    
+//     def get_patient(self):
+//         """Get the patient instance for the authenticated user"""
+//         logger.debug(f"🔍 Getting patient for user: {self.request.user.id}")
+//         try:
+//             patient = self.request.user.patient_profile
+//             logger.debug(f"✅ Patient found: {patient.id}")
+//             return patient
+//         except Exception as e:
+//             logger.error(f"❌ Error getting patient: {str(e)}")
+//             raise
+    
+//     def perform_create(self, serializer):
+//         logger.debug("🚀 Starting perform_create")
+//         patient = self.get_patient()
+        
+//         try:
+//             with transaction.atomic():
+//                 # Delete existing location if any
+//                 existing_count = PatientLocation.objects.filter(patient=patient).count()
+//                 logger.debug(f"📊 Found {existing_count} existing locations for patient {patient.id}")
                 
-//                 let userData = location?.state?.user
+//                 if existing_count > 0:
+//                     deleted_count = PatientLocation.objects.filter(patient=patient).delete()[0]
+//                     logger.debug(f"🗑️ Deleted {deleted_count} existing locations")
                 
-//                 if (!userData) {
-//                     // Fetch user data if not provided in location state
-//                     const response = await getUserProfile()
-//                     if (response.data.success) {
-//                         userData = response.data.data
-//                     } else {
-//                         setError(response.data.message || 'Failed to load profile')
-//                         return
-//                     }
-//                 }
+//                 # Create new location
+//                 logger.debug(f"📍 Creating new location with data: {serializer.validated_data}")
+//                 new_location = serializer.save(patient=patient)
+//                 logger.debug(f"✅ New location created with ID: {new_location.id}")
                 
-//                 setUser(userData)
-//                 setFormData({
-//                     first_name: userData.first_name || '',
-//                     last_name: userData.last_name || '',
-//                     email: userData.email || '',
-//                     phone: userData.phone || '',
-//                     gender: userData.gender || '',
-//                     age: userData.age || '',
-//                     bloodGroup: userData.bloodGroup || '',
-//                     address: {
-//                         street1: userData.address?.street1 || '',
-//                         street2: userData.address?.street2 || '',
-//                         city: userData.address?.city || '',
-//                         state: userData.address?.state || '',
-//                         zipCode: userData.address?.zipCode || '',
-//                         country: userData.address?.country || ''
-//                     }
-//                 })
-//             } catch (error) {
-//                 console.error("Error fetching user profile:", error)
-//                 setError('Failed to load profile data')
-//             } finally {
-//                 setLoading(false)
-//             }
-//         }
-
-//         initializeData()
-//     }, [location])
-
-//     const handleBack = () => navigate("/patientprofile")
-
-//     // Memoized input change handler to prevent unnecessary re-renders
-//     const handleInputChange = useCallback((field, value) => {
-//         setFormData(prev => {
-//             if (field.includes('.')) {
-//                 // Handle nested fields like address.street1
-//                 const [parent, child] = field.split('.')
-//                 return {
-//                     ...prev,
-//                     [parent]: {
-//                         ...prev[parent],
-//                         [child]: value
-//                     }
-//                 }
-//             } else {
-//                 return {
-//                     ...prev,
-//                     [field]: value
-//                 }
-//             }
-//         })
-//     }, [])
-
-//     const handleSaveProfile = async () => {
-//         try {
-//             setUpdateLoading(true)
-//             setError(null)
-
-//             const response = await updateUserProfile(formData)
+//                 self._updated_location = new_location
+                
+//         except Exception as e:
+//             logger.error(f"❌ Error in perform_create: {str(e)}")
+//             logger.error(f"🔥 Traceback: {traceback.format_exc()}")
+//             raise
+    
+//     def create(self, request, *args, **kwargs):
+//         """Override create to provide custom response messages"""
+//         logger.debug("="*50)
+//         logger.debug("🎯 UpdatePatientLocationView.create() called")
+//         logger.debug(f"👤 User: {request.user.id} ({request.user.username})")
+//         logger.debug(f"📨 Request data: {request.data}")
+//         logger.debug(f"🍪 Cookies: {request.COOKIES}")
+//         logger.debug(f"🔐 Headers: {dict(request.headers)}")
+        
+//         try:
+//             # Check if user is authenticated
+//             if not request.user.is_authenticated:
+//                 logger.error("❌ User is not authenticated")
+//                 return Response({
+//                     'message': 'Authentication required.',
+//                     'data': None
+//                 }, status=status.HTTP_401_UNAUTHORIZED)
             
-//             if (response.data.success) {
-//                 // Navigate back to profile page with success message
-//                 navigate('/patientprofile', { 
-//                     state: { 
-//                         success: true, 
-//                         message: 'Profile updated successfully!' 
-//                     } 
-//                 })
-//             } else {
-//                 if (response.data.field_errors) {
-//                     // Handle field-specific errors
-//                     const errorMessages = Object.entries(response.data.field_errors)
-//                         .map(([field, errors]) => `${field}: ${errors.join(', ')}`)
-//                         .join('\n')
-//                     setError(`Validation errors:\n${errorMessages}`)
-//                 } else {
-//                     setError(response.data.message || 'Failed to update profile')
-//                 }
-//             }
-//         } catch (error) {
-//             console.error("Error updating profile:", error)
+//             # Check if user has patient profile
+//             try:
+//                 patient = request.user.patient_profile
+//                 logger.debug(f"✅ Patient profile found: {patient.id}")
+//             except Exception as e:
+//                 logger.error(f"❌ No patient profile found: {str(e)}")
+//                 return Response({
+//                     'message': 'Patient profile not found for this user.',
+//                     'data': None,
+//                     'debug': str(e)
+//                 }, status=status.HTTP_404_NOT_FOUND)
             
-//             if (error.response?.status === 401) {
-//                 setError('Session expired. Please login again.')
-//             } else if (error.response?.status === 400) {
-//                 // Handle validation errors
-//                 const fieldErrors = error.response.data.field_errors
-//                 if (fieldErrors) {
-//                     const errorMessages = Object.entries(fieldErrors)
-//                         .map(([field, errors]) => `${field}: ${errors.join(', ')}`)
-//                         .join('\n')
-//                     setError(`Validation errors:\n${errorMessages}`)
-//                 } else {
-//                     setError('Invalid data provided')
-//                 }
-//             } else {
-//                 setError('Failed to update profile')
+//             # Validate serializer
+//             logger.debug("🔍 Validating serializer data...")
+//             serializer = self.get_serializer(data=request.data)
+            
+//             if not serializer.is_valid():
+//                 logger.error(f"❌ Serializer validation failed: {serializer.errors}")
+//                 return Response({
+//                     'message': 'Invalid data provided.',
+//                     'data': None,
+//                     'errors': serializer.errors,
+//                     'debug': f"Received data: {request.data}"
+//                 }, status=status.HTTP_400_BAD_REQUEST)
+            
+//             logger.debug(f"✅ Serializer validated. Clean data: {serializer.validated_data}")
+            
+//             # Perform the create logic
+//             logger.debug("🔄 Calling perform_create...")
+//             self.perform_create(serializer)
+            
+//             # Get the location data for response
+//             logger.debug("📋 Preparing response data...")
+//             location_data = PatientLocationSerializer(self._updated_location).data
+//             logger.debug(f"✅ Location data prepared: {location_data}")
+            
+//             response_data = {
+//                 'message': 'Location updated successfully.',
+//                 'data': location_data
 //             }
-//         } finally {
-//             setUpdateLoading(false)
-//         }
-//     }
-
-//     // Memoized Form Section Component to prevent unnecessary re-renders
-//     const FormSection = useCallback(({ title, icon: Icon, iconBg, children }) => (
-//         <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6">
-//             <div className="flex items-center mb-6">
-//                 <div className={`w-10 h-10 ${iconBg} rounded-lg flex items-center justify-center mr-3`}>
-//                     <Icon size={20} className={iconBg.includes('purple') ? 'text-purple-600' : 
-//                                                 iconBg.includes('blue') ? 'text-blue-600' : 
-//                                                 iconBg.includes('green') ? 'text-green-600' : 'text-red-600'} />
-//                 </div>
-//                 <h2 className="text-xl font-bold text-gray-900">{title}</h2>
-//             </div>
-//             {children}
-//         </div>
-//     ), [])
-
-//     // Memoized Input Field Component to prevent unnecessary re-renders
-//     const InputField = useCallback(({ label, icon: Icon, type = "text", field, value, placeholder, required = false }) => (
-//         <div className="space-y-2">
-//             <label className="block text-sm font-medium text-gray-700 flex items-center">
-//                 <Icon size={16} className="mr-2 text-gray-500" />
-//                 {label}
-//                 {required && <span className="text-red-500 ml-1">*</span>}
-//             </label>
-//             <input
-//                 type={type}
-//                 value={value}
-//                 onChange={(e) => handleInputChange(field, e.target.value)}
-//                 placeholder={placeholder}
-//                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-//                 disabled={updateLoading}
-//             />
-//         </div>
-//     ), [handleInputChange, updateLoading])
-
-//     // Memoized Select Field Component
-//     const SelectField = useCallback(({ label, icon: Icon, field, value, options, placeholder }) => (
-//         <div className="space-y-2">
-//             <label className="block text-sm font-medium text-gray-700 flex items-center">
-//                 <Icon size={16} className="mr-2 text-gray-500" />
-//                 {label}
-//             </label>
-//             <select
-//                 value={value}
-//                 onChange={(e) => handleInputChange(field, e.target.value)}
-//                 className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-all"
-//                 disabled={updateLoading}
-//             >
-//                 <option value="">{placeholder}</option>
-//                 {options.map(option => (
-//                     <option key={option.value} value={option.value}>
-//                         {option.label}
-//                     </option>
-//                 ))}
-//             </select>
-//         </div>
-//     ), [handleInputChange, updateLoading])
-
-//     // Loading state
-//     if (loading) {
-//         return (
-//             <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50">
-//                 <Header />
-//                 <div className="flex items-center justify-center py-20">
-//                     <div className="relative">
-//                         <div className="animate-spin rounded-full h-16 w-16 border-4 border-purple-200"></div>
-//                         <div className="animate-spin rounded-full h-16 w-16 border-t-4 border-purple-600 absolute top-0 left-0"></div>
-//                         <div className="mt-4 text-center">
-//                             <p className="text-gray-600 animate-pulse">Loading profile...</p>
-//                         </div>
-//                     </div>
-//                 </div>
-//             </div>
-//         )
-//     }
-
-//     const displayName = user?.name || `${user?.first_name || ''} ${user?.last_name || ''}`.trim() || 'User'
-
-//     const genderOptions = [
-//         { value: 'male', label: 'Male' },
-//         { value: 'female', label: 'Female' },
-//         { value: 'other', label: 'Other' },
-//         { value: 'prefer-not-to-say', label: 'Prefer not to say' }
-//     ]
-
-//     return (
-//         <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50">
-//             <Header />
-
-//             <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-//                 {/* Back Button */}
-//                 <button 
-//                     onClick={handleBack}
-//                     className="flex items-center text-gray-600 hover:text-purple-600 mb-8 transition-all duration-200 group bg-white px-4 py-2 rounded-lg shadow-sm hover:shadow-md"
-//                     disabled={updateLoading}
-//                 >
-//                     <ArrowLeft size={18} className="mr-2 group-hover:-translate-x-1 transition-transform" />
-//                     <span className="font-medium">Back to Profile</span>
-//                 </button>
-
-//                 {/* Page Header */}
-//                 <div className="text-center mb-8">
-//                     <h1 className="text-3xl font-bold text-gray-900 mb-2">Edit Profile</h1>
-//                     <p className="text-gray-600">Update your personal information and address details</p>
-//                 </div>
-
-//                 {/* Error Display */}
-//                 {error && (
-//                     <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
-//                         <div className="flex items-center">
-//                             <X className="w-5 h-5 text-red-500 mr-2" />
-//                             <div>
-//                                 <h3 className="text-sm font-medium text-red-800">Error</h3>
-//                                 <pre className="text-sm text-red-600 mt-1 whitespace-pre-wrap">{error}</pre>
-//                             </div>
-//                         </div>
-//                     </div>
-//                 )}
-
-//                 <form onSubmit={(e) => { e.preventDefault(); handleSaveProfile(); }} className="space-y-8">
-//                     {/* Personal Information Section */}
-//                     <FormSection title="Personal Information" icon={User} iconBg="bg-purple-100">
-//                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-//                             <InputField
-//                                 label="First Name"
-//                                 icon={User}
-//                                 field="first_name"
-//                                 value={formData.first_name}
-//                                 placeholder="Enter your first name"
-//                                 required
-//                             />
-//                             <InputField
-//                                 label="Last Name"
-//                                 icon={User}
-//                                 field="last_name"
-//                                 value={formData.last_name}
-//                                 placeholder="Enter your last name"
-//                                 required
-//                             />
-//                             <InputField
-//                                 label="Email Address"
-//                                 icon={Mail}
-//                                 type="email"
-//                                 field="email"
-//                                 value={formData.email}
-//                                 placeholder="Enter your email address"
-//                                 required
-//                             />
-//                             <InputField
-//                                 label="Phone Number"
-//                                 icon={Phone}
-//                                 type="tel"
-//                                 field="phone"
-//                                 value={formData.phone}
-//                                 placeholder="Enter your phone number"
-//                             />
-//                             <SelectField
-//                                 label="Gender"
-//                                 icon={User}
-//                                 field="gender"
-//                                 value={formData.gender}
-//                                 options={genderOptions}
-//                                 placeholder="Select gender"
-//                             />
-//                             <InputField
-//                                 label="Age"
-//                                 icon={Calendar}
-//                                 type="number"
-//                                 field="age"
-//                                 value={formData.age}
-//                                 placeholder="Enter your age"
-//                             />
-//                         </div>
-//                         <div className="mt-6">
-//                             <InputField
-//                                 label="Blood Group"
-//                                 icon={Heart}
-//                                 field="bloodGroup"
-//                                 value={formData.bloodGroup}
-//                                 placeholder="Enter your blood group (e.g., A+, B-, O+)"
-//                             />
-//                         </div>
-//                     </FormSection>
-
-//                     {/* Address Information Section */}
-//                     <FormSection title="Address Information" icon={MapPin} iconBg="bg-green-100">
-//                         <div className="space-y-6">
-//                             <InputField
-//                                 label="Street Address"
-//                                 icon={MapPin}
-//                                 field="address.street1"
-//                                 value={formData.address.street1}
-//                                 placeholder="Enter your street address"
-//                             />
-//                             <InputField
-//                                 label="Apartment, Suite, etc."
-//                                 icon={MapPin}
-//                                 field="address.street2"
-//                                 value={formData.address.street2}
-//                                 placeholder="Enter apartment, suite, unit, etc."
-//                             />
-//                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-//                                 <InputField
-//                                     label="City"
-//                                     icon={MapPin}
-//                                     field="address.city"
-//                                     value={formData.address.city}
-//                                     placeholder="Enter your city"
-//                                 />
-//                                 <InputField
-//                                     label="State/Province"
-//                                     icon={MapPin}
-//                                     field="address.state"
-//                                     value={formData.address.state}
-//                                     placeholder="Enter your state or province"
-//                                 />
-//                                 <InputField
-//                                     label="ZIP/Postal Code"
-//                                     icon={MapPin}
-//                                     field="address.zipCode"
-//                                     value={formData.address.zipCode}
-//                                     placeholder="Enter your ZIP or postal code"
-//                                 />
-//                                 <InputField
-//                                     label="Country"
-//                                     icon={MapPin}
-//                                     field="address.country"
-//                                     value={formData.address.country}
-//                                     placeholder="Enter your country"
-//                                 />
-//                             </div>
-//                         </div>
-//                     </FormSection>
-
-//                     {/* Action Buttons */}
-//                     <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6">
-//                         <div className="flex flex-col sm:flex-row justify-center gap-4">
-//                             <Button 
-//                                 type="submit"
-//                                 disabled={updateLoading}
-//                                 className="bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 transform hover:scale-105 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-//                             >
-//                                 <Save size={20} className="mr-2" />
-//                                 {updateLoading ? 'Saving Changes...' : 'Save Changes'}
-//                             </Button>
-//                             <Button 
-//                                 type="button"
-//                                 onClick={handleBack}
-//                                 disabled={updateLoading}
-//                                 variant="outline" 
-//                                 className="bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white border-none transform hover:scale-105 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
-//                             >
-//                                 <X size={20} className="mr-2" />
-//                                 Cancel
-//                             </Button>
-//                         </div>
-//                     </div>
-//                 </form>
-//             </div>
-//         </div>
-//     )
-// }
-
-// export default EditProfile
+            
+//             logger.debug(f"🎉 Success! Returning response: {response_data}")
+//             return Response(response_data, status=status.HTTP_201_CREATED)
+            
+//         except ValidationError as e:
+//             logger.error(f"❌ Validation error: {str(e)}")
+//             return Response({
+//                 'message': 'Validation error occurred.',
+//                 'data': None,
+//                 'errors': str(e),
+//                 'debug': f"Request data: {request.data}"
+//             }, status=status.HTTP_400_BAD_REQUEST)
+            
+//         except Exception as e:
+//             logger.error(f"❌ Unexpected error in create(): {str(e)}")
+//             logger.error(f"🔥 Full traceback: {traceback.format_exc()}")
+//             return Response({
+//                 'message': 'An unexpected error occurred.',
+//                 'data': None,
+//                 'error': str(e),
+//                 'debug': {
+//                     'user_id': request.user.id if request.user.is_authenticated else None,
+//                     'request_data': request.data,
+//                     'traceback': traceback.format_exc()
+//                 }
+//             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
+// class CurrentPatientLocationView(generics.RetrieveAPIView):
+//     """GET /patients/location/current/"""
+//     serializer_class = PatientLocationSerializer
+//     permission_classes = [IsAuthenticated]
+    
+//     def get_object(self):
+//         logger.debug("🔍 Getting current location object")
+//         try:
+//             patient = self.request.user.patient_profile
+//             logger.debug(f"✅ Patient found: {patient.id}")
+//         except Exception as e:
+//             logger.error(f"❌ Patient profile not found: {str(e)}")
+//             raise Http404("Patient profile not found for this user")
+        
+//         location = PatientLocation.objects.filter(patient=patient).first()
+        
+//         if not location:
+//             logger.warning(f"⚠️ No location found for patient {patient.id}")
+//             raise Http404("No location found for this patient")
+        
+//         logger.debug(f"✅ Location found: {location.id}")
+//         return location
+    
+//     def retrieve(self, request, *args, **kwargs):
+//         """Override retrieve to provide custom response format"""
+//         logger.debug("="*50)
+//         logger.debug("🎯 CurrentPatientLocationView.retrieve() called")
+//         logger.debug(f"👤 User: {request.user.id} ({request.user.username})")
+        
+//         try:
+//             instance = self.get_object()
+//             serializer = self.get_serializer(instance)
+            
+//             response_data = {
+//                 'message': 'Current location retrieved successfully.',
+//                 'data': serializer.data
+//             }
+            
+//             logger.debug(f"✅ Success! Returning: {response_data}")
+//             return Response(response_data, status=status.HTTP_200_OK)
+            
+//         except Http404 as e:
+//             logger.warning(f"⚠️ 404 error: {str(e)}")
+//             return Response({
+//                 'message': str(e),
+//                 'data': None
+//             }, status=status.HTTP_404_NOT_FOUND)
+            
+//         except Exception as e:
+//             logger.error(f"❌ Unexpected error in retrieve(): {str(e)}")
+//             logger.error(f"🔥 Full traceback: {traceback.format_exc()}")
+//             return Response({
+//                 'message': 'An unexpected error occurred.',
+//                 'data': None,
+//                 'error': str(e),
+//                 'debug': {
+//                     'user_id': request.user.id if request.user.is_authenticated else None,
+//                     'traceback': traceback.format_exc()
+//                 }
+//             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
 
+// class SearchNearbyDoctorsView(generics.ListAPIView):
+//     """GET /search/nearby-doctors/ - Find nearby doctors based on patient location"""
+//     serializer_class = DoctorLocationSerializer
+//     permission_classes = [IsAuthenticated]
+    
+//     def calculate_distance(self, lat1, lng1, lat2, lng2):
+//         """Calculate distance between two coordinates using Haversine formula"""
+//         try:
+//             lat1, lng1, lat2, lng2 = map(radians, [float(lat1), float(lng1), float(lat2), float(lng2)])
+//             dlng = lng2 - lng1
+//             dlat = lat2 - lat1
+//             a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlng/2)**2
+//             c = 2 * asin(sqrt(a))
+//             r = 6371  # Earth's radius in km
+//             return c * r
+//         except (ValueError, TypeError) as e:
+//             logger.error(f"Error in distance calculation: {str(e)}")
+//             return float('inf')  # Return large distance for invalid coordinates
+    
+//     def list(self, request, *args, **kwargs):
+//         logger.debug("SearchNearbyDoctorsView.list() called")
+//         logger.debug(f"User: {request.user.id} ({request.user.username})")
+        
+//         try:
+//             # Get patient's current location
+//             try:
+//                 patient = request.user.patient_profile
+//                 patient_location = PatientLocation.objects.filter(patient=patient).first()
+                
+//                 if not patient_location:
+//                     logger.warning(f"No location found for patient {patient.id}")
+//                     return Response({
+//                         'message': 'Please update your location first to find nearby doctors.',
+//                         'data': [],
+//                         'count': 0
+//                     }, status=status.HTTP_400_BAD_REQUEST)
+                
+//                 patient_lat = float(patient_location.latitude)
+//                 patient_lng = float(patient_location.longitude)
+//                 logger.debug(f"Patient location: {patient_lat}, {patient_lng}")
+                
+//             except Patient.DoesNotExist:
+//                 logger.error("Patient profile not found")
+//                 return Response({
+//                     'message': 'Patient profile not found.',
+//                     'data': [],
+//                     'count': 0
+//                 }, status=status.HTTP_404_NOT_FOUND)
+//             except Exception as e:
+//                 logger.error(f"Error getting patient location: {str(e)}")
+//                 return Response({
+//                     'message': 'Unable to get your location. Please update your location first.',
+//                     'data': [],
+//                     'count': 0,
+//                     'error': str(e)
+//                 }, status=status.HTTP_400_BAD_REQUEST)
+            
+//             # Get radius parameter
+//             try:
+//                 radius = float(request.GET.get('radius', 10))
+//                 if radius <= 0:
+//                     radius = 10
+//             except (ValueError, TypeError):
+//                 radius = 10
+            
+//             logger.debug(f"Searching within {radius}km radius")
+            
+        
+//             try:
+//                 doctor_locations = DoctorLocation.objects.filter(
+//                     doctor__is_available=True,  # Use doctor's availability field
+//                     doctor__user__is_active=True  # Check if user is active
+//                 ).select_related('doctor', 'doctor__user')
+                
+                
+                
+//             except Exception as query_error:
+//                 logger.error(f"Error in doctor query: {str(query_error)}")
+//                 # Fallback to simpler query
+//                 doctor_locations = DoctorLocation.objects.select_related(
+//                     'doctor', 'doctor__user'
+//                 ).filter(doctor__user__is_active=True)
+            
+//             logger.debug(f"Found {doctor_locations.count()} total active doctor locations")
+            
+//             # Calculate distances and filter by radius
+//             nearby_locations = []
+//             for location in doctor_locations:
+//                 try:
+//                     # Skip if doctor or user is None
+//                     if not location.doctor or not location.doctor.user:
+//                         continue
+                        
+//                     distance = self.calculate_distance(
+//                         patient_lat, patient_lng,
+//                         location.latitude, location.longitude
+//                     )
+                    
+//                     if distance <= radius:
+//                         location.distance = round(distance, 2)
+//                         nearby_locations.append(location)
+//                         logger.debug(f"Doctor {location.doctor.user.username} - {distance:.2f}km away")
+//                     else:
+//                         logger.debug(f"Doctor {location.doctor.user.username} - {distance:.2f}km away (outside radius)")
+                        
+//                 except Exception as e:
+//                     logger.error(f"Error calculating distance for doctor {location.id}: {str(e)}")
+//                     continue
+            
+//             # Sort by distance
+//             nearby_locations.sort(key=lambda x: getattr(x, 'distance', float('inf')))
+            
+//             logger.debug(f"Found {len(nearby_locations)} doctors within {radius}km")
+            
+//             # Serialize the data
+//             serializer = self.get_serializer(nearby_locations, many=True)
+            
+//             response_data = {
+//                 'message': f'Found {len(nearby_locations)} doctors within {radius}km of your location.',
+//                 'count': len(nearby_locations),
+//                 'radius': radius,
+//                 'patient_location': {
+//                     'latitude': patient_lat,
+//                     'longitude': patient_lng
+//                 },
+//                 'data': serializer.data
+//             }
+            
+//             logger.debug(f"Success! Returning {len(nearby_locations)} nearby doctors")
+//             return Response(response_data, status=status.HTTP_200_OK)
+            
+//         except Exception as e:
+//             logger.error(f"Unexpected error in SearchNearbyDoctorsView: {str(e)}")
+//             logger.error(f"Full traceback: {traceback.format_exc()}")
+//             return Response({
+//                 'message': 'An unexpected error occurred while searching for nearby doctors.',
+//                 'data': [],
+//                 'count': 0,
+//                 'error': str(e)
+//             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
-
-// Day 5-7: AI Symptom Checker
-// •	✅ Enter Symptoms (Text/Dropdown)
-// •	✅ AI Suggests Specialties & Triage
-// •	✅ Forward Report to Doctor Before Appointment

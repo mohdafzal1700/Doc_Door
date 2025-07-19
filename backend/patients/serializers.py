@@ -659,11 +659,21 @@ class MedicalRecordSerializer(serializers.ModelSerializer):
         
         return value
     
+    
 class AppointmentSerializer(serializers.ModelSerializer):
     """Comprehensive appointment serializer"""
     
     # Read-only computed fields
     patient_name = serializers.SerializerMethodField()
+
+    patient_age = serializers.SerializerMethodField()
+    patient_gender = serializers.SerializerMethodField()
+    patient_email = serializers.SerializerMethodField()
+    patient_phone = serializers.SerializerMethodField()
+    patient_profile_image = serializers.SerializerMethodField()
+    
+    
+    
     doctor_name = serializers.SerializerMethodField()
     service_name = serializers.SerializerMethodField()
     formatted_date_time = serializers.SerializerMethodField()
@@ -671,10 +681,13 @@ class AppointmentSerializer(serializers.ModelSerializer):
     can_cancel = serializers.SerializerMethodField()
     can_reschedule = serializers.SerializerMethodField()
     
+    doctor_id = serializers.SerializerMethodField() 
+    service_id = serializers.SerializerMethodField()
+    
     # Override the slot_time field to handle string inputs
     slot_time = serializers.TimeField(format='%H:%M')
     
-    # CRITICAL FIX: Override doctor field to prevent default validation
+
     doctor = serializers.CharField(write_only=True)
 
     class Meta:
@@ -683,11 +696,12 @@ class AppointmentSerializer(serializers.ModelSerializer):
             'id', 'patient', 'doctor', 'service', 'schedule',
             'appointment_date', 'slot_time', 'mode', 'address',
             'status', 'total_fee', 'is_paid', 'notes',
-            'created_at', 'updated_at', 'medical_record',
+            'created_at', 'updated_at', 'medical_record','service_id',
             # Computed fields
-            'patient_name', 'doctor_name', 'service_name',
+            'patient_name', 'doctor_name', 'service_name','doctor_id',
             'formatted_date_time', 'status_display',
-            'can_cancel', 'can_reschedule'
+            'can_cancel', 'can_reschedule','patient_age', 'patient_gender', 'patient_email', 
+            'patient_phone', 'patient_profile_image',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -698,9 +712,55 @@ class AppointmentSerializer(serializers.ModelSerializer):
     def get_doctor_name(self, obj):
         user = obj.doctor.user
         return f"{user.first_name} {user.last_name}".strip() or user.email
+    
+    def get_patient_age(self, obj):
+        if obj.patient and hasattr(obj.patient, 'age'):
+            return obj.patient.age
+        elif obj.patient and hasattr(obj.patient, 'date_of_birth'):
+            # Calculate age from date of birth
+            from datetime import date
+            dob = obj.patient.date_of_birth
+            if dob:
+                today = date.today()
+                return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+        return None
+
+    def get_patient_gender(self, obj):
+        if obj.patient and hasattr(obj.patient, 'gender'):
+            return obj.patient.gender
+        return None
+
+    def get_patient_email(self, obj):
+        if obj.patient and obj.patient.user:
+            return obj.patient.user.email
+        return None
+
+    def get_patient_phone(self, obj):
+        # Check patient model first for phone field
+        if obj.patient and hasattr(obj.patient, 'phone'):
+            return obj.patient.phone
+        # Fallback to user model phone_number field
+        elif obj.patient and obj.patient.user and hasattr(obj.patient.user, 'phone_number'):
+            return obj.patient.user.phone_number
+        return None
+
+    def get_patient_profile_image(self, obj):
+        
+        if obj.patient and hasattr(obj.patient, 'profile_picture'):
+            if obj.patient.profile_picture:
+                return obj.patient.profile_picture.url
+        return None
+    
+    def get_doctor_id(self, obj):
+        """Return the doctor's user ID for frontend use"""
+        return str(obj.doctor.user.id) if obj.doctor and obj.doctor.user else None
 
     def get_service_name(self, obj):
         return obj.service.service_name if obj.service else 'General Consultation'
+    
+    def get_service_id(self, obj):
+        """Return the service ID for frontend use"""
+        return str(obj.service.id) if obj.service else None
 
     def get_formatted_date_time(self, obj):
         if obj.appointment_date and obj.slot_time:
@@ -725,9 +785,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
         if obj.status in ['cancelled', 'completed']:
             return False
         
-        # 2. For testing, you can temporarily return True for pending/confirmed
-        # Uncomment this line to test if buttons appear:
-        # return obj.status in ['pending', 'confirmed']
+        
         
         # 3. Check if date and time exist
         if not obj.appointment_date or not obj.slot_time:
@@ -861,9 +919,9 @@ class AppointmentSerializer(serializers.ModelSerializer):
         """Validate doctor ID - handle both UUID strings and integers"""
         if isinstance(value, str):
             try:
-                # Try to parse as UUID first
+                
                 doctor_uuid = uuid.UUID(value)
-                # Look for User with role='doctor' and active status
+                
                 user = User.objects.filter(
                     id=doctor_uuid,
                     role='doctor',
@@ -874,14 +932,14 @@ class AppointmentSerializer(serializers.ModelSerializer):
                 if not user:
                     raise serializers.ValidationError(f"Doctor with ID {value} does not exist or is not approved.")
                 
-                # Return the doctor_profile (Doctor model instance)
+                
                 return user.doctor_profile
                 
             except ValueError:
-                # Not a UUID, try as integer (if your system supports integer IDs)
+                
                 try:
                     doctor_id = int(value)
-                    # Look for User with role='doctor' and active status
+                    
                     user = User.objects.filter(
                         id=doctor_id,
                         role='doctor',
@@ -892,13 +950,13 @@ class AppointmentSerializer(serializers.ModelSerializer):
                     if not user:
                         raise serializers.ValidationError(f"Doctor with ID {doctor_id} does not exist or is not approved.")
                     
-                    # Return the doctor_profile (Doctor model instance)
+                    
                     return user.doctor_profile
                     
                 except ValueError:
                     raise serializers.ValidationError("Invalid doctor ID format.")
         elif isinstance(value, int):
-            # Look for User with role='doctor' and active status
+            
             user = User.objects.filter(
                 id=value,
                 role='doctor',
@@ -909,10 +967,10 @@ class AppointmentSerializer(serializers.ModelSerializer):
             if not user:
                 raise serializers.ValidationError(f"Doctor with ID {value} does not exist or is not approved.")
             
-            # Return the doctor_profile (Doctor model instance)
+            
             return user.doctor_profile
         
-        # If value is already a Doctor instance or User instance
+        
         if isinstance(value, Doctor):
             return value
         elif isinstance(value, User) and value.role == 'doctor':
@@ -1358,49 +1416,238 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = Payment
         fields = ['id', 'appointment', 'amount', 'method', 'status', 'paid_at', 'remarks']
         
-        
-class PatientLocationSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = PatientLocation
-        fields = ['id', 'latitude', 'longitude', 'loc_name','is_current', 'updated_at']
-        read_only_fields = ['id', 'updated_at']
+          
 
-class PatientLocationUpdateSerializer(serializers.ModelSerializer):
-    """Serializer for updating patient location via API"""
-    class Meta:
-        model = PatientLocation
-        fields = ['latitude', 'longitude', 'loc_name']
-    
-    def create(self, validated_data):
-        # Set is_current=True for new location
-        validated_data['is_current'] = True
-        return super().create(validated_data)
+
+
+
 
 class DoctorLocationSerializer(serializers.ModelSerializer):
+    """Serializer for doctor location data"""
+    
     doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
+    doctor_id = serializers.IntegerField(source='doctor.id', read_only=True)
     distance = serializers.FloatField(read_only=True)
     
     class Meta:
         model = DoctorLocation
-        fields = ['id', 'name', 'latitude', 'longitude', 'loc_name', 'is_active',
-                  'doctor_name', 'distance', 'created_at']
+        fields = [
+            'id', 'name', 'latitude', 'longitude', 'loc_name', 'is_active',
+            'doctor_name', 'doctor_id', 'distance', 'created_at'
+        ]
         read_only_fields = ['id', 'created_at']
-
-class AppointmentLocationSerializer(serializers.ModelSerializer):
-    doctor_location_detail = DoctorLocationSerializer(source='doctor_location', read_only=True)
-    patient_location_detail = serializers.SerializerMethodField()
+    
+    def to_representation(self, instance):
+        """Custom representation to format distance"""
+        data = super().to_representation(instance)
+        
+        # Format distance to 2 decimal places if it exists
+        if 'distance' in data and data['distance'] is not None:
+            data['distance'] = round(float(data['distance']), 2)
+        
+        return data
+class DoctorLocationSerializer(serializers.ModelSerializer):
+    """Serializer for doctor locations with distance"""
+    
+    # Doctor user information
+    doctor_id = serializers.SerializerMethodField()  # This should be User.id
+    doctor_name = serializers.SerializerMethodField()
+    doctor_specialization = serializers.SerializerMethodField()
+    doctor_experience = serializers.SerializerMethodField()
+    doctor_rating = serializers.SerializerMethodField()
+    doctor_consultation_fee = serializers.SerializerMethodField()
+    doctor_image = serializers.SerializerMethodField()
+    doctor_clinic_name = serializers.SerializerMethodField()
+    doctor_location = serializers.SerializerMethodField()
+    doctor_is_available = serializers.SerializerMethodField()
+    doctor_consultation_mode_online = serializers.SerializerMethodField()
+    doctor_consultation_mode_offline = serializers.SerializerMethodField()
+    
+    # Location information
+    latitude = serializers.DecimalField(max_digits=10, decimal_places=8, read_only=True)
+    longitude = serializers.DecimalField(max_digits=11, decimal_places=8, read_only=True)
+    distance = serializers.SerializerMethodField()
     
     class Meta:
-        model = Appointment
-        fields = ['id', 'doctor_location', 'doctor_location_detail',
-                  'patient_latitude', 'patient_longitude', 'patient_address',
-                  'distance_km', 'patient_location_detail']
+        model = DoctorLocation
+        fields = [
+            # Location fields
+            'latitude', 'longitude', 'loc_name', 'distance',
+            # Doctor fields  
+            'doctor_id', 'doctor_name', 'doctor_specialization', 'doctor_experience',
+            'doctor_rating', 'doctor_consultation_fee', 'doctor_image', 
+            'doctor_clinic_name', 'doctor_location', 'doctor_is_available',
+            'doctor_consultation_mode_online', 'doctor_consultation_mode_offline'
+        ]
     
-    def get_patient_location_detail(self, obj):
-        if obj.patient_latitude and obj.patient_longitude:
-            return {
-                'latitude': float(obj.patient_latitude),
-                'longitude': float(obj.patient_longitude),
-                'address': obj.patient_address
-            }
-        return None
+    def get_doctor_id(self, obj):
+        """Return the User ID, not the DoctorLocation ID"""
+        try:
+            if obj.doctor and obj.doctor.user:
+                return str(obj.doctor.user.id)  # Convert UUID to string for JSON compatibility
+            return None
+        except Exception as e:
+            logger.error(f"Error getting doctor_id: {str(e)}")
+            return None
+    
+    def get_doctor_name(self, obj):
+        """Get doctor's full name from user model"""
+        try:
+            if obj.doctor and obj.doctor.user:
+                full_name = obj.doctor.user.get_full_name()
+                return full_name if full_name.strip() else "Unknown Doctor"
+            return "Unknown Doctor"
+        except Exception as e:
+            logger.error(f"Error getting doctor_name: {str(e)}")
+            return "Unknown Doctor"
+    
+    def get_doctor_specialization(self, obj):
+        """Get doctor's specialization with human-readable format"""
+        try:
+            if obj.doctor and obj.doctor.specialization:
+                return obj.doctor.get_specialization_display()  # Returns human-readable version
+            return "Not specified"
+        except Exception as e:
+            logger.error(f"Error getting doctor_specialization: {str(e)}")
+            return "Not specified"
+    
+    def get_doctor_experience(self, obj):
+        """Get doctor's years of experience"""
+        try:
+            if obj.doctor and obj.doctor.experience is not None:
+                return obj.doctor.experience
+            return 0
+        except Exception as e:
+            logger.error(f"Error getting doctor_experience: {str(e)}")
+            return 0
+    
+    def get_doctor_rating(self, obj):
+        """Get doctor's rating - implement actual rating calculation if needed"""
+        try:
+            if obj.doctor:
+                # If you have a rating field or related model, use it here
+                # For now, return a default rating
+                return getattr(obj.doctor, 'rating', 4.5) or 4.5
+            return 0
+        except Exception as e:
+            logger.error(f"Error getting doctor_rating: {str(e)}")
+            return 0
+    
+    def get_doctor_consultation_fee(self, obj):
+        """Get doctor's consultation fee"""
+        try:
+            if obj.doctor and obj.doctor.consultation_fee is not None:
+                return float(obj.doctor.consultation_fee)
+            return 0
+        except Exception as e:
+            logger.error(f"Error getting doctor_consultation_fee: {str(e)}")
+            return 0
+    
+    def get_doctor_image(self, obj):
+        """Get doctor's profile picture - FIXED: profile_picture is in Doctor model"""
+        try:
+            if (obj.doctor and 
+                hasattr(obj.doctor, 'profile_picture') and 
+                obj.doctor.profile_picture):
+                return obj.doctor.profile_picture.url
+            return None
+        except Exception as e:
+            logger.error(f"Error getting doctor_image: {str(e)}")
+            return None
+    
+    def get_doctor_clinic_name(self, obj):
+        """Get doctor's clinic name"""
+        try:
+            if obj.doctor and obj.doctor.clinic_name:
+                return obj.doctor.clinic_name
+            return "Private Practice"
+        except Exception as e:
+            logger.error(f"Error getting doctor_clinic_name: {str(e)}")
+            return "Private Practice"
+    
+    def get_doctor_location(self, obj):
+        """Get doctor's location or clinic location"""
+        try:
+            if obj.doctor and obj.doctor.location:
+                return obj.doctor.location
+            elif obj.loc_name:
+                return obj.loc_name
+            return "Location not specified"
+        except Exception as e:
+            logger.error(f"Error getting doctor_location: {str(e)}")
+            return "Location not specified"
+    
+    def get_doctor_is_available(self, obj):
+        """Get doctor's availability status"""
+        try:
+            if obj.doctor:
+                return getattr(obj.doctor, 'is_available', True)
+            return False
+        except Exception as e:
+            logger.error(f"Error getting doctor_is_available: {str(e)}")
+            return False
+    
+    def get_doctor_consultation_mode_online(self, obj):
+        """Get if doctor provides online consultations"""
+        try:
+            if obj.doctor:
+                return getattr(obj.doctor, 'consultation_mode_online', False)
+            return False
+        except Exception as e:
+            logger.error(f"Error getting doctor_consultation_mode_online: {str(e)}")
+            return False
+    
+    def get_doctor_consultation_mode_offline(self, obj):
+        """Get if doctor provides offline consultations"""
+        try:
+            if obj.doctor:
+                return getattr(obj.doctor, 'consultation_mode_offline', True)
+            return True
+        except Exception as e:
+            logger.error(f"Error getting doctor_consultation_mode_offline: {str(e)}")
+            return True
+    
+    def get_distance(self, obj):
+        """Return the calculated distance if available"""
+        try:
+            return getattr(obj, 'distance', 0)
+        except Exception as e:
+            logger.error(f"Error getting distance: {str(e)}")
+            return 0        
+        
+class PatientLocationSerializer(serializers.ModelSerializer):
+    """Serializer for reading patient location data"""
+    
+    class Meta:
+        model = PatientLocation
+        fields = ['id', 'latitude', 'longitude', 'updated_at', 'created_at']
+        read_only_fields = ['id', 'updated_at', 'created_at']
+
+class PatientLocationUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PatientLocation
+        fields = ['latitude', 'longitude']  # Add other fields as needed
+    
+    def validate(self, data):
+        logger.debug(f"🔍 Validating location data: {data}")
+        
+        # Add custom validation logic here
+        latitude = data.get('latitude')
+        longitude = data.get('longitude')
+        
+        if not latitude or not longitude:
+            logger.error("❌ Missing latitude or longitude")
+            raise serializers.ValidationError("Both latitude and longitude are required")
+        
+        # Validate latitude range
+        if not (-90 <= latitude <= 90):
+            logger.error(f"❌ Invalid latitude: {latitude}")
+            raise serializers.ValidationError("Latitude must be between -90 and 90")
+        
+        # Validate longitude range
+        if not (-180 <= longitude <= 180):
+            logger.error(f"❌ Invalid longitude: {longitude}")
+            raise serializers.ValidationError("Longitude must be between -180 and 180")
+        
+        logger.debug("✅ Location data validation passed")
+        return data

@@ -286,7 +286,7 @@ const executeStatusChange = async () => {
                     </div>
                     
                     <p className="text-gray-600 mb-6">
-                        Are you sure you want to {confirmAction.action} <strong>{confirmAction.patientName}</strong>?
+                        Are you sure you want to {confirmAction.action} <strong>{confirmAction.doctorName}</strong>?
                         {confirmAction.action === 'deactivate' && (
                             <span className="block mt-2 text-sm text-red-600">
                                 This will prevent the doctor from accessing their account.

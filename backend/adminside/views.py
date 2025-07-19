@@ -178,7 +178,7 @@ class PatientManagementView(APIView):
                 return Response(serialized_data.data, status=status.HTTP_200_OK)
             
             logger.info("Getting all patients")
-            queryset = User.objects.filter(role='patient').select_related('patient_profile')
+            queryset = User.objects.filter(role='patient').select_related('patient_profile').order_by('-patient_profile__created_at')
             
             search_query = request.GET.get('search', '')
             is_active = request.GET.get('is_active', '')
@@ -281,7 +281,7 @@ class DoctorManagementView(APIView):
             
             logger.info('Getting all Doctors')
             
-            queryset = User.objects.filter(role='doctor').select_related('doctor_profile')
+            queryset = User.objects.filter(role='doctor').select_related('doctor_profile').order_by('-doctor_profile__created_at')
             is_active=request.GET.get('is_active','')
             
             
@@ -480,26 +480,3 @@ class DoctorApprovalActionView(generics.UpdateAPIView):
     def patch(self, request, *args, **kwargs):
         """Override patch to ensure it calls update"""
         return self.update(request, *args, **kwargs)
-
-# @api_view(['GET'])
-# @permission_classes([IsAdminUser])
-# def doctor_application_stats(request):
-#     """Simple stats for admin dashboard"""
-    
-#     stats = {
-#         'pending_applications': User.objects.filter(
-#             role='doctor',
-#             doctor_profile__verification_status='pending_approval'
-#         ).count(),
-#         'approved_doctors': User.objects.filter(
-#             role='doctor',
-#             doctor_profile__verification_status='approved'
-#         ).count(),
-#         'rejected_applications': User.objects.filter(
-#             role='doctor',
-#             doctor_profile__verification_status='rejected'
-#         ).count(),
-#         'total_doctors': User.objects.filter(role='doctor').count()
-#     }
-    
-#     return Response(stats)

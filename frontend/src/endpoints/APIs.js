@@ -113,8 +113,8 @@ export const updateUserProfileWithAddress = async (data) => {
     return profileRes;
 };
 
-export const getPatientDoctors = () => axios.get("patient_doctor/");
-export const getPatientDoctor = (id) => axios.get(`patient_doctor/${id}/`);
+export const getPatientDoctors = () => axios.get("patientDoctor/");
+export const getPatientDoctor = (id) => axios.get(`patientDoctor/${id}/`);
 
 
 export const getMedicalRecord = () => axios.get("medical_records/");
@@ -161,7 +161,7 @@ export const getAppointmentsByStatus = (status) => {
 
 export const updatePatientLocation = (data) => axios.post("patients/location/update/", data);
 
-export const getPatientLocationHistory = () => axios.get("patients/location/history/");
+
 
 export const getCurrentPatientLocation = () => axios.get("patients/location/current/");
 

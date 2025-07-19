@@ -22,12 +22,12 @@ from .views import (
     PaymentView,
     
     UpdatePatientLocationView,
-    AppointmentLocationDetailView,
+    # AppointmentLocationDetailView,
     UpdatePatientLocationView,
-    PatientLocationHistoryView,
+    
     CurrentPatientLocationView,
     SearchNearbyDoctorsView,
-    AppointmentLocationDetailView,
+    # AppointmentLocationDetailView,
     
     )
 
@@ -51,8 +51,8 @@ urlpatterns = [
     path('addresses/create/', AddressManagementView.as_view(), name='addresses-create'),
     path('addresses/<uuid:address_id>/', AddressManagementView.as_view(), name='addresses-detail'),
     
-    path('patient_doctor/', PatientDoctorView.as_view(), name='patient_doctor_list'),
-    path('patient_doctor/<uuid:pk>/', PatientDoctorView.as_view(), name='patient_doctor_detail'),
+    path('patientDoctor/', PatientDoctorView.as_view(), name='patient_doctor_list'),
+    path('patientDoctor/<uuid:pk>/', PatientDoctorView.as_view(), name='patient_doctor_detail'),
     
     path('medical_records/', MedicalRecordManagementView.as_view(), name='medical_records'),
     
@@ -63,16 +63,16 @@ urlpatterns = [
 
     path('booking/doctor/<uuid:pk>/', DoctorBookingDetailView.as_view(), name='doctor-booking-detail'),
     path('booking/doctor/<uuid:doctor_id>/schedules/', DoctorSchedulesView.as_view(), name='doctor-schedules'),
-    path('appointments/<int:pk>/location/', AppointmentLocationDetailView.as_view(), name='appointment-location-detail'),
+    # path('appointments/<int:pk>/location/', AppointmentLocationDetailView.as_view(), name='appointment-location-detail'),
     
     path('patients/location/update/', UpdatePatientLocationView.as_view(), name='patient-location-update'),
-    path('patients/location/history/', PatientLocationHistoryView.as_view(), name='patient-location-history'),
+    
     path('patients/location/current/', CurrentPatientLocationView.as_view(), name='patient-location-current'),
 
 
     path('search/nearby-doctors/', SearchNearbyDoctorsView.as_view(), name='search-nearby-doctors'),
+    
 
-    path('appointments/<int:pk>/location/', AppointmentLocationDetailView.as_view(), name='appointment-location-detail'),
 ]
 
     

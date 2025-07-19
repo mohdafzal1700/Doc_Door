@@ -48,33 +48,35 @@ const DoctorsSection = () => {
       const transformedDoctors = doctorsData.map(doctorData => {
         console.log('Doctor Data:', doctorData) // Debug log
         
-        // Handle different possible data structures
-        const doctor = doctorData.doctor_profile || doctorData.doctor || {}
-        const user = doctorData
-        
-        // Validate and transform doctor data
-        if (!user.id && !doctorData.id) {
+        // Handle the flattened structure with doctor_ prefixed fields
+        if (!doctorData.id) {
           console.warn('Doctor data missing ID:', doctorData)
           return null
         }
         
         return {
-          id: user.id || doctorData.id,
-          name: user.full_name || doctorData.full_name || 
-              `${user.first_name || ''} ${user.last_name || ''}`.trim() || 
-              user.email || user.username || 'Unknown Doctor',
-          specialty: doctor.specialization || user.specialization || 'General Practice',
-          rating: parseFloat(doctor.rating) || 4.8,
-          reviews: parseInt(doctor.reviews) || Math.floor(Math.random() * 200) + 50,
-          experience: doctor.experience ? `${parseInt(doctor.experience)}+ years` : 'N/A',
-          image: user.profile_picture_url || doctorData.profile_picture_url || "/default-doctor.png",
-          available: doctor.is_available !== false,
-          consultation_fee: parseInt(doctor.consultation_fee || 0),
-          consultation_mode_online: Boolean(doctor.consultation_mode_online),
-          consultation_mode_offline: Boolean(doctor.consultation_mode_offline),
-          clinic_name: doctor.clinic_name || '',
-          location: doctor.location || '',
-          verification_status: doctor.verification_status || 'pending'
+          id: doctorData.id,
+          name: doctorData.full_name || 
+                `${doctorData.doctor_first_name || ''} ${doctorData.doctor_last_name || ''}`.trim() || 
+                doctorData.email || doctorData.username || 'Unknown Doctor',
+          specialty: doctorData.doctor_specialization || doctorData.doctor_department || 'General Practice',
+          rating: parseFloat(doctorData.doctor_rating) || 4.8, // Add rating field if available
+          reviews: parseInt(doctorData.doctor_reviews) || Math.floor(Math.random() * 200) + 50, // Add reviews field if available
+          experience: doctorData.doctor_experience ? `${parseInt(doctorData.doctor_experience)}+ years` : 'N/A',
+          image: doctorData.profile_picture_url || "/default-doctor.png",
+          available: doctorData.doctor_is_available !== false,
+          consultation_fee: parseInt(doctorData.doctor_consultation_fee || 0),
+          consultation_mode_online: Boolean(doctorData.doctor_consultation_mode_online),
+          consultation_mode_offline: Boolean(doctorData.doctor_consultation_mode_offline),
+          clinic_name: doctorData.doctor_clinic_name || '',
+          location: doctorData.doctor_location || '',
+          verification_status: doctorData.doctor_verification_status || 'pending',
+          bio: doctorData.doctor_bio || '',
+          license_number: doctorData.doctor_license_number || '',
+          gender: doctorData.doctor_gender || '',
+          date_of_birth: doctorData.doctor_date_of_birth || '',
+          profile_completed: doctorData.profile_completed || false,
+          has_profile_picture: doctorData.has_profile_picture || false
         }
       }).filter(doctor => doctor !== null) // Filter out any invalid entries
       
@@ -313,7 +315,7 @@ const DoctorsSection = () => {
                       )}
                       
                       {/* Verification Badge */}
-                      {doctor.verification_status === 'verified' && (
+                      {doctor.verification_status === 'approved' && (
                         <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800 flex items-center justify-center">
                           <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -348,6 +350,27 @@ const DoctorsSection = () => {
                         <span className="text-sm text-gray-500 dark:text-gray-400">
                           ({doctor.reviews} reviews)
                         </span>
+                      </div>
+
+                      {/* Consultation Fee */}
+                      {doctor.consultation_fee > 0 && (
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                          Consultation: ₹{doctor.consultation_fee}
+                        </p>
+                      )}
+
+                      {/* Consultation Modes */}
+                      <div className="flex items-center space-x-2 mb-2">
+                        {doctor.consultation_mode_online && (
+                          <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-300 px-2 py-1 rounded">
+                            Online
+                          </span>
+                        )}
+                        {doctor.consultation_mode_offline && (
+                          <span className="text-xs bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-300 px-2 py-1 rounded">
+                            In-person
+                          </span>
+                        )}
                       </div>
 
                       {/* Availability Status */}

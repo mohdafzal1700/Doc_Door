@@ -167,8 +167,8 @@ class Doctor(models.Model):
     consultation_mode_offline = models.BooleanField(default=False)
     clinic_name = models.CharField(max_length=200, blank=True)
     location = models.CharField(max_length=200, blank=True)
-    created_at = models.DateTimeField(null=True, blank=True)
-    updated_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
     
     # ADD THESE NEW FIELDS that your code is expecting:
     license_number = models.CharField(max_length=50, blank=True, null=True)
@@ -280,8 +280,12 @@ class Patient(models.Model):
     user = models.OneToOneField('User', on_delete=models.CASCADE, related_name='patient_profile',null=True, blank=True)
     blood_group = models.CharField(max_length=5, null=True, blank=True)
     age = models.IntegerField(null=True, blank=True)
-    profile_picture = CloudinaryField('image', blank=True, null=True)  # ✅ Cloudinary image field
+    profile_picture = CloudinaryField('image', blank=True, null=True)  # Cloudinary image field
     gender = models.CharField(max_length=10, choices=GENDER_CHOICES, null=True, blank=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
     def __str__(self):
         return f"{self.user.email} - Patient"
     
@@ -602,16 +606,16 @@ class DoctorLocation(models.Model):
     
     
 class PatientLocation(models.Model):
-    patient = models.ForeignKey('Patient', on_delete=models.CASCADE)
-    latitude = models.DecimalField(max_digits=10, decimal_places=8)
-    longitude = models.DecimalField(max_digits=11, decimal_places=8)
-    loc_name = models.CharField(max_length=100, null=True, blank=True)
-    is_current = models.BooleanField(default=True)
+    patient = models.OneToOneField('Patient', on_delete=models.CASCADE, related_name='location')
+    latitude = models.DecimalField(max_digits=20, decimal_places=15)
+    longitude = models.DecimalField(max_digits=21, decimal_places=15)
+    
+    
     updated_at = models.DateTimeField(auto_now=True)
     created_at = models.DateTimeField(auto_now_add=True)
     
     class Meta:
-        unique_together = ['patient', 'is_current']
+        
         ordering = ['-updated_at']
     
     def __str__(self):

@@ -4,7 +4,7 @@ import { Calendar, Clock, User, Phone, Mail, CheckCircle, XCircle, AlertCircle, 
 // Import the API functions (assuming they're in a separate file)
 import { getPendingAppointmentRequests, 
   appointmentRequestAction, 
-  bulkAppointmentRequestAction 
+  
 } from '../../endpoints/Doc';
 
 const AppointmentRequestsPage = () => {
@@ -31,10 +31,11 @@ const AppointmentRequestsPage = () => {
       
       // Handle the structured response from Django API
       if (response && response.data) {
-        const { results = [], summary = {} } = response.data;
-        console.log('Parsed results:', results);
-        console.log('Summary:', summary);
-        
+        const results = Array.isArray(response.data) ? response.data : [];
+        setRequests(results);
+        setSummary({});
+        console.log('Raw API response:', response.data);
+console.log('Parsed appointment count:', results.length);
         setRequests(Array.isArray(results) ? results : []);
         setSummary(summary);
       } else {

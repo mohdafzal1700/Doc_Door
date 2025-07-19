@@ -41,6 +41,27 @@ export default function PatientDoctor() {
         navigate(`/patient/messages/${id}`);
     };
 
+    const renderStars = (rating = 4.5) => {
+        const stars = [];
+        const fullStars = Math.floor(rating);
+        const hasHalfStar = rating % 1 !== 0;
+
+        for (let i = 0; i < fullStars; i++) {
+            stars.push(<Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />);
+        }
+
+        if (hasHalfStar) {
+            stars.push(<Star key="half" className="w-4 h-4 fill-yellow-400 text-yellow-400 opacity-50" />);
+        }
+
+        const remainingStars = 5 - Math.ceil(rating);
+        for (let i = 0; i < remainingStars; i++) {
+            stars.push(<Star key={`empty-${i}`} className="w-4 h-4 text-gray-300" />);
+        }
+
+        return stars;
+    };
+
     if (loading) {
         return (
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -104,27 +125,6 @@ export default function PatientDoctor() {
         );
     }
 
-    const renderStars = (rating = 4.5) => {
-        const stars = [];
-        const fullStars = Math.floor(rating);
-        const hasHalfStar = rating % 1 !== 0;
-
-        for (let i = 0; i < fullStars; i++) {
-            stars.push(<Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />);
-        }
-
-        if (hasHalfStar) {
-            stars.push(<Star key="half" className="w-4 h-4 fill-yellow-400 text-yellow-400 opacity-50" />);
-        }
-
-        const remainingStars = 5 - Math.ceil(rating);
-        for (let i = 0; i < remainingStars; i++) {
-            stars.push(<Star key={`empty-${i}`} className="w-4 h-4 text-gray-300" />);
-        }
-
-        return stars;
-    };
-
     return (
         <div className="min-h-screen bg-gray-50">
             <Header />
@@ -184,16 +184,19 @@ export default function PatientDoctor() {
                                         {doctor.full_name || `Dr. ${doctor.doctor_first_name} ${doctor.doctor_last_name}`}
                                     </h1>
                                     <div className="flex flex-wrap items-center gap-2">
-                                        {doctor.doctor_specialization && (
+                                        {doctor.doctor_department && (
                                             <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm font-medium">
-                                                {doctor.doctor_specialization}
+                                                {doctor.doctor_department}
                                             </span>
                                         )}
-                                        {doctor.doctor_experience > 0 && (
-                                            <span className="text-gray-500 text-sm">
-                                                {doctor.doctor_experience}+ years experience
+                                        
+                                        {doctor.doctor_experience >= 0 && (
+                                            <span className="flex items-center gap-1 text-gray-600 text-sm">
+                                                <Clock className="w-4 h-4 text-gray-400" />
+                                                {doctor.doctor_experience === 0 ? "New practitioner" : `${doctor.doctor_experience}+ years experience`}
                                             </span>
                                         )}
+                                        
                                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                                             doctor.doctor_verification_status === 'approved' 
                                                 ? 'bg-green-100 text-green-800' 
@@ -238,7 +241,7 @@ export default function PatientDoctor() {
                                     <div className="flex">
                                         {renderStars(4.5)}
                                     </div>
-                                    <span className="text-sm text-gray-600">4.5 (Based on reviews)</span>
+                                    <span className="text-sm text-gray-600">4.8 (87 reviews)</span>
                                 </div>
                             </div>
 
@@ -268,11 +271,18 @@ export default function PatientDoctor() {
                     {/* Left Column */}
                     <div className="lg:col-span-2 space-y-6">
                         {/* Bio Section */}
-                        {doctor.doctor_bio && (
+                        {doctor.doctor_bio ? (
                             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                 <div className="p-6 md:p-8">
                                     <h2 className="text-lg font-semibold mb-4">About</h2>
                                     <p className="text-gray-600 leading-relaxed whitespace-pre-line">{doctor.doctor_bio}</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                <div className="p-6 md:p-8">
+                                    <h2 className="text-lg font-semibold mb-4">About</h2>
+                                    <p className="text-gray-400 italic">No bio information available</p>
                                 </div>
                             </div>
                         )}
@@ -293,13 +303,18 @@ export default function PatientDoctor() {
                                         </div>
                                     )}
 
-                                    {doctor.doctor_consultation_fee > 0 && (
+                                    {doctor.doctor_consultation_fee > 0 ? (
                                         <div className="space-y-1">
                                             <h3 className="font-medium text-gray-900">Consultation Fee</h3>
                                             <p className="text-gray-600 flex items-center gap-1">
                                                 <DollarSign className="w-4 h-4" />
                                                 ${doctor.doctor_consultation_fee}
                                             </p>
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-1">
+                                            <h3 className="font-medium text-gray-900">Consultation Fee</h3>
+                                            <p className="text-gray-600">Free</p>
                                         </div>
                                     )}
 
@@ -321,10 +336,30 @@ export default function PatientDoctor() {
                                         </div>
                                     </div>
 
-                                    {doctor.member_since && (
+                                    {doctor.doctor_experience >= 0 && (
                                         <div className="space-y-1">
-                                            <h3 className="font-medium text-gray-900">Member Since</h3>
-                                            <p className="text-gray-600">{new Date(doctor.member_since).toLocaleDateString()}</p>
+                                            <h3 className="font-medium text-gray-900">Experience</h3>
+                                            <p className="text-gray-600">
+                                                {doctor.doctor_experience === 0 
+                                                    ? "New practitioner" 
+                                                    : `${doctor.doctor_experience} years`}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {doctor.doctor_date_of_birth && (
+                                        <div className="space-y-1">
+                                            <h3 className="font-medium text-gray-900">Age</h3>
+                                            <p className="text-gray-600">
+                                                {new Date().getFullYear() - new Date(doctor.doctor_date_of_birth).getFullYear()} years
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {doctor.doctor_gender && (
+                                        <div className="space-y-1">
+                                            <h3 className="font-medium text-gray-900">Gender</h3>
+                                            <p className="text-gray-600 capitalize">{doctor.doctor_gender}</p>
                                         </div>
                                     )}
                                 </div>
@@ -335,7 +370,7 @@ export default function PatientDoctor() {
                     {/* Right Column */}
                     <div className="space-y-6">
                         {/* Education Section */}
-                        {doctor.doctor_educations && doctor.doctor_educations.length > 0 && (
+                        {doctor.doctor_educations && doctor.doctor_educations.length > 0 ? (
                             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                 <div className="p-6 md:p-8">
                                     <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
@@ -353,10 +388,20 @@ export default function PatientDoctor() {
                                     </div>
                                 </div>
                             </div>
+                        ) : (
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                <div className="p-6 md:p-8">
+                                    <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                                        <GraduationCap className="w-5 h-5 text-blue-600" />
+                                        Education
+                                    </h2>
+                                    <p className="text-gray-400 italic">No education information available</p>
+                                </div>
+                            </div>
                         )}
 
                         {/* Certifications Section */}
-                        {doctor.doctor_certifications && doctor.doctor_certifications.length > 0 && (
+                        {doctor.doctor_certifications && doctor.doctor_certifications.length > 0 ? (
                             <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                                 <div className="p-6 md:p-8">
                                     <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
@@ -372,6 +417,16 @@ export default function PatientDoctor() {
                                             </div>
                                         ))}
                                     </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                                <div className="p-6 md:p-8">
+                                    <h2 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                                        <Award className="w-5 h-5 text-blue-600" />
+                                        Certifications
+                                    </h2>
+                                    <p className="text-gray-400 italic">No certifications available</p>
                                 </div>
                             </div>
                         )}

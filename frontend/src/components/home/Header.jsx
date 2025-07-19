@@ -16,7 +16,7 @@ import {
 
 const ROUTES = {
   HOME: "/home",
-  FIND_DOCTOR: "/find-doctor",
+  FIND_DOCTOR: '/patient/findDoctor',
   CONSULTATION: "/consultation",
   ABOUT: "/about",
   LOGIN: "/login",

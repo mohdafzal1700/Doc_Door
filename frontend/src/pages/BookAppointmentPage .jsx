@@ -219,6 +219,7 @@ export default function AppointmentBooking({ }) {
     const handleSubmitBooking = async () => {
         setLoading(true)
         setError("")
+        const medicalRecordId = localStorage.getItem('medicalRecordId');
 
         try {
             const bookingPayload = {
@@ -229,6 +230,7 @@ export default function AppointmentBooking({ }) {
                 slot_time: bookingData.selectedSlot?.startTime || bookingData.selectedSlot?.start_time,
                 mode: bookingData.consultationMode,
                 notes: bookingData.patientInfo.notes || "",
+                
             }
             console.log('Doctor ID from params:', doctorId);
             console.log('Doctor data:', doctor?.data);
@@ -244,7 +246,7 @@ export default function AppointmentBooking({ }) {
                 }
             }
             if (medicalRecord?.id) {
-                bookingPayload.medical_record = parseInt(medicalRecord.id);
+                bookingPayload.medical_record = medicalRecordId;
             }
             const convertTo24HourFormat = (time12h) => {
                 if (!time12h) return null;
@@ -265,7 +267,9 @@ export default function AppointmentBooking({ }) {
 
             const result = await createAppointment(bookingPayload)
             
-            if (result.success) {
+            
+
+            if (result && (result.success || result.status === 201 || result.status === 200 || (result.data && !result.error))) {
                 showSuccessNotification("Appointment booked successfully!")
                 
                 setCurrentStep(1)
