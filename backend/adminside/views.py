@@ -480,3 +480,7 @@ class DoctorApprovalActionView(generics.UpdateAPIView):
     def patch(self, request, *args, **kwargs):
         """Override patch to ensure it calls update"""
         return self.update(request, *args, **kwargs)
+
+
+class Subscription:
+    pass

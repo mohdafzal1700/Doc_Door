@@ -1651,3 +1651,5 @@ class PatientLocationUpdateSerializer(serializers.ModelSerializer):
         
         logger.debug("✅ Location data validation passed")
         return data
+    
+    
