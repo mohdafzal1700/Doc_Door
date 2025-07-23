@@ -8,7 +8,8 @@ from .views import (
     DoctorApplicationListView,
     DoctorApplicationDetailView,
     DoctorApprovalActionView,
-    
+    SubscriptionPlanListCreateView,
+    SubscriptionPlanDetailView
     
 )
 
@@ -25,5 +26,6 @@ urlpatterns = [
     path('admins/doctor-applications/', DoctorApplicationListView.as_view(), name='doctor-applications-list'),
     path('admins/doctor-applications/<uuid:id>/', DoctorApplicationDetailView.as_view(), name='doctor-application-detail'),
     path('admins/doctor-applications/<uuid:id>/action/', DoctorApprovalActionView.as_view(), name='doctor-approval-action'),
-    
+    path('admins/subscription-plans/',SubscriptionPlanListCreateView.as_view(), name='plan-list-create'),
+    path('admins/subscription-plans/<int:pk>/',SubscriptionPlanDetailView.as_view(), name='plan-list-create'),
 ]

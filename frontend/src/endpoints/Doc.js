@@ -819,3 +819,64 @@ export const rescheduleAppointment = async (appointmentId, data) => {
         throw error;
     }
 };
+
+export const getSubscriptionStatus = () => axios.get("subscription-status/");
+
+export const getSubscriptionPlans = () => axios.get('subscriptions/');
+
+export const getSubscriptionPlan = (id) => axios.get(`subscriptions/${id}/`);
+
+export const activateSubscription = (data) => axios.post('activate/', data);
+
+// Update/Upgrade a subscription
+export const updateSubscription = (data) => axios.post('update/', data);
+
+// Verify Razorpay payment
+export const verifyPayment = (data) => axios.post('verify-payment/', data);
+
+// Cancel an active subscription
+export const cancelSubscription = (data) => axios.post('cancel/', data);
+
+export const getCurrentSubscription = () => axios.get("subscription/current/");
+export const getCurrentSubscriptionInvoice = async (params = {}, config = {}) => {
+    try {
+        const response = await axiosInstance.get('/api/subscription/invoice/', {
+            params,
+            ...config,
+            // Ensure binary data is handled correctly
+            responseType: config.responseType || 'blob',
+            headers: {
+                'Accept': 'application/pdf',
+                ...config.headers
+            }
+        });
+        
+        return response;
+    } catch (error) {
+        console.error('API Error:', error);
+        throw error;
+    }
+};
+
+// Alternative approach if the above doesn't work
+export const downloadInvoicePDF = async (subscriptionId) => {
+    try {
+        const response = await fetch(`/api/subscription/invoice/?format=pdf&subscription_id=${subscriptionId}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${your_auth_token}`,
+                'Accept': 'application/pdf'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const blob = await response.blob();
+        return { data: blob, status: response.status };
+    } catch (error) {
+        console.error('Download error:', error);
+        throw error;
+    }
+};

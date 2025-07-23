@@ -35,7 +35,10 @@ import AppointmentRequestsPage from "./doctor/pages/appointment-requests"
 import DoctorDashboard from "./doctor/pages/appoinment-page"
 import FindDoctorPage from "./pages/FindDoctorPage"
 import NearbyDoctorFinder from "./doctor/pages/NearbyDoctorFinder "
-
+import Plan from "./admin/Adminplan"
+import SubscriptionPlanForm from "./admin/Adminplanform"
+import CurrentSubscription from "./doctor/pages/currentSubscription"
+import ChoosePlanDashboard from "./doctor/pages/ChoosePlan"
 
 
 
@@ -78,7 +81,11 @@ function App() {
         <Route path='/doctor/appointmentsPage' element={<DoctorDashboard/>} />
         <Route path='/patient/findDoctor' element={<FindDoctorPage/>} />
         <Route path='/patient/nearbyDoctorFinder' element={<NearbyDoctorFinder/>} />
-
+        <Route path='/admin/Plan' element={<Plan/>} />
+        <Route path='/admin/subscriptionPlanForm' element={<SubscriptionPlanForm/>} />
+        <Route path='/doctor/currentSubscription' element={<CurrentSubscription/>} />
+        <Route path='/doctor/choosePlan' element={<ChoosePlanDashboard/>} />
+        
         
         
         

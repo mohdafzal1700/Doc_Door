@@ -9,6 +9,18 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import InvalidToken
 
+from rest_framework import generics, status
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated, IsAdminUser
+from rest_framework.decorators import action
+from rest_framework.viewsets import ModelViewSet
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
+from django.db.models import Q
+from doctor.models import SubscriptionPlan
+from .serializers import SubscriptionPlanSerializer
+
+
 # Project-specific serializers and models
 from adminside.serializers import AdminLoginSerializer
 from patients.serializers import UserProfileSerializer, UserStatusSerializer 
@@ -457,7 +469,7 @@ class DoctorApprovalActionView(generics.UpdateAPIView):
                     'completion_status': completion_status
                 }, status=status.HTTP_400_BAD_REQUEST)
         
-        # Perform the action
+        # Perform the action of love
         try:
             updated_instance = serializer.save()
             logger.info(f"Successfully processed {action} for doctor {instance.id}")
@@ -482,5 +494,76 @@ class DoctorApprovalActionView(generics.UpdateAPIView):
         return self.update(request, *args, **kwargs)
 
 
-class Subscription:
-    pass
+class SubscriptionPlanListCreateView(generics.ListCreateAPIView):
+    """List all subscription plans or create a new one"""
+    queryset = SubscriptionPlan.objects.filter(is_active=True)
+    serializer_class = SubscriptionPlanSerializer
+    permission_classes = [IsAuthenticated]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = ['name']
+    search_fields = ['name']
+    ordering = ['price']
+
+    def get_permissions(self):
+        if self.request.method == 'POST':
+            return [IsAdminUser()]
+        return [IsAuthenticated()]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    'message': 'Subscription plan created successfully',
+                    'data': serializer.data
+                },
+                status=status.HTTP_201_CREATED
+            )
+        return Response(
+            {
+                'message': 'Validation failed',
+                'errors': serializer.errors
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+
+class SubscriptionPlanDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """Retrieve, update or delete a subscription plan"""
+    queryset = SubscriptionPlan.objects.all()
+    serializer_class = SubscriptionPlanSerializer
+    
+    def get_permissions(self):
+        if self.request.method == 'GET':
+            return [IsAuthenticated()]
+        return [IsAdminUser()]
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {
+                    'message': 'Subscription plan updated successfully',
+                    'data': serializer.data
+                }
+            )
+        return Response(
+            {
+                'message': 'Validation failed',
+                'errors': serializer.errors
+            },
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        instance.delete()
+        return Response(
+            {'message': 'Subscription plan deleted successfully'},
+            status=status.HTTP_204_NO_CONTENT
+        )

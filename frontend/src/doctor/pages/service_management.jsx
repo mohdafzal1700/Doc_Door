@@ -4,6 +4,44 @@ import DocHeader from '../../components/ui/DocHeader';
 import DoctorSidebar from '../../components/ui/DocSide';
 import { getServices, createService, updateService, deleteService } from '../../endpoints/Doc';
 import { useToast } from '../../components/ui/Toast';
+import { useSubscription,createSubscriptionErrorModal  } from '../../hooks/useSubscription';
+
+
+
+const SubscriptionErrorModal = ({ modalConfig, onClose }) => {
+    if (!modalConfig?.isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+                <div className="flex items-center space-x-3 mb-4">
+                    <AlertCircle className="w-6 h-6 text-amber-500" />
+                    <h3 className="text-lg font-semibold text-gray-900">{modalConfig.title}</h3>
+                </div>
+                <p className="text-gray-600 mb-6">{modalConfig.message}</p>
+                <div className="flex justify-end space-x-3">
+                    {modalConfig.cancelText && (
+                        <button
+                            onClick={onClose}
+                            className="px-4 py-2 text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50"
+                        >
+                            {modalConfig.cancelText}
+                        </button>
+                    )}
+                    <button
+                        onClick={() => {
+                            modalConfig.onConfirm?.();
+                            onClose();
+                        }}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600"
+                    >
+                        {modalConfig.confirmText}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
 
 
 // Confirmation Dialog Component
@@ -39,6 +77,7 @@ const ConfirmDialog = ({ isOpen, onClose, onConfirm, title, message }) => {
 
 // Service Form Modal Component
 const ServiceFormModal = ({ isOpen, onClose, onSubmit, editingService, loading }) => {
+    const { canCreateService } = useSubscription();
     const [formData, setFormData] = useState({
         service_name: '',
         service_mode: 'online',
@@ -117,6 +156,8 @@ const ServiceFormModal = ({ isOpen, onClose, onSubmit, editingService, loading }
 
     if (!isOpen) return null;
 
+
+
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg w-full max-w-md mx-4 max-h-[90vh] overflow-y-auto">
@@ -166,8 +207,12 @@ const ServiceFormModal = ({ isOpen, onClose, onSubmit, editingService, loading }
                                     errors.service_mode ? 'border-red-500' : 'border-gray-300'
                                 }`}
                             >
-                                <option value="online">Online</option>
-                                <option value="offline">Offline</option>
+                                 <option value="online" disabled={!canCreateService('online')}>
+                                    Online {!canCreateService('online') ? '(Not available in your plan)' : ''}
+                                </option>
+                                <option value="offline" disabled={!canCreateService('offline')}>
+                                    Offline {!canCreateService('offline') ? '(Not available in your plan)' : ''}
+                                </option>
                             </select>
                             {errors.service_mode && (
                                 <p className="text-red-500 text-sm mt-1">{errors.service_mode}</p>
@@ -455,6 +500,9 @@ const ServicePage = () => {
     const [confirmDialog, setConfirmDialog] = useState({ isOpen: false, service: null });
     const [error, setError] = useState(null);
     const [detailsModal, setDetailsModal] = useState({ isOpen: false, service: null });
+    const { canCreateService, isNearLimit, subscriptionData, loading: subscriptionLoading, error: subscriptionError } = useSubscription();
+    
+    const [subscriptionErrorModal, setSubscriptionErrorModal] = useState(null);
     
     // Use the toast hook
     const toast = useToast();
@@ -494,9 +542,27 @@ const ServicePage = () => {
     };
 
     const handleAddService = () => {
-        setEditingService(null);
-        setModalOpen(true);
-    };
+    // Check if user can create any type of service
+    const canCreateOnline = canCreateService('online');
+    const canCreateOffline = canCreateService('offline');
+    
+    if (!canCreateOnline && !canCreateOffline) {
+        const modalConfig = createSubscriptionErrorModal({
+            response: { 
+                status: 403, 
+                data: { 
+                    error_type: 'limit_reached', 
+                    message: 'You have reached the service limit for your plan.' 
+                } 
+            }
+        });
+        setSubscriptionErrorModal(modalConfig);
+        return;
+    }
+    
+    setEditingService(null);
+    setModalOpen(true);
+};
 
     const handleEditService = (service) => {
         setEditingService(service);
@@ -528,58 +594,95 @@ const ServicePage = () => {
     };
 
     const handleFormSubmit = async (formData) => {
-        try {
-            setFormLoading(true);
-            let response;
-            
-            if (editingService) {
-                // Update existing service
-                response = await updateService({ id: editingService.id, ...formData });
-                
-                if (response.data && response.data.success) {
-                    setServices(services.map(s => 
-                        s.id === editingService.id ? response.data.data : s
-                    ));
-                    toast.success('Service updated successfully', 'Success');
-                } else {
-                    const errorMessage = response.data?.message || 'Failed to update service';
-                    toast.error(errorMessage, 'Error');
-                    return;
+    try {
+        setFormLoading(true);
+        
+        // Check service type permissions before creating
+        if (!editingService && !canCreateService(formData.service_mode)) {
+            const modalConfig = createSubscriptionErrorModal({
+                response: { 
+                    status: 403, 
+                    data: { 
+                        error_type: 'feature_not_available', 
+                        message: `You cannot create ${formData.service_mode} services with your current plan.` 
+                    } 
                 }
+            });
+            setSubscriptionErrorModal(modalConfig);
+            setFormLoading(false);
+            return;
+        }
+        
+        let response;
+        
+        if (editingService) {
+            response = await updateService({ id: editingService.id, ...formData });
+            
+            if (response.data && response.data.success) {
+                setServices(services.map(s => 
+                    s.id === editingService.id ? response.data.data : s
+                ));
+                toast.success('Service updated successfully', 'Success');
             } else {
-                // Create new service
-                response = await createService(formData);
-                
-                if (response.data && response.data.success) {
-                    setServices([...services, response.data.data]);
-                    toast.success('Service added successfully', 'Success');
-                } else {
-                    const errorMessage = response.data?.message || 'Failed to add service';
-                    toast.error(errorMessage, 'Error');
-                    return;
-                }
+                const errorMessage = response.data?.message || 'Failed to update service';
+                toast.error(errorMessage, 'Error');
+                return;
             }
+        } else {
+            response = await createService(formData);
             
-            setModalOpen(false);
-            setEditingService(null);
-        } catch (error) {
-            console.error('Error saving service:', error);
+            if (response.data && response.data.success) {
+                setServices([...services, response.data.data]);
+                toast.success('Service added successfully', 'Success');
+            } else {
+                const errorMessage = response.data?.message || 'Failed to add service';
+                toast.error(errorMessage, 'Error');
+                return;
+            }
+        }
+        
+        setModalOpen(false);
+        setEditingService(null);
+    } catch (error) {
+        console.error('Error saving service:', error);
+        
+        // Handle subscription-related errors
+        if (error.response?.status === 402 || error.response?.status === 403) {
+            const modalConfig = createSubscriptionErrorModal(error);
+            setSubscriptionErrorModal(modalConfig);
+        } else {
             const errorMessage = error.response?.data?.message || 'Failed to save service';
             toast.error(errorMessage, 'Error');
-        } finally {
-            setFormLoading(false);
         }
-    };
+    } finally {
+        setFormLoading(false);
+    }
+};
 
 
-    if (loading ) {
-            return (
-                <div className="flex items-center justify-center py-12">
-                    <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-                    <span className="ml-2 text-gray-600">Loading profile...</span>
+    if (loading || subscriptionLoading) {
+        return (
+            <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                <span className="ml-2 text-gray-600">Loading...</span>
+            </div>
+        );
+    }
+    if (subscriptionError) {
+        return (
+            <div className="min-h-screen bg-gray-50">
+                <DocHeader />
+                <div className="flex">
+                    <DoctorSidebar />
+                    <div className="flex-1 p-8">
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+                            <p className="text-red-700">Subscription Error: {subscriptionError}</p>
+                        </div>
+                    </div>
                 </div>
-            );
-        }
+            </div>
+        );
+    }
     return (
         <div className="min-h-screen bg-gray-50">
             <DocHeader />
@@ -669,6 +772,13 @@ const ServicePage = () => {
                             title="Delete Service"
                             message={`Are you sure you want to delete "${confirmDialog.service?.service_name}"? This action cannot be undone.`}
                         />
+                        
+                            {subscriptionErrorModal && (
+                            <SubscriptionErrorModal
+                                modalConfig={subscriptionErrorModal}
+                                onClose={() => setSubscriptionErrorModal(null)}
+                            />
+                        )}
 
                         <ServiceDetailsModal
                             isOpen={detailsModal.isOpen}

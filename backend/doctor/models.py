@@ -269,6 +269,149 @@ class Doctor(models.Model):
         
         return has_license
     
+    def has_subscription(self):
+        """Check if doctor has active subscription"""
+        try:
+            return self.subscription.is_active
+        except (DoctorSubscription.DoesNotExist, AttributeError):
+            return False
+        
+    def get_current_plan(self):
+        """Get doctor's current subscription plan"""
+        try:
+            if self.has_subscription():
+                return self.subscription.plan
+            return None
+        except (DoctorSubscription.DoesNotExist, AttributeError):
+            return None
+
+    def can_create_service(self, service_mode='online'):
+        """Check if doctor can create new service"""
+        if not self.has_subscription():
+            return False
+        
+        plan = self.subscription.plan
+        
+        # Check mode permission
+        if service_mode == 'online' and not plan.can_create_online_service:
+            return False
+        if service_mode == 'offline' and not plan.can_create_offline_service:
+            return False
+        
+        # Check service limit
+        current_services = self.service_set.filter(is_active=True).count()
+        return current_services < plan.max_services
+
+    def can_create_schedule(self, date=None):
+        """Check if doctor can create schedule for given date"""
+        if not self.has_subscription():
+            return False
+        
+        if date is None:
+            date = timezone.now().date()
+        
+        plan = self.subscription.plan
+        
+        # Check daily limit
+        daily_schedules = self.schedules_set.filter(
+            date=date, 
+            is_active=True
+        ).count()
+        
+        if daily_schedules >= plan.max_schedules_per_day:
+            return False
+        
+        # Check monthly limit
+        monthly_schedules = self.schedules_set.filter(
+            date__year=date.year,
+            date__month=date.month,
+            is_active=True
+        ).count()
+        
+        return monthly_schedules < plan.max_schedules_per_month
+    
+    
+        
+    def get_usage_stats(self):
+        """Get current usage statistics"""
+        if not self.has_subscription():
+            return None
+        
+        try:
+            plan = self.subscription.plan
+            if not plan:
+                return None
+            
+            today = timezone.now().date()
+            
+            # Debug: Check what relationships exist
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Doctor model relationships: {[f.name for f in self._meta.get_fields() if f.is_relation]}")
+            
+            # You'll need to replace these with your actual relationship names
+            # Example: if your Service model uses related_name='services', use self.services instead
+            services_count = 0
+            daily_schedules_count = 0
+            monthly_schedules_count = 0
+            
+            try:
+                # Try different possible relationship names for services
+                if hasattr(self, 'services'):
+                    services_count = self.services.filter(is_active=True).count()
+                elif hasattr(self, 'service_set'):
+                    services_count = self.service_set.filter(is_active=True).count()
+                logger.info(f"Services count: {services_count}")
+            except Exception as e:
+                logger.error(f"Error counting services: {e}")
+            
+            try:
+                # Try different possible relationship names for schedules
+                if hasattr(self, 'schedules'):
+                    daily_schedules_count = self.schedules.filter(date=today, is_active=True).count()
+                    monthly_schedules_count = self.schedules.filter(
+                        date__year=today.year,
+                        date__month=today.month,
+                        is_active=True
+                    ).count()
+                elif hasattr(self, 'schedule_set'):
+                    daily_schedules_count = self.schedule_set.filter(date=today, is_active=True).count()
+                    monthly_schedules_count = self.schedule_set.filter(
+                        date__year=today.year,
+                        date__month=today.month,
+                        is_active=True
+                    ).count()
+                elif hasattr(self, 'schedules_set'):
+                    daily_schedules_count = self.schedules_set.filter(date=today, is_active=True).count()
+                    monthly_schedules_count = self.schedules_set.filter(
+                        date__year=today.year,
+                        date__month=today.month,
+                        is_active=True
+                    ).count()
+                logger.info(f"Daily schedules: {daily_schedules_count}, Monthly: {monthly_schedules_count}")
+            except Exception as e:
+                logger.error(f"Error counting schedules: {e}")
+            
+            return {
+                'services': {
+                    'used': services_count,
+                    'limit': getattr(plan, 'max_services', 0)
+                },
+                'daily_schedules': {
+                    'used': daily_schedules_count,
+                    'limit': getattr(plan, 'max_schedules_per_day', 0)
+                },
+                'monthly_schedules': {
+                    'used': monthly_schedules_count,
+                    'limit': getattr(plan, 'max_schedules_per_month', 0)
+                }
+            }
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in get_usage_stats: {str(e)}", exc_info=True)
+            return None
+            
 class Patient(models.Model):
     GENDER_CHOICES = [
         ('male', 'Male'),
@@ -500,6 +643,9 @@ class Schedules(models.Model):
         
         if errors:
             raise ValidationError(errors)
+        
+        
+    
 
     def save(self, *args, **kwargs):
         """Override save to run validation and calculate total slots"""
@@ -748,5 +894,145 @@ class Payment(models.Model):
     
     
 
+class SubscriptionPlan(models.Model):
+    """Simple subscription plans for doctors"""
+    
+    PLAN_CHOICES = [
+    ('basic', 'Basic Plan'),
+    ('standard', 'Standard Plan'),
+    ('pro', 'Pro Plan'),
+    ('premium', 'Premium Plan'),
+    ('enterprise', 'Enterprise Plan'),
+]
+    
+    name = models.CharField(max_length=50, choices=PLAN_CHOICES, unique=True)
+    price = models.DecimalField(max_digits=8, decimal_places=2)
+    duration_days = models.IntegerField(default=30)
+    
+    # Simple feature limits
+    max_services = models.IntegerField(default=3)
+    max_schedules_per_day = models.IntegerField(default=2)
+    max_schedules_per_month = models.IntegerField(default=20)
+    
+    # Feature permissions
+    can_create_online_service = models.BooleanField(default=True)
+    can_create_offline_service = models.BooleanField(default=False)
+    
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.get_name_display()} - ₹{self.price}"
 
 
+class DoctorSubscription(models.Model):
+    """Doctor's current subscription status"""
+    
+    STATUS_ACTIVE = 'active'
+    STATUS_EXPIRED = 'expired'
+    STATUS_CANCELLED = 'cancelled'
+
+    PAYMENT_PENDING = 'pending'
+    PAYMENT_COMPLETED = 'completed'
+    PAYMENT_FAILED = 'failed'
+    PAYMENT_CANCELLED = 'cancelled'
+
+    STATUS_CHOICES = [
+        (STATUS_ACTIVE, 'Active'),
+        (STATUS_EXPIRED, 'Expired'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    ]
+
+    PAYMENT_STATUS_CHOICES = [
+        (PAYMENT_PENDING, 'Pending'),
+        (PAYMENT_COMPLETED, 'Completed'),
+        (PAYMENT_FAILED, 'Failed'),
+        (PAYMENT_CANCELLED, 'Cancelled'),
+    ]
+    
+    doctor = models.OneToOneField('Doctor', on_delete=models.CASCADE, related_name='subscription')
+    plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE)
+    
+    start_date = models.DateTimeField(default=timezone.now)
+    end_date = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
+    
+    # Payment info
+    
+    amount_paid = models.DecimalField(max_digits=8, decimal_places=2)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    payment_status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
+    paid_at = models.DateTimeField(blank=True, null=True)
+    
+    previous_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.SET_NULL, null=True, blank=True, related_name='previous_subs')
+    razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
+    is_direct_upgrade = models.BooleanField(default=False)
+    cancelled_at = models.DateTimeField(null=True, blank=True)
+
+    # Optional Razorpay fields
+    razorpay_order_id = models.CharField(max_length=100, blank=True, null=True)
+    razorpay_signature = models.CharField(max_length=255, blank=True, null=True)
+
+    def __str__(self):
+        return f"{self.doctor} - {self.plan.get_name_display()}"
+
+    def save(self, *args, **kwargs):
+        # Auto-calculate end date
+        if not self.end_date:
+            self.end_date = self.start_date + timedelta(days=self.plan.duration_days)
+        
+        # Set amount from plan
+        if not self.amount_paid:
+            self.amount_paid = self.plan.price
+            
+        super().save(*args, **kwargs)
+
+    @property
+    def is_active(self):
+        """Check if subscription is currently active"""
+        return (
+            self.status == 'active' and 
+            self.start_date <= timezone.now() <= self.end_date
+        )
+
+    @property
+    def days_remaining(self):
+        """Days left in subscription"""
+        if not self.is_active:
+            return 0
+        remaining = self.end_date - timezone.now()
+        return max(0, remaining.days)
+    
+    
+class SubscriptionUpgrade(models.Model):
+    """Track subscription upgrade attempts"""
+    
+    STATUS_PENDING = 'pending'
+    STATUS_COMPLETED = 'completed'
+    STATUS_FAILED = 'failed'
+    STATUS_CANCELLED = 'cancelled'
+    
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_FAILED, 'Failed'),
+        (STATUS_CANCELLED, 'Cancelled'),
+    ]
+    
+    subscription = models.ForeignKey(DoctorSubscription, on_delete=models.CASCADE, related_name='upgrades')
+    old_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='old_upgrades')
+    new_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='new_upgrades')
+    upgrade_price = models.DecimalField(max_digits=8, decimal_places=2)
+    remaining_days = models.PositiveIntegerField()
+    
+    razorpay_order_id = models.CharField(max_length=100)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    
+    def __str__(self):
+        return f"Upgrade {self.old_plan.get_name_display()} -> {self.new_plan.get_name_display()}"

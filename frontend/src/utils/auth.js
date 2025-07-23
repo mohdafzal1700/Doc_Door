@@ -220,3 +220,36 @@ export const useAuthState = () => {
 
     return authState;
 };
+
+
+export const handleSubscriptionError = (error, navigate, showModal) => {
+    if (error.response?.status === 402) {
+        showModal({
+        title: 'Subscription Required',
+        message: 'You need an active subscription to access this feature.',
+        onConfirm: () => navigate('/subscription/plans'),
+        confirmText: 'View Plans',
+        cancelText: 'Cancel'
+        });
+    } else if (error.response?.status === 403) {
+        const errorData = error.response.data;
+
+        if (errorData.error_type === 'limit_reached') {
+        showModal({
+            title: 'Plan Limit Reached',
+            message: errorData.message,
+            onConfirm: () => navigate('/subscription/plans'),
+            confirmText: 'Upgrade Plan',
+            cancelText: 'Cancel'
+        });
+        } else {
+        showModal({
+            title: 'Feature Not Available',
+            message: errorData.message || 'This feature is not available in your current plan.',
+            onConfirm: () => navigate('/subscription/plans'),
+            confirmText: 'View Plans',
+            cancelText: 'Cancel'
+        });
+        }
+    }
+    };

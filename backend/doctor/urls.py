@@ -39,4 +39,21 @@ urlpatterns = [
     path('appointments/<int:appointment_id>/handle/', views.HandleAppointmentRequestView.as_view(), name='handle_appointment_request'),
     path('appointments/<int:appointment_id>/status/', views.UpdateAppointmentStatusView.as_view(), name='update_appointment_status'),
     path('appointments/<int:appointment_id>/reschedule/', views.RescheduleAppointmentView.as_view(), name='reschedule_appointment'),
+    path('subscription-status/', views.SubscriptionStatusView.as_view(), name='subscription-status'),
+    path('subscriptions/', views.SubscriptionPlanListView.as_view(), name='subscription-plan-list'),
+    path('subscriptions/<int:id>/', views.SubscriptionPlanDetailView.as_view(), name='subscription-plan-detail'),
+    path('activate/', views.SubscriptionActivationView.as_view(), name='subscription-activate'),
+    path('update/', views.SubscriptionUpdateView.as_view(), name='subscription-update'),
+    path('verify-payment/', views.PaymentVerificationView.as_view(), name='payment-verification'),
+    path('cancel/', views.SubscriptionCancellationView.as_view(), name='subscription-cancel'),
+    path('subscription/invoice/',views.SubscriptionInvoiceView.as_view(), name='current-subscription-invoice'),
+    
+    # For specific subscription invoice
+    path('subscription/<int:subscription_id>/invoice/', views.SubscriptionInvoiceView.as_view(), name='subscription-invoice'),
+
+    path('subscription/history/', views.SubscriptionHistoryView.as_view(), name='subscription-history'),
+    path('subscription/current/', views.CurrentSubscriptionView.as_view(), name='current-subscription')
+
+
 ]
+

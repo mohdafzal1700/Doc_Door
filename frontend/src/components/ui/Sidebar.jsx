@@ -30,7 +30,7 @@ const Sidebar = () => {
         if (path === '/doctorapplications') return 'applications';
         if (path === '/patientspage') return 'patients';
         if (path === '/appointments') return 'appointments';
-        if (path === '/plans') return 'plans';
+        if (path === '/admin/Plan') return 'plans';
         if (path === '/departments') return 'departments';
         return 'dashboard';
     };
@@ -43,7 +43,7 @@ const Sidebar = () => {
         { id: 'applications', label: 'Applications', icon: FileText, path: '/doctorapplications' },
         { id: 'patients', label: 'Patients', icon: UserCheck, path: '/patientspage' },
         { id: 'appointments', label: 'Appointments', icon: Calendar, path: '/appointments' },
-        { id: 'plans', label: 'Plans', icon: Briefcase, path: '/plans' },
+        { id: 'plans', label: 'Plans', icon: Briefcase, path: '/admin/Plan' },
         { id: 'departments', label: 'Departments', icon: Building2, path: '/departments' },
     ];
 

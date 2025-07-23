@@ -46,3 +46,21 @@ export const doctorApprovalAction = (doctorId, action, adminComment = '') =>
     });
 
 
+
+export const getAllSubscriptionPlans = () => 
+    adminAxios.get('subscription-plans/');
+
+
+export const createSubscriptionPlan = (planData) => 
+    adminAxios.post('subscription-plans/', planData);
+
+
+export const getSubscriptionPlanById = (planId) => 
+    adminAxios.get(`subscription-plans/${planId}/`);
+
+export const updateSubscriptionPlan = (planId, updatedData) => 
+    adminAxios.put(`subscription-plans/${planId}/`, updatedData);
+
+
+export const deleteSubscriptionPlan = (planId) => 
+    adminAxios.delete(`subscription-plans/${planId}/`);

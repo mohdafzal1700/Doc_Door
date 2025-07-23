@@ -6,13 +6,28 @@ from .models import User, Doctor, DoctorEducation, DoctorCertification, DoctorPr
 from datetime import datetime, timedelta
 from django.utils import timezone
 from datetime import datetime,date
+import hashlib
+import logging
+import razorpay
+from decimal import Decimal, ROUND_HALF_UP
+from datetime import timedelta
+from django.db import transaction
+from django.utils import timezone
+from django.conf import settings
+from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from django.contrib.auth import authenticate
 from rest_framework import serializers
 import logging
+from django.db import transaction
+from doctor.models  import SubscriptionPlan,DoctorSubscription,SubscriptionUpgrade
+from adminside.serializers import SubscriptionPlanSerializer
+from django.conf import settings
+import razorpay
+from decimal import Decimal, ROUND_HALF_UP
 
-import logging
+
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
@@ -1088,6 +1103,60 @@ class ServiceSerializer(serializers.ModelSerializer):
         service_fee = obj.service_fee or 0
         return float(doctor_fee) + float(service_fee)
 
+    def validate(self, data):
+        """Add subscription validation to service creation"""
+        logger.debug("Starting service validation")
+        logger.debug(f"Input data: {data}")
+        
+        # Get the doctor from the request context (set during view processing)
+        request = self.context.get('request')
+        logger.debug(f"Request object: {request}")
+        logger.debug(f"Request user: {getattr(request, 'user', None) if request else None}")
+        
+        if request and hasattr(request.user, 'doctor_profile'):
+            doctor = request.user.doctor_profile
+            logger.debug(f"Doctor profile found: {doctor}")
+            logger.debug(f"Doctor ID: {getattr(doctor, 'id', None)}")
+            
+            service_mode = data.get('service_mode', 'online')
+            logger.debug(f"Service mode: {service_mode}")
+            
+            # Check if doctor can create this type of service
+            can_create = doctor.can_create_service(service_mode)
+            logger.debug(f"Can create service ({service_mode}): {can_create}")
+            
+            if not can_create:
+                current_plan = doctor.get_current_plan()
+                logger.debug(f"Current plan: {current_plan}")
+                
+                if not current_plan:
+                    logger.warning(f"No active subscription for doctor {doctor.id}")
+                    raise serializers.ValidationError({
+                        'subscription': 'Active subscription required to create services.',
+                        'redirect_to': 'subscription_plans'
+                    })
+                else:
+                    usage_stats = doctor.get_usage_stats()
+                    logger.warning(f"Service limit reached for doctor {doctor.id}")
+                    logger.debug(f"Usage stats: {usage_stats}")
+                    logger.debug(f"Plan details: {current_plan}")
+                    
+                    raise serializers.ValidationError({
+                        'service_limit': f'Cannot create {service_mode} service. Plan limit reached.',
+                        'current_usage': usage_stats,
+                        'redirect_to': 'subscription_upgrade'
+                    })
+        else:
+            logger.warning("No doctor profile found in request context")
+            logger.debug(f"Request exists: {request is not None}")
+            if request:
+                logger.debug(f"User authenticated: {getattr(request.user, 'is_authenticated', False)}")
+                logger.debug(f"User has doctor_profile attr: {hasattr(request.user, 'doctor_profile')}")
+        
+        logger.debug("Validation completed successfully")
+        return data
+
+
 class SchedulesSerializer(serializers.ModelSerializer):
     """Serializer for Schedules model with doctor and service details"""
     
@@ -1236,9 +1305,28 @@ class SchedulesSerializer(serializers.ModelSerializer):
         service = data.get('service')
         mode = data.get('mode')
         
-        # if service and mode:
-        #     if service.service_mode.lower() != mode.lower():
-        #         errors['mode'] = f"Schedule mode must match service mode: {service.service_mode}"
+        request = self.context.get('request')
+        if request and hasattr(request.user, 'doctor_profile'):
+            doctor = request.user.doctor_profile
+            schedule_date = data.get('date')
+            
+            # Check if doctor can create schedule
+            if not doctor.can_create_schedule(schedule_date):
+                plan = doctor.get_current_plan()
+                if not plan:
+                    errors['subscription'] = 'Active subscription required to create schedules.'
+                else:
+                    usage_stats = doctor.get_usage_stats()
+                    if usage_stats['daily_schedules']['used'] >= usage_stats['daily_schedules']['limit']:
+                        errors['schedule_limit'] = 'Daily schedule limit reached for your plan.'
+                    elif usage_stats['monthly_schedules']['used'] >= usage_stats['monthly_schedules']['limit']:
+                        errors['schedule_limit'] = 'Monthly schedule limit reached for your plan.'
+                    
+                    errors['current_usage'] = usage_stats
+                    errors['redirect_to'] = 'subscription_upgrade'
+        
+        
+        
         
         if errors:
             raise serializers.ValidationError(errors)
@@ -1350,3 +1438,302 @@ class DoctorLocationUpdateSerializer(serializers.ModelSerializer):
         if not (-180 <= value <= 180):
             raise serializers.ValidationError("Longitude must be between -180 and 180 degrees")
         return value
+    
+    
+
+
+def generate_short_receipt(prefix, doctor_id, timestamp=None):
+    """Generate a short receipt string that fits Razorpay's 40-character limit"""
+    if timestamp is None:
+        timestamp = int(timezone.now().timestamp())
+    
+    # Create a hash of doctor_id and timestamp for uniqueness
+    hash_input = f"{doctor_id}_{timestamp}"
+    short_hash = hashlib.md5(hash_input.encode()).hexdigest()[:8]
+    
+    # Format: prefix_hash (e.g., "sub_a1b2c3d4" or "upg_a1b2c3d4")
+    receipt = f"{prefix}_{short_hash}"
+    
+    # Ensure it's within 40 characters (should be around 12-16 chars)
+    return receipt[:40]
+
+class SubscriptionActivationSerializer(serializers.Serializer):
+    """Serializer for activating a new subscription or updating existing one"""
+    plan_id = serializers.IntegerField()
+    
+    def validate_plan_id(self, value):
+        try:
+            plan = SubscriptionPlan.objects.get(id=value, is_active=True)
+            return value
+        except SubscriptionPlan.DoesNotExist:
+            raise serializers.ValidationError("Invalid or inactive subscription plan.")
+    
+    @transaction.atomic
+    def create(self, validated_data):
+        """Create Razorpay order for subscription activation or update"""
+        doctor = self.context['doctor']
+        plan = SubscriptionPlan.objects.get(id=validated_data['plan_id'])
+        
+        # Check if doctor already has subscription - handle as update instead of error
+        has_existing_subscription = hasattr(doctor, 'subscription')
+        
+        if has_existing_subscription:
+            current_subscription = doctor.subscription
+            
+            # If same plan and active, return error
+            if current_subscription.is_active and current_subscription.plan.id == plan.id:
+                raise serializers.ValidationError("You already have this subscription plan active.")
+            
+            # Log the subscription change
+            logger.info(f"Updating existing subscription {current_subscription.id} for doctor {doctor.id}")
+        else:
+            current_subscription = None
+        
+        try:
+            # Create Razorpay client
+            client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+            
+            # Generate short receipt that fits within 40 characters
+            timestamp = int(timezone.now().timestamp())
+            receipt = generate_short_receipt("sub", doctor.id, timestamp)
+            
+            # Create Razorpay order
+            order_data = {
+                'amount': int(plan.price * 100),  # Amount in paise
+                'currency': 'INR',
+                'receipt': receipt,
+                'notes': {
+                    'doctor_id': str(doctor.id),
+                    'plan_id': str(plan.id),
+                    'type': 'subscription_activation' if not has_existing_subscription else 'subscription_change',
+                    'timestamp': str(timestamp),
+                    'previous_plan_id': str(current_subscription.plan.id) if has_existing_subscription else None
+                }
+            }
+            
+            razorpay_order = client.order.create(order_data)
+            logger.info(f"Razorpay order created: {razorpay_order['id']} for doctor {doctor.id}")
+            
+        except razorpay.errors.BadRequestError as e:
+            logger.error(f"Razorpay BadRequest error: {str(e)}")
+            raise serializers.ValidationError(f"Payment gateway error: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error creating Razorpay order: {str(e)}")
+            raise serializers.ValidationError("Failed to create payment order. Please try again.")
+        
+        # Create or update subscription record
+        if has_existing_subscription:
+            # Update existing subscription
+            subscription = current_subscription
+            subscription.plan = plan
+            subscription.start_date = timezone.now()
+            subscription.end_date = None  # Will be calculated on save
+            subscription.amount_paid = plan.price
+            subscription.status = 'active'
+            subscription.payment_status = 'pending'
+            subscription.razorpay_order_id = razorpay_order['id']
+            subscription.razorpay_payment_id = None
+            subscription.razorpay_signature = None
+            subscription.paid_at = None
+            subscription.save()
+        else:
+            # Create new subscription record
+            subscription = DoctorSubscription.objects.create(
+                doctor=doctor,
+                plan=plan,
+                start_date=timezone.now(),
+                amount_paid=plan.price,
+                status='active',
+                payment_status='pending',
+                razorpay_order_id=razorpay_order['id']
+            )
+        
+        return {
+            'subscription': subscription,
+            'razorpay_order': razorpay_order,
+            'plan': plan,
+            'was_update': has_existing_subscription
+        }
+  
+class SubscriptionUpdateSerializer(serializers.Serializer):
+    """Serializer for updating/upgrading subscription plan"""
+    new_plan_id = serializers.IntegerField()
+    
+    def validate_new_plan_id(self, value):
+        try:
+            plan = SubscriptionPlan.objects.get(id=value, is_active=True)
+            return value
+        except SubscriptionPlan.DoesNotExist:
+            raise serializers.ValidationError("Invalid or inactive subscription plan.")
+    
+    def validate(self, attrs):
+        doctor = self.context['doctor']
+        
+        # Check if doctor has active subscription
+        if not hasattr(doctor, 'subscription') or not doctor.subscription.is_active:
+            raise serializers.ValidationError("No active subscription found to update.")
+        
+        # Check if trying to update to same plan
+        if doctor.subscription.plan.id == attrs['new_plan_id']:
+            raise serializers.ValidationError("Cannot update to the same plan.")
+        
+        return attrs
+    
+    def calculate_upgrade_price(self, old_plan, new_plan, remaining_days):
+        """Calculate the upgrade price based on remaining subscription value"""
+        if remaining_days <= 0:
+            return new_plan.price
+        
+        # Calculate remaining value of current plan (pro-rated)
+        daily_rate = old_plan.price / Decimal(str(old_plan.duration_days))
+        value_remaining = daily_rate * Decimal(str(remaining_days))
+        
+        # Calculate upgrade price (difference between new plan and remaining value)
+        upgrade_price = new_plan.price - value_remaining
+        
+        # Ensure upgrade price is not negative and round properly
+        upgrade_price = max(Decimal('0.00'), upgrade_price)
+        return upgrade_price.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    
+    @transaction.atomic
+    def create(self, validated_data):
+        """Create Razorpay order for subscription update"""
+        doctor = self.context['doctor']
+        subscription = doctor.subscription
+        old_plan = subscription.plan
+        new_plan = SubscriptionPlan.objects.get(id=validated_data['new_plan_id'])
+        
+        # Calculate remaining days and upgrade price
+        remaining_days = max(0, (subscription.end_date - timezone.now()).days)
+        upgrade_price = self.calculate_upgrade_price(old_plan, new_plan, remaining_days)
+        
+        # If upgrade price is very small, directly update subscription
+        if upgrade_price < Decimal('1.00'):
+            # Update current subscription directly
+            subscription.plan = new_plan
+            subscription.start_date = timezone.now()
+            subscription.end_date = None  # Will be calculated on save
+            subscription.amount_paid = new_plan.price
+            subscription.status = 'active'
+            subscription.payment_status = 'completed'  # No payment required
+            subscription.save()
+            
+            logger.info(f"Direct upgrade completed for doctor {doctor.id}: {old_plan.name} -> {new_plan.name}")
+            
+            return {
+                'subscription': subscription,
+                'upgrade_price': upgrade_price,
+                'direct_upgrade': True,
+                'plan': new_plan
+            }
+        
+        try:
+            # Create Razorpay order for upgrade payment
+            client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+            
+            timestamp = int(timezone.now().timestamp())
+            receipt = f"upg_{doctor.id}_{timestamp}"[:40]  # Ensure max 40 chars
+            
+            order_data = {
+                'amount': int(upgrade_price * 100),  # Amount in paise
+                'currency': 'INR',
+                'receipt': receipt,
+                'notes': {
+                    'doctor_id': str(doctor.id),
+                    'old_plan_id': str(old_plan.id),
+                    'new_plan_id': str(new_plan.id),
+                    'type': 'subscription_upgrade',
+                    'upgrade_price': str(upgrade_price),
+                    'remaining_days': str(remaining_days)
+                }
+            }
+            
+            razorpay_order = client.order.create(order_data)
+            logger.info(f"Razorpay upgrade order created: {razorpay_order['id']} for doctor {doctor.id}")
+            
+        except Exception as e:
+            logger.error(f"Error creating upgrade order: {str(e)}")
+            raise serializers.ValidationError("Failed to create upgrade order. Please try again.")
+        
+        return {
+            'subscription': subscription,
+            'razorpay_order': razorpay_order,
+            'upgrade_price': upgrade_price,
+            'old_plan': old_plan,
+            'new_plan': new_plan,
+            'remaining_days': remaining_days,
+            'direct_upgrade': False
+        }
+
+
+class PaymentVerificationSerializer(serializers.Serializer):
+    """Serializer for verifying Razorpay payment"""
+    razorpay_order_id = serializers.CharField()
+    razorpay_payment_id = serializers.CharField()
+    razorpay_signature = serializers.CharField()
+    
+    def validate(self, attrs):
+        """Verify Razorpay payment signature"""
+        try:
+            client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+            
+            # Verify payment signature
+            client.utility.verify_payment_signature({
+                'razorpay_order_id': attrs['razorpay_order_id'],
+                'razorpay_payment_id': attrs['razorpay_payment_id'],
+                'razorpay_signature': attrs['razorpay_signature']
+            })
+            
+            logger.info(f"Payment signature verified for order: {attrs['razorpay_order_id']}")
+            return attrs
+            
+        except razorpay.errors.SignatureVerificationError:
+            logger.error(f"Invalid payment signature for order: {attrs['razorpay_order_id']}")
+            raise serializers.ValidationError("Invalid payment signature.")
+        except Exception as e:
+            logger.error(f"Error verifying payment signature: {str(e)}")
+            raise serializers.ValidationError("Payment verification failed.")
+
+class CurrentSubscriptionSerializer(serializers.ModelSerializer):
+    """Serializer for current subscription details"""
+    plan = SubscriptionPlanSerializer(read_only=True)
+    days_remaining = serializers.SerializerMethodField()
+    usage_stats = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = DoctorSubscription
+        fields = [
+            'id', 'plan', 'status', 'payment_status',
+            'start_date', 'end_date', 'days_remaining',
+            'amount_paid', 'is_active', 'paid_at', 'cancelled_at',
+            'usage_stats'
+        ]
+    
+    def get_days_remaining(self, obj):
+        """Calculate days remaining"""
+        if obj.is_active and obj.end_date:
+            days = (obj.end_date - timezone.now()).days
+            return max(0, days)
+        return 0
+    
+    def get_usage_stats(self, obj):
+        """Get usage statistics"""
+        if not obj.is_active:
+            return None
+        return getattr(obj.doctor, 'get_usage_stats', lambda: {})()
+
+class SubscriptionHistorySerializer(serializers.ModelSerializer):
+    """Serializer for subscription history"""
+    plan_name = serializers.CharField(source='plan.get_name_display', read_only=True)
+    can_generate_invoice = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = DoctorSubscription
+        fields = [
+            'id', 'plan_name', 'status', 'payment_status',
+            'start_date', 'end_date', 'amount_paid', 'paid_at',
+            'cancelled_at', 'can_generate_invoice'
+        ]
+    
+    def get_can_generate_invoice(self, obj):
+        return obj.payment_status == 'completed'

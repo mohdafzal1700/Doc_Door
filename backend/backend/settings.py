@@ -71,6 +71,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    
+    'doctor.middleware.subscription_middleware.SubscriptionMiddleware',
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -287,3 +289,5 @@ cloudinary.config(
 # print("CLOUDINARY_API_SECRET:", config('CLOUDINARY_API_SECRET'))
 
 # # Make
+RAZORPAY_KEY_ID = config("RAZORPAY_API_KEY")
+RAZORPAY_KEY_SECRET = config("RAZORPAY_SECRET_KEY") 

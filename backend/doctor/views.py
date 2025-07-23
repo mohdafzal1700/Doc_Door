@@ -10,6 +10,16 @@ from django.utils import timezone
 from django.db import transaction
 from django.db.models import Q
 
+
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
 # DRF imports
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -23,18 +33,25 @@ from rest_framework.exceptions import (
 )
 from rest_framework_simplejwt.views import TokenObtainPairView
 
+from django.conf import settings
+import razorpay
+
 # App-specific imports
 from .models import (
     Doctor, DoctorEducation, DoctorCertification, DoctorProof,
-    Schedules, Service, DoctorLocation, Appointment
+    Schedules, Service, DoctorLocation, Appointment,SubscriptionPlan,SubscriptionUpgrade,
+    DoctorSubscription
 )
 from .serializers import (
     DoctorProfileSerializer, DoctorEducationSerializer,
     DoctorCertificationSerializer, DoctorProofSerializer,
     VerificationStatusSerializer, SchedulesSerializer,
     ServiceSerializer, DoctorLocationSerializer,
-    DoctorLocationUpdateSerializer
+    DoctorLocationUpdateSerializer,SubscriptionActivationSerializer,SubscriptionUpdateSerializer,
+    PaymentVerificationSerializer,CurrentSubscriptionSerializer,SubscriptionHistorySerializer
 )
+
+from adminside.serializers import SubscriptionPlanSerializer
 from doctor.serializers import CustomDoctorTokenObtainPairSerializer
 from patients.serializers import AppointmentSerializer
 
@@ -922,48 +939,93 @@ class ServiceView(APIView):
             traceback.print_exc()
             return Response({
                 'success': False,
-                'message': 'Failed to fetch services',
+                'message': 'Failed to fetch services',  
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
     def post(self, request):
         """Create new service (only doctors can create)"""
+        logger.info(f"Service creation request initiated by user: {request.user.id}")
+        
         try:
-            # Check if user is a doctor
+            logger.info(f"Checking user role for user {request.user.id}")
+            
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                logger.warning(f"Access denied - User {request.user.id} is not a doctor. Role: {getattr(request.user, 'role', 'None')}")
                 return Response({
                     'success': False,
                     'message': 'Access denied. Only doctors can create services.',
                 }, status=status.HTTP_403_FORBIDDEN)
-
-            # Get or create doctor profile
+            
+            logger.info(f"User {request.user.id} verified as doctor")
+            
+            
             doctor, created = Doctor.objects.get_or_create(user=request.user)
             
-            serializer = ServiceSerializer(data=request.data)
+            if created:
+                logger.debug(f"New doctor profile created for user {request.user.id}")
+            else:
+                logger.debug(f"Existing doctor profile found for user {request.user.id}")
+            
+        
+            service_mode = request.data.get('service_mode', 'online')
+            logger.debug(f"Checking subscription limits for service_mode: {service_mode}")
+            
+            if not doctor.can_create_service(service_mode):
+                logger.debug(f"Doctor {doctor.id} cannot create {service_mode} service - checking subscription status")
+                
+                plan = doctor.get_current_plan()
+                
+                if not plan:
+                    logger.debug(f"Doctor {doctor.id} has no active subscription plan")
+                    print(f"Doctor {doctor.id} has no active subscription plan")
+                    return Response({
+                        'success': False,
+                        'message': 'Active subscription required to create services.',
+                        'error_type': 'subscription_required',
+                        
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                else:
+                    usage_stats = doctor.get_usage_stats()
+                    logger.debug(f"Doctor {doctor.id} has reached plan limits. Plan: {plan.name if hasattr(plan, 'name') else plan}, Usage: {usage_stats}")
+                    
+                    return Response({
+                        'success': False,
+                        'message': f'Cannot create {service_mode} service. Plan limit reached.',
+                        'error_type': 'limit_reached',
+                        'current_usage': usage_stats,
+                    
+                    }, status=status.HTTP_403_FORBIDDEN)
+            
+            logger.debug(f"Subscription check passed for doctor {doctor.id} - proceeding with service creation")
+            
+            # PASS CONTEXT TO SERIALIZER:
+            logger.debug(f"Initializing ServiceSerializer with data: {request.data}")
+            serializer = ServiceSerializer(data=request.data, context={'request': request})
             
             if serializer.is_valid():
-                # Auto-assign the doctor to the service
+                logger.debug(f"Service data validation successful for doctor {doctor.id}")
                 service = serializer.save(doctor=doctor)
-                response_serializer = ServiceSerializer(service)
+                logger.debug(f"Service {service.id} created successfully by doctor {doctor.id}")
                 
                 return Response({
                     'success': True,
-                    'message': 'Service created successfully',
-                    'data': response_serializer.data
+                    'message': 'Service created successfully.',
+                    'data': serializer.data
                 }, status=status.HTTP_201_CREATED)
             else:
+                logger.debug(f"Service data validation failed for doctor {doctor.id}. Errors: {serializer.errors}")
                 return Response({
                     'success': False,
-                    'field_errors': serializer.errors
+                    'message': 'Invalid data provided.',
+                    'errors': serializer.errors
                 }, status=status.HTTP_400_BAD_REQUEST)
-
+                
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Unexpected error during service creation for user {request.user.id}: {str(e)}", exc_info=True)
             return Response({
                 'success': False,
-                'message': 'Failed to create service',
-                'error': str(e)
+                'message': 'An unexpected error occurred while creating the service.',
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def patch(self, request):
@@ -1101,6 +1163,46 @@ class ScheduleView(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    class ScheduleView(APIView):
+        """Handle schedule operations with doctor-specific filtering"""
+        permission_classes = [IsAuthenticated]
+        parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+        def get(self, request):
+            """Get schedule list filtered by user role"""
+            try:
+                # Check user role and filter accordingly
+                if hasattr(request.user, 'role') and request.user.role == 'doctor':
+                    # Doctor sees only their schedules
+                    try:
+                        doctor = Doctor.objects.get(user=request.user)
+                        schedules = Schedules.objects.filter(doctor=doctor).select_related('doctor', 'service')
+                    except Doctor.DoesNotExist:
+                        # If doctor profile doesn't exist, return empty list
+                        schedules = Schedules.objects.none()
+                else:
+                    # Admin or other roles see all schedules
+                    schedules = Schedules.objects.select_related('doctor', 'service').all()
+                
+                schedules = schedules.order_by('date', 'start_time')
+                
+                serializer = SchedulesSerializer(schedules, many=True)
+                
+                return Response({
+                    'success': True,
+                    'data': serializer.data,
+                    'count': schedules.count()
+                }, status=status.HTTP_200_OK)
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return Response({
+                    'success': False,
+                    'message': 'Failed to fetch schedules',
+                    'error': str(e)
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     def post(self, request):
         """Create new schedule (only doctors can create)"""
         print("Received data:", request.data)
@@ -1126,7 +1228,28 @@ class ScheduleView(APIView):
                         'message': 'You can only create schedules for your own services.'
                     }, status=status.HTTP_400_BAD_REQUEST)
             
-            serializer = SchedulesSerializer(data=request.data)
+            # ADD THIS SUBSCRIPTION CHECK:
+            if not doctor.can_create_schedule():
+                plan = doctor.get_current_plan()
+                if not plan:
+                    return Response({
+                        'success': False,
+                        'message': 'Active subscription required to create schedules.',
+                        'error_type': 'subscription_required',
+                        'redirect_to': '/subscription/plans/'
+                    }, status=status.HTTP_402_PAYMENT_REQUIRED)
+                else:
+                    usage_stats = doctor.get_usage_stats()
+                    return Response({
+                        'success': False,
+                        'message': 'Schedule creation limit reached for your plan.',
+                        'error_type': 'limit_reached',
+                        'current_usage': usage_stats,
+                        'redirect_to': '/subscription/upgrade/'
+                    }, status=status.HTTP_403_FORBIDDEN)
+            
+            # PASS CONTEXT TO SERIALIZER:
+            serializer = SchedulesSerializer(data=request.data, context={'request': request})
             
             if serializer.is_valid():
                 # Auto-assign the doctor to the schedule
@@ -2360,3 +2483,914 @@ class RescheduleAppointmentView(APIView):
                 {'error': 'Unable to reschedule appointment'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+            
+class SubscriptionStatusView(APIView):
+    """Get subscription status and usage statistics"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get current subscription status and usage"""
+        try:
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can check subscription status.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            has_subscription = doctor.has_subscription()
+            plan = doctor.get_current_plan()
+            usage_stats = doctor.get_usage_stats() if has_subscription else None
+            
+            # Fix the field name mismatches here
+            return Response({
+                'success': True,
+                'data': {
+                    'has_subscription': has_subscription,
+                    'plan': {
+                        'name': plan.name if plan else None,
+                        'max_services': plan.max_services if plan else 0,
+                        'max_daily_schedules': plan.max_schedules_per_day if plan else 0,  # Fixed field name
+                        'max_monthly_schedules': plan.max_schedules_per_month if plan else 0,  # Fixed field name
+                        'can_create_online_services': plan.can_create_online_service if plan else False,  # Fixed field name
+                        'can_create_offline_services': plan.can_create_offline_service if plan else False  # Fixed field name
+                    } if plan else None,
+                    'usage_stats': usage_stats,
+                    'subscription_end_date': doctor.subscription.end_date if has_subscription else None
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in subscription status: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch subscription status',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+class SubscriptionPlanListView(generics.ListAPIView):
+    """
+    List all active subscription plans
+    GET /api/subscriptions/
+    """
+    queryset = SubscriptionPlan.objects.filter(is_active=True).order_by('price')
+    serializer_class = SubscriptionPlanSerializer
+    permission_classes = [IsAuthenticated]
+
+    def list(self, request, *args, **kwargs):
+        """Override to add custom response format"""
+        try:
+            response = super().list(request, *args, **kwargs)
+            
+            # Add metadata to response
+            response.data = {
+                'success': True,
+                'count': len(response.data),
+                'results': response.data
+            }
+            
+            logger.info(f"Retrieved {len(response.data)} subscription plans")
+            return response
+        except Exception as e:
+            logger.error(f"Error retrieving subscription plans: {str(e)}")
+            return Response(
+                {'success': False, 'error': 'Failed to retrieve subscription plans'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+
+class SubscriptionPlanDetailView(generics.RetrieveAPIView):
+    """
+    Retrieve a specific subscription plan by ID
+    GET /api/subscriptions/{id}/
+    """
+    queryset = SubscriptionPlan.objects.filter(is_active=True)
+    serializer_class = SubscriptionPlanSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_field = 'id'
+
+    def retrieve(self, request, *args, **kwargs):
+        """Override to add custom response format and error handling"""
+        try:
+            instance = self.get_object()
+            serializer = self.get_serializer(instance)
+            
+            logger.info(f"Retrieved subscription plan: {instance.name} (ID: {instance.id})")
+            
+            return Response({
+                'success': True,
+                'data': serializer.data
+            })
+            
+        except SubscriptionPlan.DoesNotExist:
+            logger.warning(f"Subscription plan not found with ID: {kwargs.get('id')}")
+            return Response(
+                {'success': False, 'error': 'Subscription plan not found'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Error retrieving subscription plan: {str(e)}")
+            return Response(
+                {'success': False, 'error': 'Failed to retrieve subscription plan'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+            
+
+
+
+class SubscriptionActivationView(APIView):
+    """Activate a new subscription for doctor"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Create Razorpay order for subscription activation"""
+        try:
+            # Check if user is doctor
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can activate subscriptions.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            serializer = SubscriptionActivationSerializer(
+                data=request.data,
+                context={'doctor': doctor}
+            )
+            
+            if serializer.is_valid():
+                result = serializer.save()
+                
+                message = 'Razorpay order created successfully'
+                if result.get('was_update'):
+                    message = 'Subscription plan updated - Razorpay order created for payment'
+                
+                return Response({
+                    'success': True,
+                    'message': message,
+                    'data': {
+                        'order_id': result['razorpay_order']['id'],
+                        'amount': result['razorpay_order']['amount'],
+                        'currency': result['razorpay_order']['currency'],
+                        'key': settings.RAZORPAY_KEY_ID,
+                        'plan': {
+                            'id': result['plan'].id,
+                            'name': result['plan'].get_name_display(),
+                            'price': str(result['plan'].price),
+                            'duration_days': result['plan'].duration_days
+                        },
+                        'was_update': result.get('was_update', False)
+                    }
+                }, status=status.HTTP_201_CREATED)
+            
+            return Response({
+                'success': False,
+                'message': 'Invalid data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            logger.error(f"Error in subscription activation: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to create subscription order',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+class PaymentVerificationView(APIView):
+    """Verify Razorpay payment and activate/update subscription"""
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request):
+        """Verify payment and activate subscription"""
+        try:
+            # Check if user is doctor
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can verify payments.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            serializer = PaymentVerificationSerializer(data=request.data)
+            
+            if serializer.is_valid():
+                razorpay_order_id = serializer.validated_data['razorpay_order_id']
+                
+                # Check if this is a subscription activation or upgrade
+                try:
+                    subscription = DoctorSubscription.objects.get(
+                        doctor=doctor,
+                        razorpay_order_id=razorpay_order_id
+                    )
+                except DoctorSubscription.DoesNotExist:
+                    # Check if it's an upgrade
+                    try:
+                        upgrade_record = SubscriptionUpgrade.objects.get(
+                            subscription__doctor=doctor,
+                            razorpay_order_id=razorpay_order_id,
+                            status=SubscriptionUpgrade.STATUS_PENDING
+                        )
+                        return self._handle_upgrade_verification(upgrade_record, serializer.validated_data)
+                    except SubscriptionUpgrade.DoesNotExist:
+                        return Response({
+                            'success': False,
+                            'message': 'Order not found for this doctor.'
+                        }, status=status.HTTP_404_NOT_FOUND)
+                
+                # Handle subscription activation
+                return self._handle_activation_verification(subscription, serializer.validated_data)
+            
+            return Response({
+                'success': False,
+                'message': 'Invalid payment data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            logger.error(f"Error in payment verification: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to verify payment',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _handle_activation_verification(self, subscription, payment_data):
+        """Handle subscription activation after payment verification"""
+        now = timezone.now()
+        
+        # Update subscription after successful payment
+        subscription.status = DoctorSubscription.STATUS_ACTIVE
+        subscription.payment_status = DoctorSubscription.PAYMENT_COMPLETED
+        subscription.paid_at = now
+        subscription.razorpay_signature = payment_data['razorpay_signature']
+        subscription.razorpay_payment_id = payment_data['razorpay_payment_id']
+        
+        # Ensure proper end date calculation
+        if not subscription.end_date:
+            subscription.end_date = subscription.start_date + timedelta(
+                days=subscription.plan.duration_days
+            )
+        
+        subscription.save()
+        
+        logger.info(f"Subscription activated for doctor {subscription.doctor.id}: {subscription.plan.name}")
+        
+        return Response({
+            'success': True,
+            'message': 'Payment verified and subscription activated successfully',
+            'data': {
+                'subscription_status': subscription.status,
+                'plan': {
+                    'id': subscription.plan.id,
+                    'name': subscription.plan.get_name_display(),
+                    'price': str(subscription.plan.price)
+                },
+                'start_date': subscription.start_date.isoformat(),
+                'end_date': subscription.end_date.isoformat(),
+                'days_remaining': subscription.days_remaining
+            }
+        }, status=status.HTTP_200_OK)
+    
+    def _handle_upgrade_verification(self, upgrade_record, payment_data):
+        """Handle subscription upgrade after payment verification"""
+        now = timezone.now()
+        subscription = upgrade_record.subscription
+        
+        # Update subscription with new plan
+        subscription.previous_plan = subscription.plan
+        subscription.plan = upgrade_record.new_plan
+        subscription.end_date = subscription.start_date + timedelta(
+            days=upgrade_record.new_plan.duration_days
+        )
+        subscription.razorpay_payment_id = payment_data['razorpay_payment_id']
+        subscription.razorpay_signature = payment_data['razorpay_signature']
+        subscription.save()
+        
+        # Update upgrade record
+        upgrade_record.status = SubscriptionUpgrade.STATUS_COMPLETED
+        upgrade_record.completed_at = now
+        upgrade_record.save()
+        
+        logger.info(f"Subscription upgraded for doctor {subscription.doctor.id}: {upgrade_record.old_plan.name} -> {upgrade_record.new_plan.name}")
+        
+        return Response({
+            'success': True,
+            'message': 'Payment verified and subscription upgraded successfully',
+            'data': {
+                'subscription_status': subscription.status,
+                'old_plan': upgrade_record.old_plan.get_name_display(),
+                'new_plan': {
+                    'id': subscription.plan.id,
+                    'name': subscription.plan.get_name_display(),
+                    'price': str(subscription.plan.price)
+                },
+                'upgrade_price': str(upgrade_record.upgrade_price),
+                'end_date': subscription.end_date.isoformat(),
+                'days_remaining': subscription.days_remaining
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class SubscriptionCancellationView(APIView):
+    """Cancel doctor's subscription"""
+    permission_classes = [IsAuthenticated]
+    
+    @transaction.atomic
+    def post(self, request):
+        """Cancel active subscription"""
+        try:
+            # Check if user is doctor
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can cancel subscriptions.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            # Check if doctor has active subscription
+            if not hasattr(doctor, 'subscription') or not doctor.subscription.is_active:
+                return Response({
+                    'success': False,
+                    'message': 'No active subscription found to cancel.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            subscription = doctor.subscription
+            subscription.status = DoctorSubscription.STATUS_CANCELLED
+            subscription.cancelled_at = timezone.now()
+            subscription.save()
+            
+            logger.info(f"Subscription cancelled for doctor {doctor.id}")
+            
+            return Response({
+                'success': True,
+                'message': 'Subscription cancelled successfully',
+                'data': {
+                    'cancelled_at': subscription.cancelled_at.isoformat(),
+                    'plan': subscription.plan.get_name_display()
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error in subscription cancellation: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to cancel subscription',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class CurrentSubscriptionView(APIView):
+    """Get current subscription details for the doctor"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get current subscription details"""
+        try:
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can check subscription details.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            # Check if doctor has subscription
+            if not hasattr(doctor, 'subscription'):
+                return Response({
+                    'success': True,
+                    'message': 'No subscription found',
+                    'data': {
+                        'has_subscription': False,
+                        'subscription': None
+                    }
+                }, status=status.HTTP_200_OK)
+            
+            subscription = doctor.subscription
+            serializer = CurrentSubscriptionSerializer(subscription)
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'has_subscription': True,
+                    'subscription': serializer.data
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error in current subscription view: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch subscription details',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+import logging
+from django.http import HttpResponse
+from django.conf import settings
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib import colors
+from reportlab.lib.units import inch
+from decimal import Decimal
+
+logger = logging.getLogger(__name__)
+
+class SubscriptionInvoiceView(APIView):
+    """Generate and retrieve subscription invoices"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, subscription_id=None):
+        """Get invoice for subscription"""
+        logger.info(f"Invoice request received - User: {request.user.id}, Subscription ID: {subscription_id}, Format: {request.GET.get('format')}")
+        
+        try:
+            # Validate user is a doctor
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                logger.warning(f"Non-doctor user {request.user.id} attempted to access invoice")
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can access invoices.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            # Get or create doctor instance
+            from .models import Doctor, DoctorSubscription  # Adjust import based on your app structure
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            logger.info(f"Doctor instance retrieved: {doctor.id}, Created: {created}")
+            
+            # Get subscription
+            subscription = self._get_subscription(doctor, subscription_id)
+            if not subscription:
+                logger.error(f"No subscription found for doctor {doctor.id}, subscription_id: {subscription_id}")
+                return Response({
+                    'success': False,
+                    'message': 'No subscription found.'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            logger.info(f"Subscription found: {subscription.id}, Status: {subscription.payment_status}")
+            
+            # Check if subscription is paid
+            if subscription.payment_status != 'completed':
+                logger.warning(f"Attempted to generate invoice for unpaid subscription {subscription.id}")
+                return Response({
+                    'success': False,
+                    'message': 'Invoice not available for unpaid subscription.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Check if PDF download is requested
+            if request.GET.get('format') == 'pdf':
+                logger.info(f"Generating PDF invoice for subscription {subscription.id}")
+                return self._generate_pdf_invoice(subscription)
+            
+            # Generate JSON invoice data
+            logger.info(f"Generating JSON invoice for subscription {subscription.id}")
+            invoice_data = self._generate_invoice_data(subscription)
+            
+            return Response({
+                'success': True,
+                'data': invoice_data
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error generating invoice: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'message': 'Failed to generate invoice',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _get_subscription(self, doctor, subscription_id=None):
+        """Get subscription instance"""
+        try:
+            from .models import DoctorSubscription
+            
+            if subscription_id:
+                # Get specific subscription by ID
+                return DoctorSubscription.objects.get(
+                    id=subscription_id, 
+                    doctor=doctor
+                )
+            else:
+                # Get current active subscription
+                if hasattr(doctor, 'subscription'):
+                    return doctor.subscription
+                else:
+                    # Try to get the latest paid subscription
+                    return DoctorSubscription.objects.filter(
+                        doctor=doctor,
+                        payment_status='completed'
+                    ).order_by('-start_date').first()
+                    
+        except DoctorSubscription.DoesNotExist:
+            logger.error(f"Subscription not found - doctor: {doctor.id}, subscription_id: {subscription_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Error getting subscription: {str(e)}")
+            return None
+    
+    def _generate_pdf_invoice(self, subscription):
+        """Generate PDF invoice"""
+        try:
+            logger.info(f"Starting PDF generation for subscription {subscription.id}")
+            
+            # Create a BytesIO buffer to receive PDF data
+            buffer = BytesIO()
+            
+            # Create the PDF object
+            doc = SimpleDocTemplate(
+                buffer, 
+                pagesize=A4, 
+                rightMargin=72, 
+                leftMargin=72, 
+                topMargin=72, 
+                bottomMargin=18
+            )
+            
+            # Generate invoice data
+            invoice_data = self._generate_invoice_data(subscription)
+            logger.info(f"Invoice data generated for subscription {subscription.id}")
+                
+            # Build PDF content
+            story = []
+            styles = getSampleStyleSheet()
+            
+            # Custom styles
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=24,
+                spaceAfter=30,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor('#2563eb')
+            )
+            
+            heading_style = ParagraphStyle(
+                'CustomHeading',
+                parent=styles['Heading2'],
+                fontSize=14,
+                spaceAfter=12,
+                textColor=colors.HexColor('#1f2937')
+            )
+            
+            normal_style = ParagraphStyle(
+                'CustomNormal',
+                parent=styles['Normal'],
+                fontSize=10,
+                spaceAfter=6
+            )
+            
+            # Header
+            story.append(Paragraph("INVOICE", title_style))
+            story.append(Spacer(1, 20))
+            
+            # Company Info
+            company_info = [
+                ["Your Company Name", ""],
+                ["Your Address Line 1", f"Invoice #: {invoice_data['invoice_number']}"],
+                ["Your Address Line 2", f"Date: {invoice_data['invoice_date'][:10]}"],
+                ["City, State, ZIP", f"Due Date: {invoice_data['due_date'][:10]}"],
+                ["GST No: YOUR_GST_NUMBER", ""]
+            ]
+            
+            company_table = Table(company_info, colWidths=[3*inch, 2.5*inch])
+            company_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            story.append(company_table)
+            story.append(Spacer(1, 30))
+            
+            # Bill To Section
+            story.append(Paragraph("Bill To:", heading_style))
+            customer = invoice_data['customer_details']
+            bill_to_text = f"""
+            {customer['name']}<br/>
+            {customer['email']}<br/>
+            Phone: {customer['phone']}<br/>
+            {customer['address']}
+            """
+            story.append(Paragraph(bill_to_text, normal_style))
+            story.append(Spacer(1, 20))
+            
+            # Subscription Details
+            story.append(Paragraph("Subscription Details:", heading_style))
+            sub_details = invoice_data['subscription_details']
+            sub_text = f"""
+            Plan: {sub_details['plan_name']}<br/>
+            Start Date: {sub_details['start_date'][:10]}<br/>
+            Duration: {sub_details['duration_days']} days
+            """
+            story.append(Paragraph(sub_text, normal_style))
+            story.append(Spacer(1, 20))
+            
+            # Line Items Table
+            story.append(Paragraph("Invoice Items:", heading_style))
+            
+            # Table headers
+            data = [['Description', 'Quantity', 'Rate (₹)', 'Amount (₹)']]
+            
+            # Add line items
+            for item in invoice_data['line_items']:
+                data.append([
+                    item['description'],
+                    str(item['quantity']),
+                    item['rate'],
+                    item['amount']
+                ])
+            
+            # Add subtotal, tax, and total
+            billing = invoice_data['billing_details']
+            data.extend([
+                ['', '', 'Subtotal:', billing['base_amount']],
+                ['', '', f'GST ({billing["tax_rate"]}):', billing['tax_amount']],
+                ['', '', 'Total Amount:', billing['total_amount']]
+            ])
+            
+            # Create table
+            table = Table(data, colWidths=[3*inch, 1*inch, 1*inch, 1*inch])
+            table.setStyle(TableStyle([
+                # Header row
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f4f6')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # Description column left aligned
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                
+                # Data rows
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -4), [colors.white, colors.HexColor('#f9fafb')]),
+                
+                # Total rows
+                ('FONTNAME', (0, -3), (-1, -1), 'Helvetica-Bold'),
+                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e5e7eb')),
+                
+                # Grid
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            
+            story.append(table)
+            story.append(Spacer(1, 30))
+            
+            # Payment Details
+            story.append(Paragraph("Payment Details:", heading_style))
+            payment = invoice_data['payment_details']
+            payment_text = f"""
+            Payment Method: {payment['payment_method']}<br/>
+            Transaction ID: {payment['razorpay_payment_id'] or 'N/A'}<br/>
+            Payment Date: {payment['paid_at'][:10] if payment['paid_at'] else 'N/A'}<br/>
+            Status: <font color="green">PAID</font>
+            """
+            story.append(Paragraph(payment_text, normal_style))
+            story.append(Spacer(1, 30))
+            
+            # Footer
+            footer_text = """
+            <para alignment="center">
+            <font size="8" color="gray">
+            Thank you for your business!<br/>
+            This is a computer generated invoice and does not require signature.
+            </font>
+            </para>
+            """
+            story.append(Paragraph(footer_text, styles['Normal']))
+            
+            # Build PDF
+            logger.info(f"Building PDF document for subscription {subscription.id}")
+            doc.build(story)
+            
+            # Get the value of the BytesIO buffer and return as response
+            pdf = buffer.getvalue()
+            buffer.close()
+            
+            logger.info(f"PDF generated successfully for subscription {subscription.id}, size: {len(pdf)} bytes")
+            
+            if len(pdf) == 0:
+                logger.error("Generated PDF is empty")
+                raise Exception("Generated PDF is empty")
+                
+            response = HttpResponse(content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="invoice-{invoice_data["invoice_number"]}.pdf"'
+            response['Content-Length'] = len(pdf)
+            response.write(pdf)
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error generating PDF invoice: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'message': 'Failed to generate PDF invoice',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _generate_invoice_data(self, subscription):
+        """Generate invoice data for subscription"""
+        try:
+            logger.info(f"Generating invoice data for subscription {subscription.id}")
+            
+            # Calculate tax (18% GST for India)
+            base_amount = subscription.amount_paid
+            tax_rate = Decimal('0.18')  # 18% GST
+            tax_amount = (base_amount * tax_rate).quantize(Decimal('0.01'))
+            total_amount = base_amount + tax_amount
+            
+            # Generate invoice number
+            invoice_number = f"INV-{subscription.id}-{subscription.start_date.strftime('%Y%m%d')}"
+            
+            invoice_data = {
+                'invoice_number': invoice_number,
+                'invoice_date': subscription.paid_at.isoformat() if subscription.paid_at else subscription.start_date.isoformat(),
+                'due_date': subscription.start_date.isoformat(),
+                'status': 'paid',
+                'customer_details': {
+                    'name': f"Dr. {subscription.doctor.user.first_name} {subscription.doctor.user.last_name}",
+                    'email': subscription.doctor.user.email,
+                    'phone': getattr(subscription.doctor, 'phone', 'N/A'),
+                    'address': getattr(subscription.doctor, 'address', 'N/A')
+                },
+                'subscription_details': {
+                    'plan_name': subscription.plan.get_name_display(),
+                    'start_date': subscription.start_date.isoformat(),
+                    'end_date': subscription.end_date.isoformat() if subscription.end_date else None,
+                    'duration_days': subscription.plan.duration_days
+                },
+                'payment_details': {
+                    'razorpay_order_id': subscription.razorpay_order_id,
+                    'razorpay_payment_id': subscription.razorpay_payment_id,
+                    'payment_method': 'Razorpay',
+                    'paid_at': subscription.paid_at.isoformat() if subscription.paid_at else None
+                },
+                'billing_details': {
+                    'base_amount': str(base_amount),
+                    'tax_rate': str(tax_rate * 100) + '%',
+                    'tax_amount': str(tax_amount),
+                    'total_amount': str(total_amount),
+                    'currency': 'INR'
+                },
+                'line_items': [
+                    {
+                        'description': f"{subscription.plan.get_name_display()} Subscription",
+                        'quantity': 1,
+                        'rate': str(base_amount),
+                        'amount': str(base_amount)
+                    }
+                ]
+            }
+            
+            logger.info(f"Invoice data generated successfully for subscription {subscription.id}")
+            return invoice_data
+            
+        except Exception as e:
+            logger.error(f"Error generating invoice data: {str(e)}", exc_info=True)
+            raise
+
+class SubscriptionHistoryView(APIView):
+    """Get subscription history for doctor"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        """Get subscription history"""
+        try:
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can check subscription history.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            # Get all subscriptions for this doctor
+            subscriptions = DoctorSubscription.objects.filter(
+                doctor=doctor
+            ).order_by('-start_date')
+            
+            serializer = SubscriptionHistorySerializer(subscriptions, many=True)
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'total_subscriptions': subscriptions.count(),
+                    'subscriptions': serializer.data
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error in subscription history: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch subscription history',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+class SubscriptionUpdateView(APIView):
+    """Update/upgrade doctor's subscription plan"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """Create Razorpay order for subscription upgrade"""
+        try:
+            # Check if user is doctor
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can update subscriptions.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            # Check if doctor has active subscription
+            if not hasattr(doctor, 'subscription') or not doctor.subscription.is_active:
+                return Response({
+                    'success': False,
+                    'message': 'No active subscription found to upgrade.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            serializer = SubscriptionUpdateSerializer(
+                data=request.data,
+                context={'doctor': doctor}
+            )
+            
+            if serializer.is_valid():
+                result = serializer.save()
+                
+                if result.get('direct_upgrade'):
+                    # Serialize the updated subscription data
+                    subscription_serializer = CurrentSubscriptionSerializer(result['subscription'])
+                    
+                    return Response({
+                        'success': True,
+                        'message': 'Subscription upgraded successfully (no payment required)',
+                        'data': {
+                            'direct_upgrade': True,
+                            'upgrade_price': str(result['upgrade_price']),
+                            'subscription': subscription_serializer.data,
+                            'new_plan': {
+                                'id': result['plan'].id,
+                                'name': result['plan'].get_name_display(),
+                                'price': str(result['plan'].price)
+                            }
+                        }
+                    }, status=status.HTTP_200_OK)
+                
+                return Response({
+                    'success': True,
+                    'message': 'Upgrade order created successfully',
+                    'data': {
+                        'order_id': result['razorpay_order']['id'],
+                        'amount': result['razorpay_order']['amount'],
+                        'currency': result['razorpay_order']['currency'],
+                        'key': settings.RAZORPAY_KEY_ID,
+                        'upgrade_price': str(result['upgrade_price']),
+                        'remaining_days': result['remaining_days'],
+                        'old_plan': {
+                            'id': result['old_plan'].id,
+                            'name': result['old_plan'].get_name_display(),
+                            'price': str(result['old_plan'].price)
+                        },
+                        'new_plan': {
+                            'id': result['new_plan'].id,
+                            'name': result['new_plan'].get_name_display(),
+                            'price': str(result['new_plan'].price)
+                        }
+                    }
+                }, status=status.HTTP_201_CREATED)
+            
+            return Response({
+                'success': False,
+                'message': 'Invalid data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            logger.error(f"Error in subscription update: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to create upgrade order',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
