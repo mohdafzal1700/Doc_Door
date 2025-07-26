@@ -838,45 +838,13 @@ export const verifyPayment = (data) => axios.post('verify-payment/', data);
 export const cancelSubscription = (data) => axios.post('cancel/', data);
 
 export const getCurrentSubscription = () => axios.get("subscription/current/");
-export const getCurrentSubscriptionInvoice = async (params = {}, config = {}) => {
-    try {
-        const response = await axiosInstance.get('/api/subscription/invoice/', {
-            params,
-            ...config,
-            // Ensure binary data is handled correctly
-            responseType: config.responseType || 'blob',
-            headers: {
-                'Accept': 'application/pdf',
-                ...config.headers
-            }
-        });
-        
-        return response;
-    } catch (error) {
-        console.error('API Error:', error);
-        throw error;
-    }
+
+
+export const getCurrentSubscriptionInvoice = () => {
+  return axios.get('invoice/subscription/');
 };
 
-// Alternative approach if the above doesn't work
-export const downloadInvoicePDF = async (subscriptionId) => {
-    try {
-        const response = await fetch(`/api/subscription/invoice/?format=pdf&subscription_id=${subscriptionId}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${your_auth_token}`,
-                'Accept': 'application/pdf'
-            }
-        });
-        
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
-        const blob = await response.blob();
-        return { data: blob, status: response.status };
-    } catch (error) {
-        console.error('Download error:', error);
-        throw error;
-    }
+// Get invoice for a specific subscription by ID
+export const getSubscriptionInvoiceById = (subscriptionId) => {
+  return axios.get(`invoice/subscription/${subscriptionId}/`);
 };

@@ -25,8 +25,7 @@ import PortalCertification from "./doctor/components/DocCertification"
 import ManageQualifications from "./doctor/components/DocEducation"
 import DoctorProfilePage from "./doctor/components/DocProfile"
 import { ToastProvider } from "./components/ui/Toast"
-import ServicePage from "./doctor/pages/service_management"
-import ScheduleManagement from "./doctor/pages/ScheduleManagement"
+
 import PatientDoctor from "./pages/PatientDoctorpage"
 import MedicalRecordForm from "./pages/medical_records"
 import AppointmentBooking from "./pages/BookAppointmentPage "
@@ -39,7 +38,9 @@ import Plan from "./admin/Adminplan"
 import SubscriptionPlanForm from "./admin/Adminplanform"
 import CurrentSubscription from "./doctor/pages/currentSubscription"
 import ChoosePlanDashboard from "./doctor/pages/ChoosePlan"
-
+import ChatApp from "./Chat/chat"
+import ScheduleService from "./doctor/pages/Service&shcedule"
+import DocDashboard from "./doctor/pages/dashboard"
 
 
 function App() {
@@ -70,9 +71,8 @@ function App() {
         <Route path='/doctor/editProfile'  element={<PortalProfile/>}/>
         <Route path='/doctor/certification'  element={<PortalCertification />}/>
         <Route path='/doctor/education'  element={<ManageQualifications/>}/>
-        <Route path='/doctor/service'  element={<ServicePage/>}/>
-        <Route path='/doctor/schedule'  element={<ScheduleManagement/>}/>
-        <Route path='/doctor/schedule'  element={<ScheduleManagement/>}/>
+        
+        <Route path='/doctor/schedule'  element={<ScheduleService/>}/>
         <Route path='/patient/doctor/:id' element={<PatientDoctor/>}/>
         <Route path="/patient/medical_record" element={<MedicalRecordForm />} />
         <Route path='/patient/appointmentBooking/:id' element={<AppointmentBooking />} />
@@ -85,7 +85,8 @@ function App() {
         <Route path='/admin/subscriptionPlanForm' element={<SubscriptionPlanForm/>} />
         <Route path='/doctor/currentSubscription' element={<CurrentSubscription/>} />
         <Route path='/doctor/choosePlan' element={<ChoosePlanDashboard/>} />
-        
+        <Route path="/chat/:userId?" element={<ChatApp />} />
+        <Route path='/doctor/dashboard' element={<DocDashboard/>}/>
         
         
         

@@ -1,7 +1,7 @@
 import axios from '../AxiosIntersptors/UserInterceptor';
 
-axios.defaults.withCredentials = true;
 
+axios.defaults.withCredentials = true;
 // -------------------- Auth --------------------
 export const login = (data) => axios.post("login/", data);
 export const register = (data) => axios.post("register/", data);

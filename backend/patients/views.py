@@ -373,7 +373,7 @@ class ResetPasswordView(generics.GenericAPIView):
 
     def post(self, request, *args, **kwargs):
         logger.info(f"Reset password request data: {request.data}")
-        print(f"DEBUG - Request data: {request.data}")
+        
         
         serializer = self.get_serializer(data=request.data)
 
@@ -387,14 +387,14 @@ class ResetPasswordView(generics.GenericAPIView):
                 }, status=status.HTTP_200_OK)
             except Exception as e:
                 logger.error(f"Error saving password reset: {str(e)}")
-                print(f"DEBUG - Save error: {str(e)}")
+                
                 return Response({
                     'success': False,
                     'message': f'An error occurred while resetting password: {str(e)}'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         logger.error(f"Password reset validation errors: {serializer.errors}")
-        print(f"DEBUG - Validation errors: {serializer.errors}")
+        
         
         return Response({
             'success': False,
@@ -457,7 +457,7 @@ class UserProfileView(APIView):
     
     def get(self, request):
         try:
-            print(" Request User:", request.user)
+            logger.info(" Request User:", request.user)
             serializer = UserProfileSerializer(request.user)
             return Response({
                 'success': True,
@@ -991,41 +991,34 @@ class MedicalRecordManagementView(APIView):
         """Get medical record for the authenticated patient"""
         try:
             # Enhanced logging for debugging
-            logger.info(f"🔍 Medical record request started for user: {request.user.id}")
-            logger.info(f"📧 User email: {request.user.email}")
-            logger.info(f"👤 User type: {type(request.user)}")
+            logger.info(f"Medical record request started for user: {request.user.id}")
+            logger.info(f"User email: {request.user.email}")
+            logger.info(f"User type: {type(request.user)}")
             
-            # Print to console for immediate debugging
-            print(f"\n=== MEDICAL RECORD DEBUG ===")
-            print(f"🔍 Request user ID: {request.user.id}")
-            print(f"📧 User email: {request.user.email}")
-            print(f"👤 User object: {request.user}")
-            print(f"🔐 Is authenticated: {request.user.is_authenticated}")
+            
             
             # Check if user has patient profile
             try:
                 patient = request.user.patient_profile
-                logger.info(f"✅ Patient profile found: {patient.id}")
-                print(f"✅ Patient profile found: {patient.id}")
-                print(f"🏥 Patient object: {patient}")
+                logger.info(f"Patient profile found: {patient.id}")
+               
                 
             except Patient.DoesNotExist:
-                logger.error(f"❌ Patient profile not found for user {request.user.id}")
-                print(f"❌ Patient profile not found for user {request.user.id}")
-                print(f"🔍 Available user attributes: {dir(request.user)}")
+                logger.error(f"Patient profile not found for user {request.user.id}")
+              
                 
                 # Check if there are any patient profiles in the system
                 total_patients = Patient.objects.count()
-                print(f"📊 Total patients in system: {total_patients}")
+                
                 
                 # Check if this user has any related patient profiles
                 try:
                     related_patients = Patient.objects.filter(user=request.user)
-                    print(f"🔗 Related patients for this user: {related_patients.count()}")
+                 
                     for rp in related_patients:
-                        print(f"   - Patient: {rp.id}, User: {rp.user}")
+                        logger.info(f"   - Patient: {rp.id}, User: {rp.user}")
                 except Exception as e:
-                    print(f"❌ Error checking related patients: {e}")
+                    logger.error(f" Error checking related patients: {e}")
                 
                 return Response({
                     'success': False,
@@ -1038,11 +1031,8 @@ class MedicalRecordManagementView(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
             
             except AttributeError as e:
-                logger.error(f"❌ AttributeError accessing patient_profile: {str(e)}")
-                print(f"❌ AttributeError: {str(e)}")
-                print(f"🔍 User model fields: {[f.name for f in request.user._meta.fields]}")
-                print(f"🔍 User related objects: {[rel.get_accessor_name() for rel in request.user._meta.related_objects]}")
-                
+                logger.error(f" AttributeError accessing patient_profile: {str(e)}")
+              
                 return Response({
                     'success': False,
                     'message': 'Error accessing patient profile',
@@ -1056,14 +1046,12 @@ class MedicalRecordManagementView(APIView):
             # Try to get medical record
             try:
                 medical_record = Medical_Record.objects.get(patient=patient)
-                logger.info(f"✅ Medical record found: {medical_record.id}")
-                print(f"✅ Medical record found: {medical_record.id}")
-                print(f"📋 Medical record object: {medical_record}")
+                logger.info(f"Medical record found: {medical_record.id}")
+                
                 
                 serializer = MedicalRecordSerializer(medical_record)
-                logger.info(f"✅ Medical record serialized successfully")
-                print(f"✅ Serialized data keys: {list(serializer.data.keys())}")
-                print(f"=== END DEBUG ===\n")
+                logger.info(f"Medical record serialized successfully")
+               
                 
                 return Response({
                     'success': True,
@@ -1071,20 +1059,19 @@ class MedicalRecordManagementView(APIView):
                 }, status=status.HTTP_200_OK)
 
             except Medical_Record.DoesNotExist:
-                logger.info(f"ℹ️ Medical record not found for patient {patient.id}")
-                print(f"ℹ️ Medical record not found for patient {patient.id}")
+                logger.info(f" Medical record not found for patient {patient.id}")
+                
                 
                 # Check if there are any medical records in the system
                 total_records = Medical_Record.objects.count()
-                print(f"📊 Total medical records in system: {total_records}")
                 
                 # List all medical records for debugging
                 all_records = Medical_Record.objects.all()[:5]  # Limit to first 5
-                print(f"🔍 Sample medical records:")
+            
                 for record in all_records:
-                    print(f"   - Record ID: {record.id}, Patient: {record.patient.id}")
+                    logger.info(f"   - Record ID: {record.id}, Patient: {record.patient.id}")
                 
-                print(f"=== END DEBUG ===\n")
+                
                 
                 return Response({
                     'success': False,
@@ -1096,19 +1083,16 @@ class MedicalRecordManagementView(APIView):
                 }, status=status.HTTP_404_NOT_FOUND)
 
         except Exception as e:
-            logger.error(f"❌ Unexpected error in medical record view: {str(e)}")
-            logger.error(f"❌ Error type: {type(e)}")
-            logger.error(f"❌ Error args: {e.args}")
+            logger.error(f" Unexpected error in medical record view: {str(e)}")
+            logger.error(f" Error type: {type(e)}")
+            logger.error(f" Error args: {e.args}")
             
-            print(f"\n❌ UNEXPECTED ERROR ❌")
-            print(f"Error: {str(e)}")
-            print(f"Error type: {type(e)}")
-            print(f"Error args: {e.args}")
+        
             
-            # Print stack trace
+            
             import traceback
             traceback.print_exc()
-            print(f"=== END DEBUG ===\n")
+            
             
             return Response({
                 'success': False,
@@ -1503,9 +1487,7 @@ class DoctorBookingDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request, pk):
-        print(f"🔍 DoctorBookingDetailView called with pk: {pk}")
-        print(f"🔍 Request user: {request.user}")
-        print(f"🔍 Request user authenticated: {request.user.is_authenticated}")
+    
         
 
         try:
@@ -1516,11 +1498,11 @@ class DoctorBookingDetailView(APIView):
                 is_active=True,
                 doctor_profile__verification_status='approved'
             )
-            print(f"🔍 Doctor found: {doctor}")
+        
             serializer = BookingDoctorDetailSerializer(doctor)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
-            print(f"❌ Error: {e}")
+            
             return Response({
                 'error': 'Doctor not found or not available',
                 'details': str(e)
@@ -1583,7 +1565,7 @@ class DoctorSchedulesView(APIView):
         except Exception as e:
             # Add more detailed error logging
             import traceback
-            print(f"Error in DoctorSchedulesView: {str(e)}")
+            
             traceback.print_exc()
             return Response({
                 'error': 'Failed to fetch schedules',
@@ -1967,4 +1949,5 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
+                
                 

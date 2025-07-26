@@ -33,7 +33,7 @@ SECRET_KEY = 'django-insecure-(*u5%f$pd)!4(m41yg3r#v%xr(3d2b5p(jet_+suuak-dcx9pr
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '*']
 
 
 # Application definition
@@ -46,15 +46,19 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     
+    
     # Third party apps
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
     
+    'channels',
+    
     # Your apps
     'adminside',
     'patients',
     'doctor',
+    'chat',
     
     'cloudinary_storage',
     'cloudinary',
@@ -215,9 +219,9 @@ SIMPLE_JWT = {
 # CORS settings for development
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # React dev server
+    "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://localhost:5173",  # Vite dev server
+    "http://localhost:5173",
     "http://127.0.0.1:5173",
 ]
 
@@ -291,3 +295,56 @@ cloudinary.config(
 # # Make
 RAZORPAY_KEY_ID = config("RAZORPAY_API_KEY")
 RAZORPAY_KEY_SECRET = config("RAZORPAY_SECRET_KEY") 
+
+REDIS_URL = 'redis://127.0.0.1:6379/0'  # Using database 0 for general operations
+
+ASGI_APPLICATION = 'backend.asgi.application'
+
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer',  # No Redis needed
+    },
+}
+
+
+# Channels
+# CHANNEL_LAYERS = {
+#     'default': {
+#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
+#         'CONFIG': {
+#             "hosts": [('127.0.0.1', 6379)],
+#         },
+#     },
+# }
+
+# Cache
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'loggers': {
+        'chat': {  # Your chat app
+            'handlers': ['console'],
+            'level': 'DEBUG',
+        },
+        'channels': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+        },
+    },
+}

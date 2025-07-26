@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, Calendar, DollarSign, MapPin, Clock, Check, X, AlertCircle, Loader2 } from 'lucide-react';
-import DocHeader from '../../components/ui/DocHeader';
-import DoctorSidebar from '../../components/ui/DocSide';
+
 import { getServices, createService, updateService, deleteService } from '../../endpoints/Doc';
 import { useToast } from '../../components/ui/Toast';
 import { useSubscription,createSubscriptionErrorModal  } from '../../hooks/useSubscription';
@@ -671,9 +670,9 @@ const ServicePage = () => {
     if (subscriptionError) {
         return (
             <div className="min-h-screen bg-gray-50">
-                <DocHeader />
+               
                 <div className="flex">
-                    <DoctorSidebar />
+                    
                     <div className="flex-1 p-8">
                         <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                             <p className="text-red-700">Subscription Error: {subscriptionError}</p>
@@ -685,9 +684,9 @@ const ServicePage = () => {
     }
     return (
         <div className="min-h-screen bg-gray-50">
-            <DocHeader />
+            
             <div className="flex">
-                <DoctorSidebar />
+                
                 <div className="flex-1 p-8">
                     <div className="max-w-7xl mx-auto">
                         {/* Header */}

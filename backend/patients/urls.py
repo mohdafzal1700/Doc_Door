@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import path,include
 from .views import (
     CustomTokenObtainPairView,
     CustomTokenRefreshView,
@@ -28,6 +28,7 @@ from .views import (
     CurrentPatientLocationView,
     SearchNearbyDoctorsView,
     # AppointmentLocationDetailView,
+
     
     )
 
@@ -73,6 +74,7 @@ urlpatterns = [
     path('search/nearby-doctors/', SearchNearbyDoctorsView.as_view(), name='search-nearby-doctors'),
     
 
+    
 ]
 
     

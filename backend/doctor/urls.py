@@ -1,7 +1,7 @@
 from doctor.views import (DoctorLoginView,DoctorProfileView,
 DoctorEducationView,DoctorCertificationView,LicenseUploadView,
-DoctorVerificationStatusView,ServiceView,ScheduleView)
-from django.urls import path
+DoctorVerificationStatusView,ServiceView,ScheduleView,SubscriptionInvoiceView)
+from django.urls import path,include
 from . import views
 
 
@@ -46,14 +46,14 @@ urlpatterns = [
     path('update/', views.SubscriptionUpdateView.as_view(), name='subscription-update'),
     path('verify-payment/', views.PaymentVerificationView.as_view(), name='payment-verification'),
     path('cancel/', views.SubscriptionCancellationView.as_view(), name='subscription-cancel'),
-    path('subscription/invoice/',views.SubscriptionInvoiceView.as_view(), name='current-subscription-invoice'),
-    
-    # For specific subscription invoice
-    path('subscription/<int:subscription_id>/invoice/', views.SubscriptionInvoiceView.as_view(), name='subscription-invoice'),
-
+     
     path('subscription/history/', views.SubscriptionHistoryView.as_view(), name='subscription-history'),
-    path('subscription/current/', views.CurrentSubscriptionView.as_view(), name='current-subscription')
+    path('subscription/current/', views.CurrentSubscriptionView.as_view(), name='current-subscription'),
+    
+    path('invoice/subscription/<int:subscription_id>/', SubscriptionInvoiceView.as_view(), name='subscription-invoice'),
 
-
+    # For current subscription invoice
+    path('invoice/subscription/', SubscriptionInvoiceView.as_view(), name='current-subscription-invoice'),
 ]
+
 

@@ -22,7 +22,7 @@ export default function DocHeader() {
     { name: "Home", icon: Home, path: "/doctor/home" },
     { name: "Appointments", icon: Calendar, path: '/doctor/currentSubscription' },
     { name: "Messages", icon: MessageSquare, path: "/subscription-management" },
-    { name: "Notifications", icon: Bell, path: "/doctor/notifications" },
+    { name: "Notifications", icon: Bell, path: "/chat" },
   ]
 
   const handleNavigation = (path) => {

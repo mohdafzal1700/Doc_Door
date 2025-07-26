@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, Clock, Users, Edit, Trash2, Plus, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { getSchedules, createSchedule, updateSchedule, deleteSchedule ,getServices} from '../../endpoints/Doc';
-import DocHeader from '../../components/ui/DocHeader';
-import DoctorSidebar from '../../components/ui/DocSide';
+// import DocHeader from '../../components/ui/DocHeader';
+// import DoctorSidebar from '../../components/ui/DocSide';
 
 const ScheduleManagement = () => {
   const [schedules, setSchedules] = useState([]);
@@ -434,9 +434,9 @@ const handleSubmit = async (e) => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <DocHeader />
+      
       <div className="flex">
-        <DoctorSidebar />
+        
         <div className="flex-1 p-6">
           <div className="max-w-7xl mx-auto">
             <div className="bg-white rounded-xl shadow-sm p-6 mb-6">

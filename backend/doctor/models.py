@@ -68,6 +68,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     is_blocked = models.BooleanField(default=False)
     is_active = models.BooleanField(default=False)
     is_staff = models.BooleanField(default=False)
+    
+    is_online = models.BooleanField(default=False)
+    last_seen = models.DateTimeField(null=True, blank=True)
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['first_name', 'role']  # Fixed: removed 'name', added 'first_name'

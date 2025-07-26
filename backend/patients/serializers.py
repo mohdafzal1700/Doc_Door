@@ -419,13 +419,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
         patient = getattr(obj, "patient_profile", None)
         return bool(patient and patient.profile_picture)
 
-    # === Validation Methods ===
-
-    # def validate_email(self, value):
-    #     user = self.instance
-    #     if user and User.objects.filter(email=value).exclude(id=user.id).exists():
-    #         raise serializers.ValidationError("This email is already in use.")
-    #     return value
+    
 
     def validate_phone_number(self, value):
         if value:
@@ -816,7 +810,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
             
         except Exception as e:
             # Log the error for debugging
-            print(f"Error in get_can_cancel: {e}")
+            logger.error(f"Error in get_can_cancel: {e}")
             return False
 
     def get_can_reschedule(self, obj):
@@ -1219,7 +1213,7 @@ class BookingDoctorDetailSerializer(serializers.ModelSerializer):
                         }
                 except Exception as e:
                     # Log the error for debugging
-                    print(f"Error getting selected service: {e}")
+                    logger.error(f"Error getting selected service: {e}")
                     pass
             
             # Fallback to doctor's default consultation fee
@@ -1235,7 +1229,7 @@ class BookingDoctorDetailSerializer(serializers.ModelSerializer):
                 'offline': default_fee
             }
         except Exception as e:
-            print(f"Error in get_consultation_fee: {e}")
+            logger.error(f"Error in get_consultation_fee: {e}")
             return {'online': 0, 'offline': 0}
     
     def get_selected_service(self, obj):
@@ -1257,11 +1251,11 @@ class BookingDoctorDetailSerializer(serializers.ModelSerializer):
                             'description': getattr(service, 'description', '')
                         }
                 except Exception as e:
-                    print(f"Error getting selected service details: {e}")
+                    logger.error(f"Error getting selected service details: {e}")
                     pass
             return None
         except Exception as e:
-            print(f"Error in get_selected_service: {e}")
+            logger.error(f"Error in get_selected_service: {e}")
             return None
     
     def get_available_modes(self, obj):
@@ -1278,7 +1272,7 @@ class BookingDoctorDetailSerializer(serializers.ModelSerializer):
                 modes.append('Offline')
             return modes
         except Exception as e:
-            print(f"Error in get_available_modes: {e}")
+            logger.error(f"Error in get_available_modes: {e}")
             return []
     
     def get_services(self, obj):
@@ -1294,7 +1288,7 @@ class BookingDoctorDetailSerializer(serializers.ModelSerializer):
                 try:
                     return ServiceSerializer(services, many=True).data
                 except Exception as e:
-                    print(f"Error serializing services: {e}")
+                    logger.error(f"Error serializing services: {e}")
                     # Return basic service data if ServiceSerializer fails
                     return [
                         {
@@ -1307,7 +1301,7 @@ class BookingDoctorDetailSerializer(serializers.ModelSerializer):
                     ]
             return []
         except Exception as e:
-            print(f"Error in get_services: {e}")
+            logger.error(f"Error in get_services: {e}")
             return []
         
 class ScheduleDetailSerializer(serializers.ModelSerializer):

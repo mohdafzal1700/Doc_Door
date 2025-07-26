@@ -381,7 +381,7 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         from django.utils import timezone
         
-        print(f"🔍 DEBUG: Received validated_data keys: {list(validated_data.keys())}")
+        logger.debug(f" DEBUG: Received validated_data keys: {list(validated_data.keys())}")
         
         # Extract and separate doctor data
         doctor_data = {}
@@ -392,7 +392,7 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
             'clinic_name', 'location', 'license_number', 'consultation_fee',
             'date_of_birth', 'gender'
         ]
-        print(f"🔍 DEBUG: Looking for doctor_fields: {doctor_fields}")
+        logger.debug(f" DEBUG: Looking for doctor_fields: {doctor_fields}")
         
         # Extract user fields
         for field in user_fields:
@@ -404,13 +404,13 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
             if field in validated_data:
                 value = validated_data.pop(field)
                 # Add this debug line:
-                print(f"🔍 DEBUG: Processing field '{field}' with value: {value} (type: {type(value)})")
+                logger.debug(f" DEBUG: Processing field '{field}' with value: {value} (type: {type(value)})")
                 
                 if field == 'department':
                     doctor_data['specialization'] = value
                 elif field == 'years_of_experience':
                     doctor_data['experience'] = value
-                    print(f"🔍 DEBUG: Mapped years_of_experience={value} to experience")
+                    logger.debug(f" DEBUG: Mapped years_of_experience={value} to experience")
                 elif field == 'profile_image':
                     doctor_data['profile_picture'] = value
                 else:
@@ -426,7 +426,7 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
             user_updated = True
-            print(f"👤 DEBUG: Updated user.{attr} = {value}")
+            logger.debug(f" DEBUG: Updated user.{attr} = {value}")
         
         
         # Update user first_name and last_name if provided in doctor_data
@@ -434,15 +434,15 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
             if field in doctor_data:
                 setattr(instance, field, doctor_data.pop(field))
                 user_updated = True
-                print(f"👤 DEBUG: Updated user.{field} from doctor_data")
+                logger.debug(f" DEBUG: Updated user.{field} from doctor_data")
         
         if user_updated:
             instance.save()
-            print("DEBUG: User model saved")
+            logger.debug("DEBUG: User model saved")
 
         # Update or create doctor profile (only for doctors)
         if instance.role == 'doctor' and doctor_data:
-            print(f"🩺 DEBUG: Updating doctor profile with data: {doctor_data}")
+            logger.debug(f" DEBUG: Updating doctor profile with data: {doctor_data}")
             try:
                 doctor_profile, created = Doctor.objects.get_or_create(
                     user=instance,
@@ -469,25 +469,25 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
                 for attr, value in doctor_data.items():
                     old_value = getattr(doctor_profile, attr, 'NOT_FOUND')
                     setattr(doctor_profile, attr, value)
-                    print(f"🔄 DEBUG: doctor.{attr}: {old_value} -> {value}")
+                    logger.debug(f" DEBUG: doctor.{attr}: {old_value} -> {value}")
                 
                 doctor_profile.updated_at = timezone.now()
                 doctor_profile.save()
-                print("DEBUG: Doctor profile saved")
+                logger.debug("DEBUG: Doctor profile saved")
                 
                 # Check if profile is complete and update accordingly
                 if self._is_profile_complete(doctor_profile):
                     doctor_profile.is_profile_setup_done = True
                     doctor_profile.save()
-                    print("DEBUG: Profile marked as complete")
+                    logger.debug("DEBUG: Profile marked as complete")
                 else:
-                    print("DEBUG: Profile still incomplete")
+                    logger.debug("DEBUG: Profile still incomplete")
                     
             except Exception as e:
-                print(f"DEBUG: Error updating doctor profile: {str(e)}")
+                logger.debug(f"DEBUG: Error updating doctor profile: {str(e)}")
                 raise serializers.ValidationError(f"Error updating doctor profile: {str(e)}")
         else:
-            print(f"DEBUG: Not updating doctor profile. Role: {instance.role}, doctor_data: {bool(doctor_data)}")
+            logger.debug(f"DEBUG: Not updating doctor profile. Role: {instance.role}, doctor_data: {bool(doctor_data)}")
 
         return instance
 
@@ -1055,8 +1055,8 @@ class DoctorApprovalActionSerializer(serializers.Serializer):
         instance.save()
         
         # Log the action
-        print(f" APPROVAL ACTION: {action.upper()} for Doctor {doctor.id}")
-        print(f"Admin Comment: {admin_comment}")
+        logger.info(f" APPROVAL ACTION: {action.upper()} for Doctor {doctor.id}")
+        logger.info(f"Admin Comment: {admin_comment}")
         
         return instance
     
@@ -1709,6 +1709,11 @@ class CurrentSubscriptionSerializer(serializers.ModelSerializer):
             'usage_stats'
         ]
     
+    def to_representation(self, instance):
+        """Override to add debugging"""
+        print(f"DEBUG: Serializing DoctorSubscription ID: {instance.id}")
+        return super().to_representation(instance)
+    
     def get_days_remaining(self, obj):
         """Calculate days remaining"""
         if obj.is_active and obj.end_date:
@@ -1720,7 +1725,7 @@ class CurrentSubscriptionSerializer(serializers.ModelSerializer):
         """Get usage statistics"""
         if not obj.is_active:
             return None
-        return getattr(obj.doctor, 'get_usage_stats', lambda: {})()
+        return getattr(obj.doctor, 'get_usage_stats', lambda: {})() 
 
 class SubscriptionHistorySerializer(serializers.ModelSerializer):
     """Serializer for subscription history"""

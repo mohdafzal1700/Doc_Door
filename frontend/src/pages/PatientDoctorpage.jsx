@@ -37,9 +37,13 @@ export default function PatientDoctor() {
         navigate(`/patient/appointmentBooking/${id}`);
     };
 
+    // const handleSendMessage = () => {
+    //     navigate(`/patient/messages/${id}`);
+    // };
     const handleSendMessage = () => {
-        navigate(`/patient/messages/${id}`);
-    };
+  navigate(`/chat/${id}`);
+};
+
 
     const renderStars = (rating = 4.5) => {
         const stars = [];

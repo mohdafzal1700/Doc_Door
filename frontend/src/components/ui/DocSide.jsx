@@ -23,12 +23,12 @@ const DoctorSidebar = ({ initialActiveMenuItem = 'Profile' }) => {
     
     const menuItems = [
         { name: 'Profile', icon: User, href: '/doctor/portal' },
-        { name: 'Dashboard', icon: LayoutDashboard, href: '/doctor/education' },
-        { name: 'Service & Slots', icon: Calendar, href: '/doctor/service' },
-        { name: 'Subscriptions', icon: CreditCard, href: '/doctor/schedule'},
-        { name: 'Qualifications', icon: Award, href: '/doctor/appointmentsPage' },
-        { name: 'Review and Ratings', icon: Star, href: '/doctor/appointmentsRequest' },
-        { name: 'Password Change', icon: Lock, href: '#' },
+        { name: 'Dashboard', icon: LayoutDashboard, href: '/doctor/dashboard' },
+        { name: 'Service & Slots', icon: Calendar, href: '/doctor/schedule' },
+        { name: 'Subscriptions', icon: CreditCard, href: '/doctor/service'},
+        { name: 'Qualifications', icon: Award, href: '/doctor/education' },
+        { name: 'Review and Ratings', icon: Star, href: '/doctor/appointmentsPage'  },
+        { name: 'Password Change', icon: Lock, href:'/doctor/appointmentsRequest' },
         { name: 'Logout', icon: LogOut, href: '#' }
     ];
 

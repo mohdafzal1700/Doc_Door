@@ -978,7 +978,7 @@ class ServiceView(APIView):
                 
                 if not plan:
                     logger.debug(f"Doctor {doctor.id} has no active subscription plan")
-                    print(f"Doctor {doctor.id} has no active subscription plan")
+                    
                     return Response({
                         'success': False,
                         'message': 'Active subscription required to create services.',
@@ -1205,7 +1205,7 @@ class ScheduleView(APIView):
 
     def post(self, request):
         """Create new schedule (only doctors can create)"""
-        print("Received data:", request.data)
+        logger.info("Received data:", request.data)
         try:
             # Check if user has doctor role
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
@@ -2896,378 +2896,6 @@ class CurrentSubscriptionView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-import logging
-from django.http import HttpResponse
-from django.conf import settings
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from io import BytesIO
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-from decimal import Decimal
-
-logger = logging.getLogger(__name__)
-
-class SubscriptionInvoiceView(APIView):
-    """Generate and retrieve subscription invoices"""
-    permission_classes = [IsAuthenticated]
-    
-    def get(self, request, subscription_id=None):
-        """Get invoice for subscription"""
-        logger.info(f"Invoice request received - User: {request.user.id}, Subscription ID: {subscription_id}, Format: {request.GET.get('format')}")
-        
-        try:
-            # Validate user is a doctor
-            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
-                logger.warning(f"Non-doctor user {request.user.id} attempted to access invoice")
-                return Response({
-                    'success': False,
-                    'message': 'Only doctors can access invoices.'
-                }, status=status.HTTP_403_FORBIDDEN)
-            
-            # Get or create doctor instance
-            from .models import Doctor, DoctorSubscription  # Adjust import based on your app structure
-            doctor, created = Doctor.objects.get_or_create(user=request.user)
-            logger.info(f"Doctor instance retrieved: {doctor.id}, Created: {created}")
-            
-            # Get subscription
-            subscription = self._get_subscription(doctor, subscription_id)
-            if not subscription:
-                logger.error(f"No subscription found for doctor {doctor.id}, subscription_id: {subscription_id}")
-                return Response({
-                    'success': False,
-                    'message': 'No subscription found.'
-                }, status=status.HTTP_404_NOT_FOUND)
-            
-            logger.info(f"Subscription found: {subscription.id}, Status: {subscription.payment_status}")
-            
-            # Check if subscription is paid
-            if subscription.payment_status != 'completed':
-                logger.warning(f"Attempted to generate invoice for unpaid subscription {subscription.id}")
-                return Response({
-                    'success': False,
-                    'message': 'Invoice not available for unpaid subscription.'
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Check if PDF download is requested
-            if request.GET.get('format') == 'pdf':
-                logger.info(f"Generating PDF invoice for subscription {subscription.id}")
-                return self._generate_pdf_invoice(subscription)
-            
-            # Generate JSON invoice data
-            logger.info(f"Generating JSON invoice for subscription {subscription.id}")
-            invoice_data = self._generate_invoice_data(subscription)
-            
-            return Response({
-                'success': True,
-                'data': invoice_data
-            }, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            logger.error(f"Error generating invoice: {str(e)}", exc_info=True)
-            return Response({
-                'success': False,
-                'message': 'Failed to generate invoice',
-                'error': str(e) if settings.DEBUG else 'Internal server error'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    def _get_subscription(self, doctor, subscription_id=None):
-        """Get subscription instance"""
-        try:
-            from .models import DoctorSubscription
-            
-            if subscription_id:
-                # Get specific subscription by ID
-                return DoctorSubscription.objects.get(
-                    id=subscription_id, 
-                    doctor=doctor
-                )
-            else:
-                # Get current active subscription
-                if hasattr(doctor, 'subscription'):
-                    return doctor.subscription
-                else:
-                    # Try to get the latest paid subscription
-                    return DoctorSubscription.objects.filter(
-                        doctor=doctor,
-                        payment_status='completed'
-                    ).order_by('-start_date').first()
-                    
-        except DoctorSubscription.DoesNotExist:
-            logger.error(f"Subscription not found - doctor: {doctor.id}, subscription_id: {subscription_id}")
-            return None
-        except Exception as e:
-            logger.error(f"Error getting subscription: {str(e)}")
-            return None
-    
-    def _generate_pdf_invoice(self, subscription):
-        """Generate PDF invoice"""
-        try:
-            logger.info(f"Starting PDF generation for subscription {subscription.id}")
-            
-            # Create a BytesIO buffer to receive PDF data
-            buffer = BytesIO()
-            
-            # Create the PDF object
-            doc = SimpleDocTemplate(
-                buffer, 
-                pagesize=A4, 
-                rightMargin=72, 
-                leftMargin=72, 
-                topMargin=72, 
-                bottomMargin=18
-            )
-            
-            # Generate invoice data
-            invoice_data = self._generate_invoice_data(subscription)
-            logger.info(f"Invoice data generated for subscription {subscription.id}")
-                
-            # Build PDF content
-            story = []
-            styles = getSampleStyleSheet()
-            
-            # Custom styles
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=styles['Heading1'],
-                fontSize=24,
-                spaceAfter=30,
-                alignment=TA_CENTER,
-                textColor=colors.HexColor('#2563eb')
-            )
-            
-            heading_style = ParagraphStyle(
-                'CustomHeading',
-                parent=styles['Heading2'],
-                fontSize=14,
-                spaceAfter=12,
-                textColor=colors.HexColor('#1f2937')
-            )
-            
-            normal_style = ParagraphStyle(
-                'CustomNormal',
-                parent=styles['Normal'],
-                fontSize=10,
-                spaceAfter=6
-            )
-            
-            # Header
-            story.append(Paragraph("INVOICE", title_style))
-            story.append(Spacer(1, 20))
-            
-            # Company Info
-            company_info = [
-                ["Your Company Name", ""],
-                ["Your Address Line 1", f"Invoice #: {invoice_data['invoice_number']}"],
-                ["Your Address Line 2", f"Date: {invoice_data['invoice_date'][:10]}"],
-                ["City, State, ZIP", f"Due Date: {invoice_data['due_date'][:10]}"],
-                ["GST No: YOUR_GST_NUMBER", ""]
-            ]
-            
-            company_table = Table(company_info, colWidths=[3*inch, 2.5*inch])
-            company_table.setStyle(TableStyle([
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
-                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ]))
-            story.append(company_table)
-            story.append(Spacer(1, 30))
-            
-            # Bill To Section
-            story.append(Paragraph("Bill To:", heading_style))
-            customer = invoice_data['customer_details']
-            bill_to_text = f"""
-            {customer['name']}<br/>
-            {customer['email']}<br/>
-            Phone: {customer['phone']}<br/>
-            {customer['address']}
-            """
-            story.append(Paragraph(bill_to_text, normal_style))
-            story.append(Spacer(1, 20))
-            
-            # Subscription Details
-            story.append(Paragraph("Subscription Details:", heading_style))
-            sub_details = invoice_data['subscription_details']
-            sub_text = f"""
-            Plan: {sub_details['plan_name']}<br/>
-            Start Date: {sub_details['start_date'][:10]}<br/>
-            Duration: {sub_details['duration_days']} days
-            """
-            story.append(Paragraph(sub_text, normal_style))
-            story.append(Spacer(1, 20))
-            
-            # Line Items Table
-            story.append(Paragraph("Invoice Items:", heading_style))
-            
-            # Table headers
-            data = [['Description', 'Quantity', 'Rate (₹)', 'Amount (₹)']]
-            
-            # Add line items
-            for item in invoice_data['line_items']:
-                data.append([
-                    item['description'],
-                    str(item['quantity']),
-                    item['rate'],
-                    item['amount']
-                ])
-            
-            # Add subtotal, tax, and total
-            billing = invoice_data['billing_details']
-            data.extend([
-                ['', '', 'Subtotal:', billing['base_amount']],
-                ['', '', f'GST ({billing["tax_rate"]}):', billing['tax_amount']],
-                ['', '', 'Total Amount:', billing['total_amount']]
-            ])
-            
-            # Create table
-            table = Table(data, colWidths=[3*inch, 1*inch, 1*inch, 1*inch])
-            table.setStyle(TableStyle([
-                # Header row
-                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f3f4f6')),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor('#1f2937')),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('ALIGN', (0, 1), (0, -1), 'LEFT'),  # Description column left aligned
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 10),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                
-                # Data rows
-                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
-                ('FONTSIZE', (0, 1), (-1, -1), 9),
-                ('ROWBACKGROUNDS', (0, 1), (-1, -4), [colors.white, colors.HexColor('#f9fafb')]),
-                
-                # Total rows
-                ('FONTNAME', (0, -3), (-1, -1), 'Helvetica-Bold'),
-                ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor('#e5e7eb')),
-                
-                # Grid
-                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
-                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-            ]))
-            
-            story.append(table)
-            story.append(Spacer(1, 30))
-            
-            # Payment Details
-            story.append(Paragraph("Payment Details:", heading_style))
-            payment = invoice_data['payment_details']
-            payment_text = f"""
-            Payment Method: {payment['payment_method']}<br/>
-            Transaction ID: {payment['razorpay_payment_id'] or 'N/A'}<br/>
-            Payment Date: {payment['paid_at'][:10] if payment['paid_at'] else 'N/A'}<br/>
-            Status: <font color="green">PAID</font>
-            """
-            story.append(Paragraph(payment_text, normal_style))
-            story.append(Spacer(1, 30))
-            
-            # Footer
-            footer_text = """
-            <para alignment="center">
-            <font size="8" color="gray">
-            Thank you for your business!<br/>
-            This is a computer generated invoice and does not require signature.
-            </font>
-            </para>
-            """
-            story.append(Paragraph(footer_text, styles['Normal']))
-            
-            # Build PDF
-            logger.info(f"Building PDF document for subscription {subscription.id}")
-            doc.build(story)
-            
-            # Get the value of the BytesIO buffer and return as response
-            pdf = buffer.getvalue()
-            buffer.close()
-            
-            logger.info(f"PDF generated successfully for subscription {subscription.id}, size: {len(pdf)} bytes")
-            
-            if len(pdf) == 0:
-                logger.error("Generated PDF is empty")
-                raise Exception("Generated PDF is empty")
-                
-            response = HttpResponse(content_type='application/pdf')
-            response['Content-Disposition'] = f'attachment; filename="invoice-{invoice_data["invoice_number"]}.pdf"'
-            response['Content-Length'] = len(pdf)
-            response.write(pdf)
-            
-            return response
-            
-        except Exception as e:
-            logger.error(f"Error generating PDF invoice: {str(e)}", exc_info=True)
-            return Response({
-                'success': False,
-                'message': 'Failed to generate PDF invoice',
-                'error': str(e) if settings.DEBUG else 'Internal server error'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    def _generate_invoice_data(self, subscription):
-        """Generate invoice data for subscription"""
-        try:
-            logger.info(f"Generating invoice data for subscription {subscription.id}")
-            
-            # Calculate tax (18% GST for India)
-            base_amount = subscription.amount_paid
-            tax_rate = Decimal('0.18')  # 18% GST
-            tax_amount = (base_amount * tax_rate).quantize(Decimal('0.01'))
-            total_amount = base_amount + tax_amount
-            
-            # Generate invoice number
-            invoice_number = f"INV-{subscription.id}-{subscription.start_date.strftime('%Y%m%d')}"
-            
-            invoice_data = {
-                'invoice_number': invoice_number,
-                'invoice_date': subscription.paid_at.isoformat() if subscription.paid_at else subscription.start_date.isoformat(),
-                'due_date': subscription.start_date.isoformat(),
-                'status': 'paid',
-                'customer_details': {
-                    'name': f"Dr. {subscription.doctor.user.first_name} {subscription.doctor.user.last_name}",
-                    'email': subscription.doctor.user.email,
-                    'phone': getattr(subscription.doctor, 'phone', 'N/A'),
-                    'address': getattr(subscription.doctor, 'address', 'N/A')
-                },
-                'subscription_details': {
-                    'plan_name': subscription.plan.get_name_display(),
-                    'start_date': subscription.start_date.isoformat(),
-                    'end_date': subscription.end_date.isoformat() if subscription.end_date else None,
-                    'duration_days': subscription.plan.duration_days
-                },
-                'payment_details': {
-                    'razorpay_order_id': subscription.razorpay_order_id,
-                    'razorpay_payment_id': subscription.razorpay_payment_id,
-                    'payment_method': 'Razorpay',
-                    'paid_at': subscription.paid_at.isoformat() if subscription.paid_at else None
-                },
-                'billing_details': {
-                    'base_amount': str(base_amount),
-                    'tax_rate': str(tax_rate * 100) + '%',
-                    'tax_amount': str(tax_amount),
-                    'total_amount': str(total_amount),
-                    'currency': 'INR'
-                },
-                'line_items': [
-                    {
-                        'description': f"{subscription.plan.get_name_display()} Subscription",
-                        'quantity': 1,
-                        'rate': str(base_amount),
-                        'amount': str(base_amount)
-                    }
-                ]
-            }
-            
-            logger.info(f"Invoice data generated successfully for subscription {subscription.id}")
-            return invoice_data
-            
-        except Exception as e:
-            logger.error(f"Error generating invoice data: {str(e)}", exc_info=True)
-            raise
-
 class SubscriptionHistoryView(APIView):
     """Get subscription history for doctor"""
     permission_classes = [IsAuthenticated]
@@ -3393,4 +3021,118 @@ class SubscriptionUpdateView(APIView):
                 'message': 'Failed to create upgrade order',
                 'error': str(e) if settings.DEBUG else 'Internal server error'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            
+ 
+class SubscriptionInvoiceView(APIView):
+    """Generate and retrieve subscription invoices"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, subscription_id=None):
+        """Get invoice for subscription"""
+        try:
+            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+                return Response({
+                    'success': False,
+                    'message': 'Only doctors can access invoices.'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
+            
+            # If subscription_id is provided, get that specific subscription
+            if subscription_id:
+                try:
+                    subscription = DoctorSubscription.objects.get(
+                        id=subscription_id, 
+                        doctor=doctor
+                    )
+                except DoctorSubscription.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'message': 'Subscription not found.'
+                    }, status=status.HTTP_404_NOT_FOUND)
+            else:
+                # Get current subscription
+                if not hasattr(doctor, 'subscription'):
+                    return Response({
+                        'success': False,
+                        'message': 'No subscription found.'
+                    }, status=status.HTTP_404_NOT_FOUND)
+                subscription = doctor.subscription
+            
+            # Check if subscription is paid
+            if subscription.payment_status != 'completed':
+                return Response({
+                    'success': False,
+                    'message': 'Invoice not available for unpaid subscription.'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Generate invoice data
+            invoice_data = self._generate_invoice_data(subscription)
+            
+            return Response({
+                'success': True,
+                'data': invoice_data
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error generating invoice: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to generate invoice',
+                'error': str(e) if settings.DEBUG else 'Internal server error'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _generate_invoice_data(self, subscription):
+        """Generate invoice data for subscription"""
+        from datetime import datetime
+        
+        # Calculate tax (18% GST for India)
+        base_amount = subscription.amount_paid
+        tax_rate = Decimal('0.18')  # 18% GST
+        tax_amount = (base_amount * tax_rate).quantize(Decimal('0.01'))
+        total_amount = base_amount + tax_amount
+        
+        # Generate invoice number
+        invoice_number = f"INV-{subscription.id}-{subscription.start_date.strftime('%Y%m%d')}"
+        
+        invoice_data = {
+            'invoice_number': invoice_number,
+            'invoice_date': subscription.paid_at.isoformat() if subscription.paid_at else subscription.start_date.isoformat(),
+            'due_date': subscription.start_date.isoformat(),
+            'status': 'paid',
+            'customer_details': {
+                'name': f"Dr. {subscription.doctor.user.first_name} {subscription.doctor.user.last_name}",
+                'email': subscription.doctor.user.email,
+                'phone': getattr(subscription.doctor, 'phone', 'N/A'),
+                'address': getattr(subscription.doctor, 'address', 'N/A')
+            },
+            'subscription_details': {
+                'plan_name': subscription.plan.get_name_display(),
+                'start_date': subscription.start_date.isoformat(),
+                'end_date': subscription.end_date.isoformat() if subscription.end_date else None,
+                'duration_days': subscription.plan.duration_days
+            },
+            'payment_details': {
+                'razorpay_order_id': subscription.razorpay_order_id,
+                'razorpay_payment_id': subscription.razorpay_payment_id,
+                'payment_method': 'Razorpay',
+                'paid_at': subscription.paid_at.isoformat() if subscription.paid_at else None
+            },
+            'billing_details': {
+                'base_amount': str(base_amount),
+                'tax_rate': str(tax_rate * 100) + '%',
+                'tax_amount': str(tax_amount),
+                'total_amount': str(total_amount),
+                'currency': 'INR'
+            },
+            'line_items': [
+                {
+                    'description': f"{subscription.plan.get_name_display()} Subscription",
+                    'quantity': 1,
+                    'rate': str(base_amount),
+                    'amount': str(base_amount)
+                }
+            ]
+        }
+        
+        return invoice_data
