@@ -6,8 +6,10 @@ import { useEffect, useState } from 'react';
 export const STORAGE_KEYS = {
     USER_DETAILS: "user_details",
     IS_AUTHENTICATED: "isAuthenticated",
-    USER_TYPE: "user_type"
-    // Remove ACCESS_TOKEN and REFRESH_TOKEN - using cookies only
+    USER_TYPE: "user_type",
+    ACCESS_TOKEN: 'access_token',  // Added for WebSocket auth
+    REFRESH_TOKEN: 'refresh_token' 
+    
 };
 
 //  Auth check using cookie-based authentication
@@ -103,20 +105,42 @@ export const isDoctorAuthenticated = async () => {
     }
 };
 
-//  Save auth info (NO tokens - cookies handle this)
 export const setAuthData = (userDetails, tokens, userType = "patient") => {
     try {
+        console.log("💾 Storing auth data...");
+        console.log("👤 User details:", userDetails);
+        console.log("🔑 Tokens received:", {
+            access: tokens?.access ? "✅ Present" : "❌ Missing",
+            refresh: tokens?.refresh ? "✅ Present" : "❌ Missing"
+        });
+
+        // Store user details and auth state
         localStorage.setItem(STORAGE_KEYS.USER_DETAILS, JSON.stringify(userDetails));
         localStorage.setItem(STORAGE_KEYS.IS_AUTHENTICATED, "true");
         localStorage.setItem(STORAGE_KEYS.USER_TYPE, userType);
-        
-        // Don't store tokens - they're in HTTP-only cookies
-        console.log(" Auth data stored successfully (tokens in cookies)");
-        
+
+        // 🚀 NEW: Store tokens for WebSocket authentication
+        if (tokens) {
+            if (tokens.access) {
+                localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, tokens.access);
+                console.log("✅ Access token stored for WebSocket auth");
+            } else {
+                console.warn("⚠️ No access token provided - WebSocket auth may fail");
+            }
+            
+            if (tokens.refresh) {
+                localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, tokens.refresh);
+                console.log("✅ Refresh token stored");
+            }
+        } else {
+            console.warn("⚠️ No tokens provided - WebSocket auth may fail");
+        }
+
+        console.log("✅ Auth data stored successfully");
         window.dispatchEvent(new Event("authStateChanged"));
         return true;
     } catch (error) {
-        console.error("Error storing auth data:", error);
+        console.error("❌ Error storing auth data:", error);
         return false;
     }
 };
@@ -126,6 +150,73 @@ export const setDoctorAuthData = (doctorDetails, tokens) => {
     return setAuthData(doctorDetails, tokens, "doctor");
 };
 
+// 🔑 NEW: Get stored access token for WebSocket
+export const getAccessToken = () => {
+    try {
+        const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+        if (token) {
+            console.log("✅ Access token found:", token.substring(0, 30) + '...');
+            return token;
+        } else {
+            console.log("❌ No access token found in localStorage");
+            return null;
+        }
+    } catch (error) {
+        console.error("❌ Error getting access token:", error);
+        return null;
+    }
+};
+
+// 🔑 NEW: Get stored refresh token
+export const getRefreshToken = () => {
+    try {
+        const token = localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN);
+        return token || null;
+    } catch (error) {
+        console.error("❌ Error getting refresh token:", error);
+        return null;
+    }
+};
+
+// 🔄 NEW: Check if token is expired (basic check)
+export const isTokenExpired = (token) => {
+    if (!token) return true;
+    
+    try {
+        // Decode JWT payload (basic decode, not verification)
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        const currentTime = Math.floor(Date.now() / 1000);
+        
+        if (payload.exp && payload.exp < currentTime) {
+            console.log("⏰ Token is expired");
+            return true;
+        }
+        
+        console.log("✅ Token is still valid");
+        return false;
+    } catch (error) {
+        console.error("❌ Error checking token expiration:", error);
+        return true; // Assume expired if we can't decode
+    }
+};
+
+// 🔄 NEW: Get valid access token (with expiration check)
+export const getValidAccessToken = () => {
+    const token = getAccessToken();
+    
+    if (!token) {
+        console.log("❌ No access token available");
+        return null;
+    }
+    
+    if (isTokenExpired(token)) {
+        console.log("⏰ Access token is expired");
+        // You could implement token refresh logic here
+        return null;
+    }
+    
+    return token;
+};
 // Clear all auth data
 export const clearAuthData = () => {
     try {

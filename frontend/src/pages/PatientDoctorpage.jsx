@@ -41,9 +41,10 @@ export default function PatientDoctor() {
     //     navigate(`/patient/messages/${id}`);
     // };
     const handleSendMessage = () => {
-  navigate(`/chat/${id}`);
+    // Make sure we're passing the doctor's ID, not the current user's ID
+    console.log('Navigating to chat with doctor ID:', doctor.id);
+    navigate(`/chat/${doctor.id}`); // This should be the doctor's ID
 };
-
 
     const renderStars = (rating = 4.5) => {
         const stars = [];

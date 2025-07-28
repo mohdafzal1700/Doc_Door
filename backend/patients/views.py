@@ -1804,7 +1804,7 @@ class CurrentPatientLocationView(generics.RetrieveAPIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
+# Haversine calculation
 class SearchNearbyDoctorsView(generics.ListAPIView):
     """GET /search/nearby-doctors/ - Find nearby doctors based on patient location"""
     serializer_class = DoctorLocationSerializer

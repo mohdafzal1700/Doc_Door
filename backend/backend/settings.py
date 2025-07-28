@@ -301,22 +301,22 @@ REDIS_URL = 'redis://127.0.0.1:6379/0'  # Using database 0 for general operation
 ASGI_APPLICATION = 'backend.asgi.application'
 
 
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer',  # No Redis needed
-    },
-}
-
-
-# Channels
 # CHANNEL_LAYERS = {
 #     'default': {
-#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#         'CONFIG': {
-#             "hosts": [('127.0.0.1', 6379)],
-#         },
+#         'BACKEND': 'channels.layers.InMemoryChannelLayer',  # No Redis needed
 #     },
 # }
+
+
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [('127.0.0.1', 6379)],
+        },
+    },
+}
 
 # Cache
 CACHES = {

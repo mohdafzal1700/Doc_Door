@@ -10,16 +10,16 @@ class Conversation(models.Model):
     participants = models.ManyToManyField(User, related_name='conversations')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         ordering = ['-updated_at']
-    
+
     def __str__(self):
         return f"Conversation {self.id}"
-    
+
     @property
     def last_message(self):
-        return self.messages.first()
+        return self.messages.filter(is_deleted=False).order_by('-created_at').first()
 
 class Message(models.Model):
     STATUS_CHOICES = (
@@ -27,7 +27,7 @@ class Message(models.Model):
         ('delivered', 'Delivered'),
         ('seen', 'Seen'),
     )
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name='messages')
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_messages')
@@ -36,23 +36,35 @@ class Message(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='sent')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    # Added fields for WebSocket consumer compatibility
+    is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False)
     is_edited = models.BooleanField(default=False)
-    
+
     class Meta:
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"Message from {self.sender} to {self.receiver}"
 
+    def save(self, *args, **kwargs):
+        # Auto-update status based on is_read
+        if self.is_read and self.status != 'seen':
+            self.status = 'seen'
+            if not self.read_at:
+                self.read_at = timezone.now()
+        super().save(*args, **kwargs)
+
 class Notification(models.Model):
     NOTIFICATION_TYPES = (
-        ('message', 'New Message'),
+        ('new_message', 'New Message'),  # Updated to match consumer
+        ('message', 'Message'),  # Keep for backward compatibility
         ('typing', 'Typing'),
         ('online', 'User Online'),
         ('offline', 'User Offline'),
     )
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
     notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
@@ -60,10 +72,17 @@ class Notification(models.Model):
     message = models.TextField()
     data = models.JSONField(default=dict, blank=True)
     is_read = models.BooleanField(default=False)
+    read_at = models.DateTimeField(null=True, blank=True)  # Added for tracking when read
     created_at = models.DateTimeField(auto_now_add=True)
-    
+
     class Meta:
         ordering = ['-created_at']
-    
+
     def __str__(self):
         return f"Notification for {self.user}: {self.title}"
+
+    def save(self, *args, **kwargs):
+        # Auto-set read_at when is_read is True
+        if self.is_read and not self.read_at:
+            self.read_at = timezone.now()
+        super().save(*args, **kwargs)
