@@ -788,50 +788,20 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     'message': 'Content cannot be empty'
                 }))
                 return
-
-            # Step 3: Update message in database
-            updated_message = await self.update_message(message_id, new_content)
-            if not updated_message:
+            
+            # Step 3: Update message in database AND get formatted data
+            message_data = await self.update_message_with_data(message_id, new_content)
+            if not message_data:
                 print(f"   ❌ Failed to update message in database")
                 await self.send(text_data=safe_json_dumps({
                     'type': 'error',
                     'message': 'Failed to update message - not found or unauthorized'
                 }))
                 return
-
+            
             print(f"   ✅ Message updated successfully")
             
-            # Step 4: Prepare updated message data
-            message_data = {
-                'id': str(updated_message.id),
-                'conversation_id': str(updated_message.conversation.id),
-                'sender': {
-                    'id': str(updated_message.sender.id),
-                    'username': updated_message.sender.username,
-                    'full_name': getattr(updated_message.sender, 'full_name', updated_message.sender.username),
-                },
-                'receiver': {
-                    'id': str(updated_message.receiver.id),
-                    'username': updated_message.receiver.username,
-                    'full_name': getattr(updated_message.receiver, 'full_name', updated_message.receiver.username),
-                } if updated_message.receiver else None,
-                'content': updated_message.content,
-                'created_at': updated_message.created_at.isoformat(),
-                'edited': True,
-                'edited_at': updated_message.updated_at.isoformat() if hasattr(updated_message, 'updated_at') else timezone.now().isoformat(),
-                'is_read': updated_message.is_read if hasattr(updated_message, 'is_read') else False,
-            }
-            
-            # Step 5: Send confirmation to sender
-            print(f"   📤 Sending edit confirmation to sender")
-            confirmation = {
-                'type': 'message_edited_confirmation',
-                'message': message_data
-            }
-            json_confirmation = safe_json_dumps(confirmation)
-            await self.send(text_data=json_confirmation)
-            
-            # Step 6: Broadcast to group
+            # Step 4: Broadcast to group (includes sender)
             print(f"   📡 Broadcasting edit to group")
             await self.channel_layer.group_send(
                 self.conversation_group_name,
@@ -854,16 +824,93 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'message': 'Failed to edit message'
             }))
 
+    async def handle_delete_message(self, data):
+        """Handle message deletion with proper confirmation"""
+        print(f"\n🗑️ HANDLING MESSAGE DELETE")
+        print(f"   📋 Data: {data}")
+        
+        try:
+            # Step 1: Extract and validate data
+            message_id = data.get('message_id')
+            print(f"   🆔 Message ID: {message_id}")
+            
+            # Step 2: Validation
+            if not message_id:
+                print(f"   ❌ Message ID is missing")
+                await self.send(text_data=safe_json_dumps({
+                    'type': 'error',
+                    'message': 'message_id is required'
+                }))
+                return
+            
+            # Step 3: Delete message from database
+            deleted_message_data = await self.delete_message_with_data(message_id)
+            if not deleted_message_data:
+                print(f"   ❌ Failed to delete message from database")
+                await self.send(text_data=safe_json_dumps({
+                    'type': 'error',
+                    'message': 'Failed to delete message - not found or unauthorized'
+                }))
+                return
+            
+            print(f"   ✅ Message deleted successfully")
+            
+            # Step 4: Broadcast to group (includes sender)
+            print(f"   📡 Broadcasting delete to group")
+            await self.channel_layer.group_send(
+                self.conversation_group_name,
+                {
+                    'type': 'message_deleted',
+                    'message_id': deleted_message_data['message_id'],  # Use the correct key
+                    'deleted_by': deleted_message_data.get('deleted_by'),
+                    'deleted_at': deleted_message_data.get('deleted_at'),
+                    'conversation_id': deleted_message_data.get('conversation_id')
+                }
+            )
+            
+            logger.info(f"Message {message_id} deleted successfully by {self.user.username}")
+            print(f"✅ MESSAGE DELETE COMPLETED SUCCESSFULLY")
+            
+        except Exception as e:
+            print(f"💥 MESSAGE DELETE FAILED")
+            print(f"❌ Error: {e}")
+            print(f"📋 Traceback: {traceback.format_exc()}")
+            logger.error(f"Error handling delete message: {e}")
+            await self.send(text_data=safe_json_dumps({
+                'type': 'error',
+                'message': 'Failed to delete message'
+            }))
+                
+    async def message_edited(self, event):
+        """Handle message_edited events from channel layer"""
+        await self.send(text_data=json.dumps({
+            'type': 'message_edited',
+            'message': event['message'],
+            'message_id': event.get('message_id'),
+            'edited_by': event.get('edited_by'),
+            'timestamp': event.get('timestamp')
+        }))
+
+    async def message_deleted(self, event):
+        """Handle message_deleted events from channel layer"""
+        await self.send(text_data=json.dumps({
+            'type': 'message_deleted',
+            'message_id': event['message_id'],  # This should now work correctly
+            'deleted_by': event.get('deleted_by'),
+            'timestamp': event.get('deleted_at')  # Use deleted_at from the event
+        }))
     @database_sync_to_async
-    def update_message(self, message_id, new_content):
-        """Update message content in database"""
-        print(f"\n💾 UPDATING MESSAGE IN DATABASE")
+    def update_message_with_data(self, message_id, new_content):
+        """Update message content and return formatted data"""
+        print(f"\n💾 UPDATING MESSAGE WITH DATA")
         print(f"   🆔 Message ID: {message_id}")
         print(f"   📝 New content: '{new_content}'")
         
         try:
-            # Get the message
-            message = Message.objects.get(
+            # Get the message with related fields prefetched
+            message = Message.objects.select_related(
+                'sender', 'receiver', 'conversation'
+            ).get(
                 id=message_id,
                 sender=self.user,  # Only allow editing own messages
                 conversation=self.conversation_id
@@ -878,7 +925,30 @@ class ChatConsumer(AsyncWebsocketConsumer):
             message.save()
             
             print(f"   ✅ Message updated in database")
-            return message
+            
+            # Format message data (sync version since we're in sync context)
+            message_data = {
+                'id': str(message.id),
+                'conversation_id': str(message.conversation.id),
+                'sender': {
+                    'id': str(message.sender.id),
+                    'username': message.sender.username,
+                    'full_name': getattr(message.sender, 'full_name', message.sender.username),
+                },
+                'receiver': {
+                    'id': str(message.receiver.id),
+                    'username': message.receiver.username,
+                    'full_name': getattr(message.receiver, 'full_name', message.receiver.username),
+                } if message.receiver else None,
+                'content': message.content,
+                'created_at': message.created_at.isoformat(),
+                'edited': True,
+                'edited_at': message.updated_at.isoformat() if hasattr(message, 'updated_at') else timezone.now().isoformat(),
+                'is_read': getattr(message, 'is_read', False),
+            }
+            
+            print(f"   ✅ Message data formatted")
+            return message_data
             
         except Message.DoesNotExist:
             print(f"   ❌ Message not found or unauthorized")
@@ -889,64 +959,44 @@ class ChatConsumer(AsyncWebsocketConsumer):
             logger.error(f"Error updating message: {e}")
             return None
 
-    # Add the WebSocket event handler
-    async def message_edited(self, event):
-        """Send edited message to WebSocket"""
-        print(f"\n✏️ SENDING EDITED MESSAGE TO WEBSOCKET")
+    @database_sync_to_async
+    def delete_message_with_data(self, message_id):
+        """Delete message and return delete data"""
+        print(f"\n💾 DELETING MESSAGE WITH DATA")
+        print(f"   🆔 Message ID: {message_id}")
+        
         try:
-            message_data = event['message']
-            response = {
-                'type': 'message_edited',
-                'message': message_data
+            # Get the message with related fields
+            message = Message.objects.select_related('sender', 'conversation').get(
+                id=message_id,
+                sender=self.user,  # Only allow deleting own messages
+                conversation=self.conversation_id
+            )
+            
+            print(f"   ✅ Message found and authorized")
+            
+            # Prepare delete data before deletion
+            delete_data = {
+                'message_id': str(message.id),
+                'conversation_id': str(message.conversation.id),
+                'deleted_by': str(message.sender.id),
+                'deleted_at': timezone.now().isoformat()
             }
-            json_response = safe_json_dumps(response)
-            await self.send(text_data=json_response)
-            print(f"   ✅ Edited message sent to WebSocket successfully")
+            
+            # Delete the message
+            message.delete()
+            
+            print(f"   ✅ Message deleted from database")
+            return delete_data
+            
+        except Message.DoesNotExist:
+            print(f"   ❌ Message not found or unauthorized")
+            logger.error(f"Message {message_id} not found or user {self.user.id} not authorized")
+            return None
         except Exception as e:
-            print(f"   💥 Failed to send edited message: {e}")
-            logger.error(f"Error sending edited message: {e}")
-
-    async def message_edited_confirmation(self, event):
-        """Send edit confirmation to WebSocket"""
-        print(f"\n✅ SENDING EDIT CONFIRMATION TO WEBSOCKET")
-        try:
-            message_data = event['message']
-            response = {
-                'type': 'message_edited_confirmation',
-                'message': message_data
-            }
-            json_response = safe_json_dumps(response)
-            await self.send(text_data=json_response)
-            print(f"   ✅ Edit confirmation sent to WebSocket successfully")
-        except Exception as e:
-            print(f"   💥 Failed to send edit confirmation: {e}")
-            logger.error(f"Error sending edit confirmation: {e}")
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    async def handle_delete_message(self, data):
-        """Handle message deletion with debugging"""
-        print(f"\n🗑️ HANDLING MESSAGE DELETE")
-        print(f"   📋 Data: {data}")
-        # Implementation here
-        pass
+            print(f"   💥 Error deleting message: {e}")
+            logger.error(f"Error deleting message: {e}")
+            return None
 
     async def create_message_notification(self, message):
         """Create notification for new message with debugging"""

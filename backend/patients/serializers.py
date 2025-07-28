@@ -1440,7 +1440,7 @@ class PaymentSerializer(serializers.ModelSerializer):
 #             data['distance'] = round(float(data['distance']), 2)
         
 #         return data
-    
+
 class DoctorLocationSerializer(serializers.ModelSerializer):
     """Serializer for doctor locations with distance"""
     

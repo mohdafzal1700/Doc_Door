@@ -1,7 +1,16 @@
 "use client"
 import { useState, useRef, useEffect, useCallback } from "react"
-import { Send, Paperclip, MoreVertical, Phone, Video, Edit2, Trash2 } from "lucide-react"
-import { getChatSocket, sendChatMessage, sendTyping, closeChatSocket, getConnectionStatus, markMessageAsRead } from "../service/websocket"
+import { Send, Paperclip, MoreVertical, Phone, Video, Edit2, Trash2, Check, X } from "lucide-react"
+import { 
+  getChatSocket, 
+  sendChatMessage, 
+  sendTyping, 
+  closeChatSocket, 
+  getConnectionStatus, 
+  markMessageAsRead,
+  editChatMessage,
+  deleteChatMessage 
+} from "../service/websocket"
 import { getConversationMessages } from "../endpoints/Chat"
 
 export default function ChatArea({ 
@@ -9,9 +18,8 @@ export default function ChatArea({
   currentUser, 
   onConversationUpdate, 
   messages: propMessages, 
-  onDeleteMessage, 
-  onEditMessage, 
-  onSendMessage 
+  onDeleteMessage,
+  onEditMessage 
 }) {
   const [message, setMessage] = useState("")
   const [isTyping, setIsTyping] = useState(false)
@@ -22,34 +30,27 @@ export default function ChatArea({
   const [connectionStatus, setConnectionStatus] = useState('disconnected')
   const [retryCount, setRetryCount] = useState(0)
   const [isLoadingMessages, setIsLoadingMessages] = useState(false)
-  
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
   const messagesEndRef = useRef(null)
   const typingTimeoutRef = useRef(null)
   const reconnectTimeoutRef = useRef(null)
   const websocketInitialized = useRef(false)
   const componentMounted = useRef(true)
-  const loadedConversationId = useRef(null) // Track which conversation we loaded
+  const loadedConversationId = useRef(null)
+  const editInputRef = useRef(null)
+
   const maxRetries = 5
 
-
-
-
+  // Get the other participant for header display
   const activePatient = conversation?.participants?.find(p => {
-        // Convert both IDs to strings for comparison
-        const pId = String(p.id || p.user_id || '');
-        const currentId = String(currentUser?.id || '');
-        console.log('Comparing participant:', pId, 'with current user:', currentId);
-        return pId !== currentId;
-    }) || {};
-
-    console.log('Active patient (other participant):', activePatient);
-    console.log('Current user:', currentUser);
+    const pId = String(p.id || p.user_id || '').trim()
+    const currentId = String(currentUser?.id || '').trim()
+    return pId !== currentId && pId !== 'undefined' && pId !== 'null' && pId !== ''
+  }) || {}
 
   // Use prop messages if provided, otherwise use local messages
   const messages = propMessages || localMessages
-
-  // Get the other participant for header display
-
 
   const scrollToBottom = useCallback(() => {
     if (componentMounted.current) {
@@ -61,41 +62,26 @@ export default function ChatArea({
     scrollToBottom()
   }, [messages, scrollToBottom])
 
-
+  // Component mounted flag
   useEffect(() => {
-    console.log('=== CONVERSATION DEBUG ===');
-    console.log('Conversation:', conversation);
-    console.log('Conversation ID:', conversation?.id);
-    console.log('Current User:', currentUser);
-    console.log('Current User ID:', currentUser?.id, typeof currentUser?.id);
-    
-    if (conversation?.participants) {
-        console.log('All participants:');
-        conversation.participants.forEach((p, index) => {
-            console.log(`  ${index}: ID=${p.id || p.user_id}, Name=${p.full_name || p.username}, Type=${typeof (p.id || p.user_id)}`);
-        });
+    componentMounted.current = true
+    return () => {
+      componentMounted.current = false
     }
-    
-    console.log('Active Patient (other participant):', activePatient);
-    console.log('Active Patient ID:', activePatient.id || activePatient.user_id);
-    console.log('========================');
-}, [conversation, currentUser, activePatient]);
+  }, [])
 
-  // FIXED: Simplified message loading logic
+  // Enhanced message loading logic
   useEffect(() => {
     const loadConversationMessages = async () => {
-      // Skip if prop messages are provided or no conversation
       if (propMessages || !conversation?.id || !componentMounted.current) {
         return
       }
 
-      // Skip if we already loaded messages for this conversation
       if (loadedConversationId.current === conversation.id) {
         return
       }
 
       setIsLoadingMessages(true)
-      
       try {
         console.log('📥 Loading messages for conversation:', conversation.id)
         const response = await getConversationMessages(conversation.id)
@@ -103,11 +89,9 @@ export default function ChatArea({
         if (componentMounted.current && response.data) {
           const fetchedMessages = response.data.results || response.data || []
           console.log('✅ Messages loaded successfully:', fetchedMessages.length, 'messages')
-          
           setLocalMessages(fetchedMessages)
-          loadedConversationId.current = conversation.id // Mark as loaded
-          
-          // Update conversation if callback provided
+          loadedConversationId.current = conversation.id
+
           if (onConversationUpdate && fetchedMessages.length > 0) {
             const updatedConversation = {
               ...conversation,
@@ -119,10 +103,9 @@ export default function ChatArea({
         }
       } catch (error) {
         console.error('❌ Error loading conversation messages:', error)
-        // Set empty array on error to avoid infinite loading
         if (componentMounted.current) {
           setLocalMessages([])
-          loadedConversationId.current = conversation.id // Mark as attempted
+          loadedConversationId.current = conversation.id
         }
       } finally {
         if (componentMounted.current) {
@@ -131,33 +114,14 @@ export default function ChatArea({
       }
     }
 
-    // Reset loaded state when conversation changes
     if (conversation?.id && loadedConversationId.current !== conversation.id) {
       loadedConversationId.current = null
-      setLocalMessages([]) // Clear previous messages
+      setLocalMessages([])
       loadConversationMessages()
     }
   }, [conversation?.id, propMessages, onConversationUpdate])
 
-  // FIXED: Simplified fallback message loading
-  useEffect(() => {
-    if (conversation && !propMessages && componentMounted.current && !isLoadingMessages) {
-      // Only use conversation messages if we haven't loaded from API
-      if (loadedConversationId.current !== conversation.id && conversation.messages) {
-        setLocalMessages(conversation.messages || [])
-      }
-    }
-  }, [conversation, propMessages, isLoadingMessages])
-
-  // Component mounted flag
-  useEffect(() => {
-    componentMounted.current = true
-    return () => {
-      componentMounted.current = false
-    }
-  }, [])
-
-  // Initialize WebSocket connection with proper cleanup
+  // Initialize WebSocket connection
   useEffect(() => {
     if (conversation?.id && currentUser?.id && !websocketInitialized.current) {
       console.log('🔌 Setting up WebSocket for conversation:', conversation.id)
@@ -178,7 +142,6 @@ export default function ChatArea({
       if (!componentMounted.current) return
 
       const { conversationId, data } = event.detail
-      // Only process messages for this conversation
       if (conversationId !== conversation?.id) return
 
       handleWebSocketData(data)
@@ -188,7 +151,7 @@ export default function ChatArea({
     return () => {
       window.removeEventListener('websocket_message', handleWebSocketMessage)
     }
-  }, [conversation?.id, currentUser?.id, propMessages, onEditMessage, onDeleteMessage, onConversationUpdate])
+  }, [conversation?.id, currentUser?.id])
 
   const initializeWebSocket = useCallback(async () => {
     if (!componentMounted.current || connectionStatus === 'connecting') return
@@ -199,7 +162,6 @@ export default function ChatArea({
       if (socket && componentMounted.current) {
         console.log('🔌 WebSocket connection initiated')
         
-        // Check connection status
         const checkStatus = () => {
           if (!componentMounted.current) return
           const status = getConnectionStatus(conversation.id, currentUser.id)
@@ -210,8 +172,7 @@ export default function ChatArea({
             setConnectionStatus('error')
           }
         }
-        
-        // Check status after a short delay
+
         setTimeout(checkStatus, 100)
       } else if (componentMounted.current) {
         setConnectionStatus('error')
@@ -227,7 +188,6 @@ export default function ChatArea({
   }, [conversation?.id, currentUser?.id, connectionStatus])
 
   const cleanupWebSocket = useCallback(() => {
-    // Clear timeouts
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
       typingTimeoutRef.current = null
@@ -237,11 +197,9 @@ export default function ChatArea({
       reconnectTimeoutRef.current = null
     }
 
-    // Close WebSocket for this specific conversation
     if (conversation?.id && currentUser?.id) {
       closeChatSocket(conversation.id, currentUser.id)
     }
-    
     setConnectionStatus('disconnected')
     setRetryCount(0)
   }, [conversation?.id, currentUser?.id])
@@ -265,74 +223,82 @@ export default function ChatArea({
     }, delay)
   }, [retryCount, initializeWebSocket])
 
-  const handleWebSocketData = useCallback((data) => {
-    if (!componentMounted.current) return
+const handleWebSocketData = useCallback((data) => {
+  if (!componentMounted.current) return
+  
+  console.log('📨 Processing WebSocket message:', data)
+  
+  switch (data.type) {
+    case 'chat_message':
+      if (data.message && data.message.sender.id !== currentUser.id) {
+        handleNewMessage(data.message)
+      }
+      break
+      
+    case 'message_sent':
+      console.log('✅ Message sent confirmation received:', data.message)
+      if (data.message && data.message.sender.id === currentUser.id) {
+        handleMessageSentConfirmation(data.message)
+      }
+      break
+      
+    case 'typing_indicator':
+      handleTypingIndicator(data)
+      break
+      
+    case 'message_edited':
+      console.log('✅ Message edit confirmation received:', data.message)
+      // Now update the UI based on server confirmation
+      if (onEditMessage) {
+        onEditMessage(data.message.id, data.message.content)
+      } else {
+        handleLocalMessageEdit(data.message.id, data.message.content)
+      }
+      break
+      
+    case 'message_deleted':
+      console.log('✅ Message delete confirmation received:', data.message_id)
+      // Now update the UI based on server confirmation
+      if (onDeleteMessage) {
+        onDeleteMessage(data.message_id)
+      } else {
+        handleLocalMessageDelete(data.message_id)
+      }
+      break
+      
+    case 'message_read':
+      console.log('📖 Message marked as read:', data.message_id)
+      handleMessageRead(data.message_id, data.read_by)
+      break
+      
+    case 'connection_established':
+    case 'connection_confirmed':
+      console.log('✅ Connection confirmed by server')
+      setConnectionStatus('connected')
+      break
+      
+    case 'error':
+      if (!data.message.includes('typing_indicator')) {
+        console.error('❌ WebSocket error message:', data.message)
+        // Handle edit/delete errors specifically
+        if (data.message.includes('edit') || data.message.includes('delete')) {
+          alert('Operation failed: ' + data.message)
+        }
+      }
+      break
+      
+    default:
+      console.log('🤷 Unknown message type:', data.type)
+  }
+}, [currentUser.id, onEditMessage, onDeleteMessage])
 
-    console.log('📨 Processing WebSocket message:', data)
 
-    switch (data.type) {
-      case 'chat_message':
-        if (data.message && data.message.sender.id !== currentUser.id) {
-          handleNewMessage(data.message)
-        }
-        break
-      case 'message_sent':
-        console.log('✅ Message sent confirmation received:', data.message)
-        if (data.message && data.message.sender.id === currentUser.id) {
-          handleMessageSentConfirmation(data.message)
-        }
-        break
-      case 'typing_indicator':
-        handleTypingIndicator(data)
-        break
-      case 'message_edited':
-        if (onEditMessage) {
-          onEditMessage(data.message.id, data.message.content)
-        } else {
-          handleLocalMessageEdit(data.message.id, data.message.content)
-        }
-        break
-      case 'message_deleted':
-        if (onDeleteMessage) {
-          onDeleteMessage(data.message_id)
-        } else {
-          handleLocalMessageDelete(data.message_id)
-        }
-        break
-      case 'message_read':
-        console.log('📖 Message marked as read:', data.message_id)
-        handleMessageRead(data.message_id, data.read_by)
-        break
-      case 'user_status_changed':
-        handleUserPresence(data)
-        break
-      case 'connection_established':
-        console.log('✅ Connection established by server')
-        setConnectionStatus('connected')
-        break
-      case 'connection_confirmed':
-        console.log('✅ Connection confirmed by server')
-        setConnectionStatus('connected')
-        break
-      case 'error':
-        // Filter out typing indicator errors since server doesn't support them yet
-        if (!data.message.includes('typing_indicator')) {
-          console.error('❌ WebSocket error message:', data.message)
-        } else {
-          console.log('ℹ️ Server doesn\'t support typing indicators yet:', data.message)
-        }
-        break
-      default:
-        console.log('🤷 Unknown message type:', data.type)
-    }
-  }, [currentUser.id, onEditMessage, onDeleteMessage])
 
   const handleNewMessage = useCallback((newMessage) => {
     if (!componentMounted.current) return
 
     if (!propMessages) {
       setLocalMessages(prev => {
-        // Avoid duplicates
         if (prev.some(msg => msg.id === newMessage.id)) {
           return prev
         }
@@ -340,7 +306,6 @@ export default function ChatArea({
       })
     }
 
-    // Update conversation if callback provided
     if (onConversationUpdate) {
       const updatedConversation = {
         ...conversation,
@@ -350,7 +315,6 @@ export default function ChatArea({
       onConversationUpdate(updatedConversation)
     }
 
-    // Auto-mark as read if conversation is active
     setTimeout(() => {
       if (componentMounted.current) {
         handleMarkAsRead(newMessage.id)
@@ -363,7 +327,6 @@ export default function ChatArea({
 
     console.log('✅ Message confirmation received:', confirmedMessage)
     setLocalMessages(prev => prev.map(msg => {
-      // Match by temp_id first, then by content and sender as fallback
       const isMatch = (
         (msg.temp_id && confirmedMessage.temp_id && msg.temp_id === confirmedMessage.temp_id) ||
         (msg.content === confirmedMessage.content && msg.sender.id === currentUser.id)
@@ -371,27 +334,36 @@ export default function ChatArea({
 
       if (isMatch) {
         console.log('🔄 Updating message from temp to confirmed:', msg.id, '->', confirmedMessage.id)
-        return confirmedMessage // Replace with confirmed message
+        return confirmedMessage
       }
       return msg
     }))
   }, [propMessages, currentUser.id])
 
   const handleLocalMessageEdit = useCallback((messageId, newContent) => {
-    if (!componentMounted.current || propMessages) return
-
-    setLocalMessages(prev => prev.map(msg => 
+  if (!componentMounted.current || propMessages) return
+  
+  console.log('🔄 Updating message locally after server confirmation:', messageId)
+  setLocalMessages(prev => 
+    prev.map(msg => 
       msg.id === messageId 
-        ? { ...msg, content: newContent, edited: true, edited_at: new Date().toISOString() }
+        ? { 
+            ...msg, 
+            content: newContent, 
+            edited: true, 
+            edited_at: new Date().toISOString() 
+          } 
         : msg
-    ))
-  }, [propMessages])
+    )
+  )
+}, [propMessages])
 
-  const handleLocalMessageDelete = useCallback((messageId) => {
-    if (!componentMounted.current || propMessages) return
-
-    setLocalMessages(prev => prev.filter(msg => msg.id !== messageId))
-  }, [propMessages])
+const handleLocalMessageDelete = useCallback((messageId) => {
+  if (!componentMounted.current || propMessages) return
+  
+  console.log('🗑️ Removing message locally after server confirmation:', messageId)
+  setLocalMessages(prev => prev.filter(msg => msg.id !== messageId))
+}, [propMessages])
 
   const handleTypingIndicator = useCallback((data) => {
     if (!componentMounted.current || data.user_id === currentUser.id) return
@@ -407,7 +379,6 @@ export default function ChatArea({
       return newSet
     })
 
-    // Clear typing indicator after 3 seconds
     if (data.is_typing) {
       setTimeout(() => {
         if (componentMounted.current) {
@@ -426,137 +397,110 @@ export default function ChatArea({
 
     setLocalMessages(prev => prev.map(msg => 
       msg.id === messageId 
-        ? { ...msg, read_by: [...(msg.read_by || []), readBy] }
+        ? { ...msg, read_by: [...(msg.read_by || []), readBy] } 
         : msg
     ))
   }, [propMessages])
 
-  const handleUserPresence = useCallback((data) => {
-    console.log('👤 User presence update:', data)
-    // Update user presence in the UI if needed
-  }, [])
-
   const handleSubmit = async (e) => {
-        e.preventDefault()
-        if (!message.trim() || !conversation || !componentMounted.current) return
+    e.preventDefault()
+    if (!message.trim() || !conversation || !componentMounted.current || isSubmitting) return
 
-        const messageText = message.trim()
-        const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-        
-        // FIXED: Ensure we're getting the correct receiver ID
-        // ✅ AFTER - Proper receiver ID extraction
-          const getReceiverId = () => {
-            // Try different possible ID fields
-            const possibleIds = [
-              activePatient?.id,
-              activePatient?.user_id,
-              activePatient?.participant_id
-            ];
-            
-            for (const id of possibleIds) {
-              if (id) {
-                const normalizedId = String(id).trim();
-                if (normalizedId && normalizedId !== 'undefined' && normalizedId !== 'null') {
-                  return normalizedId;
-                }
-              }
-            }
-            return null;
-          };
+    const messageText = message.trim()
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 
-          const receiverId = getReceiverId();
+    setIsSubmitting(true)
+    setMessage("")
 
-          console.log('🎯 Receiver ID Analysis:', {
-            activePatient,
-            possibleIds: {
-              id: activePatient?.id,
-              user_id: activePatient?.user_id,
-              participant_id: activePatient?.participant_id
-            },
-            selectedReceiverId: receiverId,
-            currentUserId: String(currentUser?.id)
-          });
+    const getReceiverId = () => {
+      const possibleIds = [
+        activePatient?.id,
+        activePatient?.user_id,
+        activePatient?.participant_id
+      ]
 
-          if (!receiverId) {
-            console.error('❌ No valid receiver ID found');
-            console.error('Available participant data:', activePatient);
-            alert('Cannot send message: Recipient not found. Please refresh the page.');
-            return;
+      for (const id of possibleIds) {
+        if (id) {
+          const normalizedId = String(id).trim()
+          if (normalizedId && normalizedId !== 'undefined' && normalizedId !== 'null') {
+            return normalizedId
           }
-
-        const tempMessage = {
-            id: tempId,
-            temp_id: tempId,
-            content: messageText,
-            sender: currentUser,
-            created_at: new Date().toISOString(),
-            conversation_id: conversation.id
         }
-
-        setMessage("")
-
-        try {
-            // Add message to local state immediately for better UX
-            if (!propMessages && componentMounted.current) {
-                setLocalMessages(prev => [...prev, tempMessage])
-            }
-
-            // Send via WebSocket if connected
-            if (connectionStatus === 'connected') {
-                const result = await sendChatMessage(conversation.id, {
-                    type: 'chat_message',
-                    message: messageText,
-                    content: messageText,
-                    conversation_id: conversation.id,
-                    receiver_id: receiverId, // Use the correct receiver ID
-                    temp_id: tempId
-                }, currentUser.id)
-
-                if (result.success) {
-                    console.log('📤 Message sent via WebSocket with temp_id:', tempId)
-                } else {
-                    throw new Error(result.error || 'WebSocket send failed')
-                }
-            } else {
-                // Fallback to HTTP API if WebSocket not available
-                console.log('📤 Sending via HTTP API (WebSocket not connected)')
-                if (onSendMessage) {
-                    await onSendMessage(messageText)
-                } else {
-                    throw new Error('No send method available')
-                }
-            }
-        } catch (error) {
-            console.error('❌ Error sending message:', error)
-            if (!componentMounted.current) return
-
-            // Restore message text on error
-            setMessage(messageText)
-
-            // Remove the temporary message on error
-            if (!propMessages) {
-                setLocalMessages(prev => prev.filter(msg => msg.id !== tempId))
-            }
-        }
+      }
+      return null
     }
+
+    const receiverId = getReceiverId()
+
+    if (!receiverId) {
+      console.error('❌ No valid receiver ID found')
+      alert('Cannot send message: Recipient not found. Please refresh the page.')
+      setMessage(messageText)
+      setIsSubmitting(false)
+      return
+    }
+
+    const tempMessage = {
+      id: tempId,
+      temp_id: tempId,
+      content: messageText,
+      sender: currentUser,
+      created_at: new Date().toISOString(),
+      conversation_id: conversation.id
+    }
+
+    try {
+      if (!propMessages && componentMounted.current) {
+        setLocalMessages(prev => [...prev, tempMessage])
+      }
+
+      if (connectionStatus === 'connected') {
+        const result = await sendChatMessage(conversation.id, {
+          type: 'chat_message',
+          message: messageText,
+          content: messageText,
+          conversation_id: conversation.id,
+          receiver_id: receiverId,
+          temp_id: tempId
+        }, currentUser.id)
+
+        if (result.success) {
+          console.log('📤 Message sent via WebSocket with temp_id:', tempId)
+        } else {
+          throw new Error(result.error || 'WebSocket send failed')
+        }
+      } else {
+        throw new Error('WebSocket not connected and no HTTP fallback available')
+      }
+    } catch (error) {
+      console.error('❌ Error sending message:', error)
+      if (!componentMounted.current) return
+
+      setMessage(messageText)
+      if (!propMessages) {
+        setLocalMessages(prev => prev.filter(msg => msg.id !== tempId))
+      }
+      alert('Failed to send message. Please try again.')
+    } finally {
+      if (componentMounted.current) {
+        setIsSubmitting(false)
+      }
+    }
+  }
 
   const handleInputChange = (e) => {
     if (!componentMounted.current) return
-
     setMessage(e.target.value)
 
-    // Send typing indicator
     if (!isTyping && connectionStatus === 'connected') {
       setIsTyping(true)
       sendTypingIndicator(true)
     }
 
-    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
     }
 
-    // Stop typing after 2 seconds of inactivity
     typingTimeoutRef.current = setTimeout(() => {
       if (componentMounted.current && isTyping) {
         setIsTyping(false)
@@ -566,87 +510,101 @@ export default function ChatArea({
   }
 
   const sendTypingIndicator = useCallback((typing) => {
-    if (!componentMounted.current) return
+    if (!componentMounted.current || connectionStatus !== 'connected') return
 
-    if (connectionStatus === 'connected') {
-      try {
-        sendTyping(conversation.id, typing, currentUser.id)
-      } catch (error) {
-        // Silently handle typing indicator errors since server may not support them
-        console.log('ℹ️ Typing indicator not supported by server')
-      }
+    try {
+      sendTyping(conversation.id, typing, currentUser.id)
+    } catch (error) {
+      console.log('ℹ️ Typing indicator not supported by server')
     }
   }, [connectionStatus, conversation?.id, currentUser?.id])
 
   const handleEditMessage = (msg) => {
-    if (!componentMounted.current) return
-    setEditingMessage(msg.id)
-    setEditText(msg.content)
-  }
+  if (!componentMounted.current) return
+  setEditingMessage(msg.id)
+  setEditText(msg.content)
+  setTimeout(() => editInputRef.current?.focus(), 0)
+}
 
-  const handleSaveEdit = async () => {
-    if (!editText.trim() || !editingMessage || !componentMounted.current) return
-
-    try {
-      const status = getConnectionStatus(conversation.id, currentUser.id)
-      if (status.connected) {
-        // Send via WebSocket
-        sendChatMessage(conversation.id, {
-          type: 'edit_message',
-          message_id: editingMessage,
-          content: editText.trim(),
-          conversation_id: conversation.id
-        }, currentUser.id)
+const handleSaveEdit = async () => {
+  if (!editText.trim() || !editingMessage || !componentMounted.current) return
+  
+  const originalContent = editText.trim()
+  
+  try {
+    if (connectionStatus === 'connected') {
+      // Send the edit request via WebSocket
+      const result = await editChatMessage(conversation.id, editingMessage, originalContent, currentUser.id)
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to edit message')
       }
-
-      if (onEditMessage) {
-        onEditMessage(editingMessage, editText.trim())
-      } else {
-        handleLocalMessageEdit(editingMessage, editText.trim())
-      }
-
+      
+      // DO NOT update UI here - wait for WebSocket confirmation
+      console.log('✅ Edit message sent, waiting for server confirmation...')
+      
+      // Clear editing state immediately after sending
       setEditingMessage(null)
       setEditText("")
-    } catch (error) {
-      console.error('❌ Error editing message:', error)
+      
+    } else {
+      throw new Error('WebSocket not connected')
     }
+    
+  } catch (error) {
+    console.error('❌ Error editing message:', error)
+    alert('Failed to edit message. Please try again.')
+    
+    // Reset editing state on error
+    setEditingMessage(null)
+    setEditText("")
   }
+}
 
-  const handleDeleteMessage = async (messageId) => {
-    if (!window.confirm('Are you sure you want to delete this message?')) return
-    if (!componentMounted.current) return
-
-    try {
-      const status = getConnectionStatus(conversation.id, currentUser.id)
-      if (status.connected) {
-        // Send via WebSocket
-        sendChatMessage(conversation.id, {
-          type: 'delete_message',
-          message_id: messageId,
-          conversation_id: conversation.id
-        }, currentUser.id)
+const handleDeleteMessage = async (messageId) => {
+  if (!window.confirm('Are you sure you want to delete this message?')) return
+  if (!componentMounted.current) return
+  
+  try {
+    if (connectionStatus === 'connected') {
+      // Send the delete request via WebSocket
+      const result = await deleteChatMessage(conversation.id, messageId, currentUser.id)
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to delete message')
       }
-
-      if (onDeleteMessage) {
-        onDeleteMessage(messageId)
-      } else {
-        handleLocalMessageDelete(messageId)
-      }
-    } catch (error) {
-      console.error('❌ Error deleting message:', error)
+      
+      // DO NOT update UI here - wait for WebSocket confirmation
+      console.log('✅ Delete message sent, waiting for server confirmation...')
+      
+    } else {
+      throw new Error('WebSocket not connected')
     }
+    
+  } catch (error) {
+    console.error('❌ Error deleting message:', error)
+    alert('Failed to delete message. Please try again.')
   }
+}
 
-  const handleMarkAsRead = useCallback((messageId) => {
+const handleCancelEdit = () => {
+  setEditingMessage(null)
+  setEditText("")
+}
+
+const handleMarkAsRead = useCallback((messageId) => {
     if (!componentMounted.current) return
-
     const status = getConnectionStatus(conversation.id, currentUser.id)
     if (status.connected) {
       markMessageAsRead(conversation.id, messageId, currentUser.id)
     }
   }, [conversation?.id, currentUser?.id])
 
-  // Early return if no conversation
+  const normalizeId = (id) => {
+    if (!id) return ''
+    return String(id).trim()
+  }
+
   if (!conversation) {
     return (
       <div className="flex-1 bg-gray-50 flex items-center justify-center">
@@ -678,9 +636,20 @@ export default function ChatArea({
             <h3 className="text-sm font-medium text-gray-900">
               {activePatient.full_name || activePatient.username || 'Unknown User'}
             </h3>
-            <p className="text-xs text-gray-500">
-              {activePatient.isOnline ? "Online" : `Last seen ${activePatient.timestamp || 'recently'}`}
-            </p>
+            <div className="flex items-center space-x-2">
+              <p className="text-xs text-gray-500">
+                {activePatient.isOnline ? "Online" : `Last seen ${activePatient.timestamp || 'recently'}`}
+              </p>
+              {connectionStatus === 'connected' && (
+                <div className="w-2 h-2 bg-green-500 rounded-full" title="Connected"></div>
+              )}
+              {connectionStatus === 'connecting' && (
+                <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" title="Connecting"></div>
+              )}
+              {connectionStatus === 'error' && (
+                <div className="w-2 h-2 bg-red-500 rounded-full" title="Connection Error"></div>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center space-x-2">
@@ -698,19 +667,6 @@ export default function ChatArea({
 
       {/* Messages Container */}
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {/* DEBUG: Add this temporarily to see message data */}
-        {process.env.NODE_ENV === 'development' && (
-          <div className="text-xs text-gray-400 p-2 bg-gray-100 rounded">
-            Debug: {messages.length} messages loaded | Current user: {currentUser?.id} (type: {typeof currentUser?.id})
-            {messages.length > 0 && (
-              <div>
-                First message sender: {JSON.stringify(messages[0]?.sender?.id)} (type: {typeof messages[0]?.sender?.id})
-                <br />Message content: "{messages[0]?.content}"
-              </div>
-            )}
-          </div>
-        )}
-        
         {isLoadingMessages ? (
           <div className="text-center text-gray-500 mt-8">
             <div className="flex items-center justify-center space-x-2">
@@ -724,35 +680,11 @@ export default function ChatArea({
           </div>
         ) : (
           messages.map((msg, index) => {
-            // More robust sender comparison with type conversion
-            // ✅ AFTER - Robust ID comparison
-            const normalizeId = (id) => {
-              if (!id) return '';
-              return String(id).trim();
-            };
-
-            const currentUserId = normalizeId(currentUser?.id);
-            const msgSenderId = normalizeId(msg.sender?.id || msg.sender_id);
-            const isCurrentUser = currentUserId && msgSenderId && (msgSenderId === currentUserId);
-
-            console.log('🔍 ID Comparison:', { 
-              currentUserId, 
-              msgSenderId, 
-              isCurrentUser,
-              types: { current: typeof currentUser?.id, sender: typeof msg.sender?.id }
-            });
+            const currentUserId = normalizeId(currentUser?.id)
+            const msgSenderId = normalizeId(msg.sender?.id || msg.sender_id)
+            const isCurrentUser = currentUserId && msgSenderId && (msgSenderId === currentUserId)
             const isEditing = editingMessage === msg.id
-            
-            // Fallback key in case msg.id is undefined
             const messageKey = msg.id || msg.temp_id || `msg-${index}`
-            
-            // Debug individual message
-            console.log('Message comparison:', {
-              msgSenderId,
-              currentUserId,
-              isCurrentUser,
-              content: msg.content
-            })
 
             return (
               <div key={messageKey} className={`flex ${isCurrentUser ? "justify-end" : "justify-start"}`}>
@@ -760,30 +692,40 @@ export default function ChatArea({
                   {isEditing ? (
                     <div className="bg-white border border-gray-300 rounded-lg p-3">
                       <input
+                        ref={editInputRef}
                         type="text"
                         value={editText}
                         onChange={(e) => setEditText(e.target.value)}
                         className="w-full p-2 border border-gray-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        onKeyPress={(e) => e.key === 'Enter' && handleSaveEdit()}
+                        onKeyPress={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleSaveEdit()
+                          } else if (e.key === 'Escape') {
+                            handleCancelEdit()
+                          }
+                        }}
                       />
                       <div className="flex justify-end space-x-2 mt-2">
                         <button
-                          onClick={() => setEditingMessage(null)}
-                          className="text-xs text-gray-500 hover:text-gray-700"
+                          onClick={handleCancelEdit}
+                          className="flex items-center space-x-1 px-2 py-1 text-xs text-gray-500 hover:text-gray-700 rounded"
                         >
-                          Cancel
+                          <X className="w-3 h-3" />
+                          <span>Cancel</span>
                         </button>
                         <button
                           onClick={handleSaveEdit}
-                          className="text-xs text-blue-500 hover:text-blue-700"
+                          className="flex items-center space-x-1 px-2 py-1 text-xs text-blue-500 hover:text-blue-700 rounded"
                         >
-                          Save
+                          <Check className="w-3 h-3" />
+                          <span>Save</span>
                         </button>
                       </div>
                     </div>
                   ) : (
                     <div
-                      className={`px-4 py-2 rounded-lg ${
+                      className={`px-4 py-2 rounded-lg cursor-pointer ${
                         isCurrentUser
                           ? "bg-blue-500 text-white rounded-br-sm"
                           : "bg-white text-gray-900 border border-gray-200 rounded-bl-sm"
@@ -800,13 +742,15 @@ export default function ChatArea({
                           <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                             <button
                               onClick={() => handleEditMessage(msg)}
-                              className="text-xs text-blue-200 hover:text-white"
+                              className="text-xs text-blue-200 hover:text-white p-1 rounded"
+                              title="Edit message"
                             >
                               <Edit2 className="w-3 h-3" />
                             </button>
                             <button
                               onClick={() => handleDeleteMessage(msg.id)}
-                              className="text-xs text-red-200 hover:text-white"
+                              className="text-xs text-red-200 hover:text-white p-1 rounded"
+                              title="Delete message"
                             >
                               <Trash2 className="w-3 h-3" />
                             </button>
@@ -853,14 +797,19 @@ export default function ChatArea({
               onChange={handleInputChange}
               placeholder="Type a message..."
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              disabled={isSubmitting}
             />
           </div>
           <button
             type="submit"
-            disabled={!message.trim()}
+            disabled={!message.trim() || isSubmitting}
             className="p-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
-            <Send className="w-5 h-5" />
+            {isSubmitting ? (
+              <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+            ) : (
+              <Send className="w-5 h-5" />
+            )}
           </button>
         </form>
       </div>

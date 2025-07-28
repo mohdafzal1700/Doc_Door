@@ -114,7 +114,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_403_FORBIDDEN
             )
 
-        messages = conversation.messages.filter(is_deleted=False).order_by('-created_at')
+        messages = conversation.messages.filter(is_deleted=False).order_by('created_at')
         
         # Pagination
         page = self.paginate_queryset(messages)

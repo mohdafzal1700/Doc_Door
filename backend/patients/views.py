@@ -1803,13 +1803,31 @@ class CurrentPatientLocationView(generics.RetrieveAPIView):
                 'data': None,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
 
-# Haversine calculation
+# View to find nearby doctors using bounding box filtering + Haversine distance calculation
+
+from math import radians, cos, sin, asin, sqrt, degrees
+
+
 class SearchNearbyDoctorsView(generics.ListAPIView):
     """GET /search/nearby-doctors/ - Find nearby doctors based on patient location"""
     serializer_class = DoctorLocationSerializer
     permission_classes = [IsAuthenticated]
-    
+
+    def get_bounding_box(self, lat, lng, radius_km):
+        """Calculate bounding box coordinates for initial filtering"""
+        R = 6371  # Earth radius in km
+        delta_lat = radius_km / R
+        delta_lng = radius_km / (R * cos(radians(lat)))
+        return {
+            'min_lat': lat - degrees(delta_lat),
+            'max_lat': lat + degrees(delta_lat),
+            'min_lng': lng - degrees(delta_lng),
+            'max_lng': lng + degrees(delta_lng)
+        }
+
     def calculate_distance(self, lat1, lng1, lat2, lng2):
         """Calculate distance between two coordinates using Haversine formula"""
         try:
@@ -1823,7 +1841,7 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
         except (ValueError, TypeError) as e:
             logger.error(f"Error in distance calculation: {str(e)}")
             return float('inf')
-    
+
     def list(self, request, *args, **kwargs):
         logger.debug("SearchNearbyDoctorsView.list() called")
         logger.debug(f"User: {request.user.id} ({request.user.username})")
@@ -1833,7 +1851,6 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
             try:
                 patient = request.user.patient_profile
                 patient_location = PatientLocation.objects.filter(patient=patient).first()
-                
                 if not patient_location:
                     logger.warning(f"No location found for patient {patient.id}")
                     return Response({
@@ -1841,7 +1858,7 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                         'data': [],
                         'count': 0
                     }, status=status.HTTP_400_BAD_REQUEST)
-                
+
                 patient_lat = float(patient_location.latitude)
                 patient_lng = float(patient_location.longitude)
                 logger.debug(f"Patient location: {patient_lat}, {patient_lng}")
@@ -1861,7 +1878,7 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                     'count': 0,
                     'error': str(e)
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
+
             # Get radius parameter
             try:
                 radius = float(request.GET.get('radius', 10))
@@ -1869,59 +1886,71 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                     radius = 10
             except (ValueError, TypeError):
                 radius = 10
-            
+
             logger.debug(f"Searching within {radius}km radius")
-            
-            
+
+            # Calculate bounding box for initial filtering
+            bounding_box = self.get_bounding_box(patient_lat, patient_lng, radius)
+            logger.debug(f"Bounding box: {bounding_box}")
+
             try:
+                # Pre-filter doctors using bounding box to reduce database load
                 doctor_locations = DoctorLocation.objects.filter(
-                    doctor__user__is_active=True  # Filter by user's active status
+                    doctor__user__is_active=True,  # Filter by user's active status
+                    latitude__gte=bounding_box['min_lat'],
+                    latitude__lte=bounding_box['max_lat'],
+                    longitude__gte=bounding_box['min_lng'],
+                    longitude__lte=bounding_box['max_lng']
                 ).select_related('doctor', 'doctor__user')
                 
-                
+                logger.debug(f"Bounding box pre-filtering found {doctor_locations.count()} potential doctors")
                 
             except Exception as query_error:
                 logger.error(f"Error in doctor query: {str(query_error)}")
-                # Fallback to even simpler query
-                doctor_locations = DoctorLocation.objects.select_related(
-                    'doctor', 'doctor__user'
-                )
-            
-            logger.debug(f"Found {doctor_locations.count()} total doctor locations")
-            
-            # Calculate distances and filter by radius
+                # Fallback to simpler query without bounding box
+                doctor_locations = DoctorLocation.objects.filter(
+                    doctor__user__is_active=True
+                ).select_related('doctor', 'doctor__user')
+
+            # Calculate exact distances for pre-filtered doctors and apply radius filter
             nearby_locations = []
+            distance_calculations = 0
+            
             for location in doctor_locations:
                 try:
                     # Skip if doctor or user is None
                     if not location.doctor or not location.doctor.user:
                         continue
-                    
-                    # Skip if user is not active
+
+                    # Skip if user is not active (double-check)
                     if not location.doctor.user.is_active:
                         continue
-                        
+
+                    # Calculate exact distance using Haversine formula
                     distance = self.calculate_distance(
                         patient_lat, patient_lng,
                         location.latitude, location.longitude
                     )
-                    
+                    distance_calculations += 1
+
+                    # Apply exact radius filter
                     if distance <= radius:
                         location.distance = round(distance, 2)
                         nearby_locations.append(location)
                         logger.debug(f"Doctor {location.doctor.user.username} - {distance:.2f}km away")
                     else:
                         logger.debug(f"Doctor {location.doctor.user.username} - {distance:.2f}km away (outside radius)")
-                        
+
                 except Exception as e:
                     logger.error(f"Error calculating distance for doctor {location.id}: {str(e)}")
                     continue
-            
+
             # Sort by distance
             nearby_locations.sort(key=lambda x: getattr(x, 'distance', float('inf')))
-            
+
+            logger.debug(f"Performed {distance_calculations} distance calculations")
             logger.debug(f"Found {len(nearby_locations)} doctors within {radius}km")
-            
+
             # Serialize the data
             serializer = self.get_serializer(nearby_locations, many=True)
             
@@ -1933,12 +1962,17 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                     'latitude': patient_lat,
                     'longitude': patient_lng
                 },
+                'performance_info': {
+                    'bounding_box_candidates': doctor_locations.count(),
+                    'distance_calculations_performed': distance_calculations,
+                    'final_results': len(nearby_locations)
+                },
                 'data': serializer.data
             }
-            
+
             logger.debug(f"Success! Returning {len(nearby_locations)} nearby doctors")
             return Response(response_data, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             logger.error(f"Unexpected error in SearchNearbyDoctorsView: {str(e)}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
@@ -1948,6 +1982,3 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                 'count': 0,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-                
-                
