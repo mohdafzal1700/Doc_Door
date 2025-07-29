@@ -117,3 +117,49 @@ export const createConversationWithErrorHandling = async (userId) => {
     }
   }
 };
+
+export const uploadFile = (file, conversationId, receiverId) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('conversation_id', conversationId);
+  formData.append('receiver_id', receiverId);
+  
+  return chatAxios.post('upload/', formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+};
+
+// Get file message by ID
+export const getFileMessage = (messageId) =>
+  chatAxios.get(`messages/${messageId}/`);
+
+// Simple download function
+export const downloadFile = (fileUrl, fileName) => {
+  const link = document.createElement('a');
+  link.href = fileUrl;
+  link.download = fileName || 'download';
+  link.target = '_blank';
+  
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+};
+
+// Open file in new tab
+export const openFile = (fileUrl) => {
+  window.open(fileUrl, '_blank');
+};
+
+// Smart file handler - download or view based on file type
+export const handleFile = (fileUrl, fileName, fileType) => {
+  // View these file types in browser
+  const viewableTypes = ['image', 'pdf'];
+  
+  if (viewableTypes.includes(fileType)) {
+    openFile(fileUrl);
+  } else {
+    downloadFile(fileUrl, fileName);
+  }
+}; // <-- This closing brace was missing!

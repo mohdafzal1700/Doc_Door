@@ -180,6 +180,7 @@ class ConversationViewSet(viewsets.ModelViewSet):
         # Use the main create method with formatted data
         request.data = {"participant_id": user_id}
         return self.create(request)
+    
 class UserViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for user search and user-related operations"""
     permission_classes = [IsAuthenticated]
@@ -306,3 +307,247 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         """Get count of unread notifications"""
         count = request.user.notifications.filter(is_read=False).count()
         return Response({'unread_count': count})
+    
+    
+
+from rest_framework.views import APIView
+import mimetypes
+import logging
+import mimetypes
+from django.shortcuts import get_object_or_404
+from django.db import transaction
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser
+import cloudinary.uploader
+
+# Set up logger
+logger = logging.getLogger(__name__)
+
+class FileUploadView(APIView):
+    permission_classes = [IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+    
+    def post(self, request):
+        # Debug: Log incoming request details
+        logger.info(f"File upload attempt by user: {request.user.id}")
+        logger.info(f"Request data keys: {list(request.data.keys())}")
+        logger.info(f"Request FILES keys: {list(request.FILES.keys())}")
+        
+        # Extract and validate data
+        file = request.FILES.get('file')
+        conversation_id = request.data.get('conversation_id')
+        receiver_id = request.data.get('receiver_id')
+        
+        # Debug: Log extracted values
+        logger.info(f"Extracted - file: {bool(file)}, conversation_id: {conversation_id}, receiver_id: {receiver_id}")
+        
+        if not file:
+            logger.error("No file provided in request")
+            return Response({
+                'error': 'No file provided'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not conversation_id:
+            logger.error("No conversation_id provided")
+            return Response({
+                'error': 'conversation_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        if not receiver_id:
+            logger.error("No receiver_id provided")
+            return Response({
+                'error': 'receiver_id is required'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Debug: Log file details
+        logger.info(f"File details - name: {file.name}, size: {file.size}, content_type: {getattr(file, 'content_type', 'unknown')}")
+        
+        try:
+            # Validate conversation exists and user has access
+            logger.info(f"Looking up conversation: {conversation_id}")
+            conversation = get_object_or_404(Conversation, id=conversation_id)
+            
+            logger.info(f"Conversation found: {conversation.id}")
+            
+            # Check user permissions
+            if not conversation.participants.filter(id=request.user.id).exists():
+                logger.error(f"User {request.user.id} not authorized for conversation {conversation_id}")
+                return Response({
+                    'error': 'Access denied - you are not a participant in this conversation'
+                }, status=status.HTTP_403_FORBIDDEN)
+            
+            logger.info(f"User {request.user.id} authorized for conversation {conversation_id}")
+            
+            # Validate receiver exists and is participant
+            try:
+                from django.contrib.auth import get_user_model
+                User = get_user_model()
+                receiver = User.objects.get(id=receiver_id)
+                logger.info(f"Receiver found: {receiver.id}")
+                
+                if not conversation.participants.filter(id=receiver_id).exists():
+                    logger.error(f"Receiver {receiver_id} not in conversation {conversation_id}")
+                    return Response({
+                        'error': 'Receiver is not a participant in this conversation'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                    
+            except User.DoesNotExist:
+                logger.error(f"Receiver with id {receiver_id} does not exist")
+                return Response({
+                    'error': 'Invalid receiver_id'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
+            cloudinary_response = cloudinary.uploader.upload(
+                file,
+                resource_type='raw',
+                folder='chat_files',
+                use_filename=True,
+                unique_filename=False
+            )
+
+            file_url = cloudinary_response.get('secure_url')
+            file_size = cloudinary_response.get('bytes', file.size)
+            file_name = cloudinary_response.get('original_filename', file.name)
+
+            
+            # Process file type
+            mime_type, _ = mimetypes.guess_type(file.name)
+            file_type = self.get_file_type(mime_type)
+            
+            logger.info(f"File type processing - mime_type: {mime_type}, file_type: {file_type}")
+            
+            # Create message with transaction for safety
+            with transaction.atomic():
+                logger.info("Creating file message in database")
+                
+                # Check if your Message model has is_file_message field
+                message_data = {
+                    'conversation': conversation,
+                    'sender': request.user,
+                    'receiver_id': receiver_id,
+                    'file': file,
+                    'file_name': file.name,
+                    'file_size': file.size,
+                    'file_type': file_type,
+                    'mime_type': mime_type,
+                    'content': f"Shared a {file_type}: {file.name}",
+                }
+                
+                # Try to add is_file_message field if it exists
+                try:
+                    from django.core.exceptions import FieldDoesNotExist
+                    Message._meta.get_field('is_file_message')
+                    message_data['is_file_message'] = True
+                    logger.info("Added is_file_message=True to message data")
+                except FieldDoesNotExist:
+                    logger.info("is_file_message field does not exist on Message model")
+                
+                message = Message.objects.create(**message_data)
+                logger.info(f"Message created successfully with id: {message.id}")
+            
+            # Send via WebSocket
+            try:
+                logger.info("Attempting to send file message via WebSocket")
+                self.send_file_via_websocket(message)
+                logger.info("WebSocket message sent successfully")
+            except Exception as ws_error:
+                logger.error(f"WebSocket send failed: {str(ws_error)}")
+                # Don't fail the request if WebSocket fails
+            
+            # Prepare response
+            response_data = {
+                'id': str(message.id),  # Add id field for frontend
+                'message_id': str(message.id),
+                'url': message.file.url,  # Add url field for frontend  
+                'file_url': message.file.url,
+                'file_name': message.file_name,
+                'file_type': file_type,
+                'file_size': file.size,
+                'mime_type': mime_type,
+                'success': True
+            }
+            
+            logger.info(f"File upload successful - response: {response_data}")
+            
+            return Response(response_data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f"File upload failed with error: {str(e)}", exc_info=True)
+            return Response({
+                'error': f'File upload failed: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def get_file_type(self, mime_type):
+        """Determine file type category from MIME type"""
+        if not mime_type:
+            return 'document'
+        
+        if mime_type.startswith('image/'):
+            return 'image'
+        elif mime_type.startswith('video/'):
+            return 'video'
+        elif mime_type.startswith('audio/'):
+            return 'audio'
+        elif mime_type == 'application/pdf':
+            return 'pdf'
+        elif mime_type in ['application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
+            return 'document'
+        elif mime_type in ['application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']:
+            return 'spreadsheet'
+        elif mime_type in ['application/zip', 'application/x-rar-compressed', 'application/x-7z-compressed']:
+            return 'archive'
+        else:
+            return 'document'
+    
+    def send_file_via_websocket(self, message):
+        """Send file message via WebSocket with error handling"""
+        try:
+            from channels.layers import get_channel_layer
+            from asgiref.sync import async_to_sync
+            
+            channel_layer = get_channel_layer()
+            room_group_name = f"chat_{str(message.conversation.id)}"
+            
+            logger.info(f"Sending WebSocket message to room: {room_group_name}")
+            
+            # Prepare receiver data safely
+            receiver_data = None
+            if message.receiver:
+                receiver_data = {
+                    'id': str(message.receiver.id),
+                    'username': message.receiver.username,
+                    'full_name': getattr(message.receiver, 'full_name', ''),
+                }
+            
+            ws_message = {
+                'type': 'file_message',
+                'message': {
+                    'id': str(message.id),
+                    'conversation_id': str(message.conversation.id),
+                    'sender': {
+                        'id': str(message.sender.id),
+                        'username': message.sender.username,
+                        'full_name': getattr(message.sender, 'full_name', ''),
+                    },
+                    'receiver': receiver_data,
+                    'content': message.content,
+                    'file_url': message.file.url,
+                    'file_name': message.file_name,
+                    'file_type': message.file_type,
+                    'file_size': message.file_size,
+                    'mime_type': message.mime_type,
+                    'created_at': message.created_at.isoformat(),
+                    
+                    'is_read': False
+                }
+            }
+            
+            async_to_sync(channel_layer.group_send)(room_group_name, ws_message)
+            logger.info("WebSocket message sent successfully")
+            
+        except Exception as e:
+            logger.error(f"Failed to send WebSocket message: {str(e)}", exc_info=True)
+            raise  # Re-raise to let caller handle

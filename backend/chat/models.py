@@ -21,6 +21,9 @@ class Conversation(models.Model):
     def last_message(self):
         return self.messages.filter(is_deleted=False).order_by('-created_at').first()
 
+from  cloudinary.models  import CloudinaryField
+
+
 class Message(models.Model):
     STATUS_CHOICES = (
         ('sent', 'Sent'),
@@ -36,12 +39,24 @@ class Message(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='sent')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    # Added fields for WebSocket consumer compatibility
+    
     is_read = models.BooleanField(default=False)
     read_at = models.DateTimeField(null=True, blank=True)
     is_deleted = models.BooleanField(default=False)
     is_edited = models.BooleanField(default=False)
-
+    
+    file =CloudinaryField('file',blank=True,null=True)
+    file_name=models.CharField(max_length=255,blank=True,null=True)
+    file_size=models.BigIntegerField(blank=255,null=True)
+    file_type=models.CharField(max_length=50,choices=[('image', 'Image'), ('video', 'Video'), 
+    ('document', 'Document'), ('audio', 'Audio')
+], blank=True, null=True)
+    mime_type=models.CharField(max_length=230,blank=True,null=True)
+    
+    
+    @property
+    def is_file_message(self):
+        return bool(self.file)
     class Meta:
         ordering = ['-created_at']
 

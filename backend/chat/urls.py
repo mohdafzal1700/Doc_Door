@@ -9,6 +9,8 @@ router.register(r'notifications', views.NotificationViewSet, basename='notificat
 router.register(r'users', views.UserViewSet, basename='user')  # Add this line
 
 
+
 urlpatterns = [
     path('', include(router.urls)),
+    path('upload/', views.FileUploadView.as_view(), name='file-upload'),
 ]

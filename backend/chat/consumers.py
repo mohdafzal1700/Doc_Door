@@ -284,6 +284,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
             elif message_type == 'delete_message':
                 print(f"   🎯 Routing to delete_message handler")
                 await self.handle_delete_message(data)
+            elif message_type == 'file_uploaded':
+                print(f"   🎯 Routing to file_uploaded handler")
+                await self.handle_file_uploaded(data)
             else:
                 print(f"   ❌ Unknown message type: '{message_type}'")
                 logger.warning(f"Unknown message type: {message_type} from user: {self.user.username}")
@@ -576,6 +579,95 @@ class ChatConsumer(AsyncWebsocketConsumer):
             print(f"   📋 Traceback: {traceback.format_exc()}")
             logger.error(f"Error checking conversation access: {e}")
             return False
+        
+
+    async def handle_file_uploaded(self, data):
+        """Handle file upload notification from API"""
+        print(f"\n📁 HANDLING FILE UPLOAD NOTIFICATION")
+        print(f"   📋 Data: {data}")
+        
+        message_id = data.get('message_id')
+        if not message_id:
+            print(f"   ❌ No message_id provided")
+            return
+            
+        try:
+            # Get the message with file data
+            message = await self.get_file_message(message_id)
+            if not message:
+                print(f"   ❌ Message not found: {message_id}")
+                return
+                
+            # Broadcast file message to group
+            await self.channel_layer.group_send(
+                self.conversation_group_name,
+                {
+                    'type': 'file_message',
+                    'message': message
+                }
+            )
+            print(f"   ✅ File message broadcasted")
+            
+        except Exception as e:
+            print(f"   💥 Error handling file upload: {e}")
+            logger.error(f"Error handling file upload: {e}")
+
+    @database_sync_to_async
+    def get_file_message(self, message_id):
+        """Get file message data"""
+        try:
+            message = Message.objects.select_related(
+                'sender', 'receiver', 'conversation'
+            ).get(id=message_id)
+            
+            return {
+                'id': str(message.id),
+                'conversation_id': str(message.conversation.id),
+                'sender': {
+                    'id': str(message.sender.id),
+                    'username': message.sender.username,
+                },
+                'receiver': {
+                    'id': str(message.receiver.id),
+                    'username': message.receiver.username,
+                } if message.receiver else None,
+                'content': message.content,
+                'file_url': message.file.url if message.file else None,
+                'file_name': message.file_name,
+                'file_type': message.file_type,
+                'file_size': message.file_size,
+                'mime_type': message.mime_type,
+                'created_at': message.created_at.isoformat(),
+                'is_file_message': message.is_file_message,
+                'is_read': message.is_read
+            }
+        except Message.DoesNotExist:
+            return None
+        except Exception as e:
+            logger.error(f"Error getting file message: {e}")
+            return None
+
+    # Add this WebSocket event handler
+    async def file_message(self, event):
+        """Send file message to WebSocket"""
+        print(f"\n📁 SENDING FILE MESSAGE TO WEBSOCKET")
+        try:
+            message_data = event['message']
+            print(f"   📋 File: {message_data.get('file_name')}")
+            print(f"   📋 Type: {message_data.get('file_type')}")
+            
+            response = {
+                'type': 'file_message',
+                'message': message_data
+            }
+            
+            json_response = safe_json_dumps(response)
+            await self.send(text_data=json_response)
+            print(f"   ✅ File message sent to WebSocket successfully")
+            
+        except Exception as e:
+            print(f"   💥 Failed to send file message: {e}")
+            logger.error(f"Error sending file message: {e}")
 
     @database_sync_to_async
     def create_message(self, content, receiver_id):
@@ -961,23 +1053,61 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def delete_message_with_data(self, message_id):
-        """Delete message and return delete data"""
+        """Delete message and return delete data with enhanced debugging"""
         print(f"\n💾 DELETING MESSAGE WITH DATA")
         print(f"   🆔 Message ID: {message_id}")
+        print(f"   👤 User ID: {self.user.id}")
+        print(f"   💬 Conversation ID: {self.conversation_id}")
         
         try:
-            # Get the message with related fields
-            message = Message.objects.select_related('sender', 'conversation').get(
-                id=message_id,
-                sender=self.user,  # Only allow deleting own messages
-                conversation=self.conversation_id
-            )
+            # Extract UUID from prefixed ID if needed
+            actual_message_id = message_id
+            if message_id.startswith('file_') and '_' in message_id:
+                actual_message_id = message_id.split('_')[-1]
+                print(f"   🔧 Extracted UUID: {actual_message_id}")
             
-            print(f"   ✅ Message found and authorized")
+            # First, let's see what messages exist for this user in this conversation
+            user_messages = Message.objects.filter(
+                sender=self.user,
+                conversation=self.conversation_id
+            ).values_list('id', 'content', 'created_at')
+            
+            print(f"   📋 User's messages in conversation:")
+            for msg_id, content, created_at in user_messages:
+                print(f"      - {msg_id}: '{content[:50]}...' at {created_at}")
+            
+            # Now try to find the specific message
+            try:
+                message = Message.objects.select_related('sender', 'conversation').get(
+                    id=actual_message_id,
+                    sender=self.user,
+                    conversation=self.conversation_id
+                )
+                print(f"   ✅ Message found and authorized")
+                
+            except Message.DoesNotExist:
+                print(f"   🔍 Message not found with exact match, checking alternatives...")
+                
+                # Check if message exists but with different sender
+                try:
+                    msg_different_sender = Message.objects.get(id=actual_message_id)
+                    print(f"   ⚠️  Message exists but sender is: {msg_different_sender.sender.id} (not {self.user.id})")
+                except Message.DoesNotExist:
+                    print(f"   ❌ Message doesn't exist in database at all")
+                
+                # Check if message exists but in different conversation
+                try:
+                    msg_different_conv = Message.objects.filter(id=actual_message_id).first()
+                    if msg_different_conv:
+                        print(f"   ⚠️  Message exists but in conversation: {msg_different_conv.conversation.id} (not {self.conversation_id})")
+                except Exception as e:
+                    print(f"   💥 Error checking different conversation: {e}")
+                
+                raise Message.DoesNotExist("Message not found after detailed search")
             
             # Prepare delete data before deletion
             delete_data = {
-                'message_id': str(message.id),
+                'message_id': message_id,  # Return original ID
                 'conversation_id': str(message.conversation.id),
                 'deleted_by': str(message.sender.id),
                 'deleted_at': timezone.now().isoformat()
@@ -997,7 +1127,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             print(f"   💥 Error deleting message: {e}")
             logger.error(f"Error deleting message: {e}")
             return None
-
+    
     async def create_message_notification(self, message):
         """Create notification for new message with debugging"""
         print(f"\n🔔 CREATING MESSAGE NOTIFICATION")

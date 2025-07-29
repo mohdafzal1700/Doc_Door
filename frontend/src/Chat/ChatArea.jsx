@@ -1,26 +1,70 @@
 "use client"
-import { useState, useRef, useEffect, useCallback } from "react"
-import { Send, Paperclip, MoreVertical, Phone, Video, Edit2, Trash2, Check, X } from "lucide-react"
-import { 
-  getChatSocket, 
-  sendChatMessage, 
-  sendTyping, 
-  closeChatSocket, 
-  getConnectionStatus, 
-  markMessageAsRead,
-  editChatMessage,
-  deleteChatMessage 
-} from "../service/websocket"
-import { getConversationMessages } from "../endpoints/Chat"
 
-export default function ChatArea({ 
-  conversation, 
-  currentUser, 
-  onConversationUpdate, 
-  messages: propMessages, 
-  onDeleteMessage,
-  onEditMessage 
-}) {
+import { useState, useRef, useEffect, useCallback } from "react"
+import { Send, Paperclip, MoreVertical, Phone, Video, Edit2, Trash2, Check, X, Image, Film, Music, FileText, Archive, File, Eye, Download } from "lucide-react"
+import { getChatSocket, sendChatMessage, sendTyping, closeChatSocket, getConnectionStatus, markMessageAsRead, editChatMessage, deleteChatMessage, notifyFileUploaded, } from "../service/websocket"
+import { getConversationMessages, uploadFile, handleFile, openFile, downloadFile, getFileMessage } from "../endpoints/Chat"
+
+// File size limits
+const FILE_SIZE_LIMITS = {
+  image: 5 * 1024 * 1024, // 5MB for images
+  video: 50 * 1024 * 1024, // 50MB for videos
+  document: 10 * 1024 * 1024, // 10MB for documents
+  default: 25 * 1024 * 1024 // 25MB for other files
+}
+const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB absolute maximum
+
+const getFileCategory = (mimeType) => {
+  if (!mimeType) return 'other'
+  if (mimeType.startsWith('image/')) return 'image'
+  if (mimeType.startsWith('video/')) return 'video'
+  if (mimeType.startsWith('audio/')) return 'audio'
+  if (mimeType.includes('pdf') || mimeType.includes('document') || mimeType.includes('text') || mimeType.includes('spreadsheet') || mimeType.includes('presentation')) return 'document'
+  if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('7z')) return 'archive'
+  return 'other'
+}
+
+const getFileIcon = (mimeType, size = 'w-5 h-5') => {
+  const category = getFileCategory(mimeType)
+  switch (category) {
+    case 'image':
+      return <Image className={size} />
+    case 'video':
+      return <Film className={size} />
+    case 'audio':
+      return <Music className={size} />
+    case 'document':
+      return <FileText className={size} />
+    case 'archive':
+      return <Archive className={size} />
+    default:
+      return <File className={size} />
+  }
+}
+
+const formatFileSize = (bytes) => {
+  if (!bytes) return ''
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`
+}
+
+const validateFileSize = (file) => {
+  const category = getFileCategory(file.type)
+  const limit = FILE_SIZE_LIMITS[category] || FILE_SIZE_LIMITS.default
+  
+  if (file.size > MAX_FILE_SIZE) {
+    return { valid: false, error: `File size exceeds maximum limit of ${formatFileSize(MAX_FILE_SIZE)}` }
+  }
+  
+  if (file.size > limit) {
+    return { valid: false, error: `${category} files must be smaller than ${formatFileSize(limit)}` }
+  }
+  
+  return { valid: true }
+}
+
+export default function ChatArea({ conversation, currentUser, onConversationUpdate, messages: propMessages, onDeleteMessage, onEditMessage }) {
   const [message, setMessage] = useState("")
   const [isTyping, setIsTyping] = useState(false)
   const [typingUsers, setTypingUsers] = useState(new Set())
@@ -31,7 +75,9 @@ export default function ChatArea({
   const [retryCount, setRetryCount] = useState(0)
   const [isLoadingMessages, setIsLoadingMessages] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [uploadingFiles, setUploadingFiles] = useState(new Set())
 
+  const fileInputRef = useRef(null)
   const messagesEndRef = useRef(null)
   const typingTimeoutRef = useRef(null)
   const reconnectTimeoutRef = useRef(null)
@@ -39,7 +85,6 @@ export default function ChatArea({
   const componentMounted = useRef(true)
   const loadedConversationId = useRef(null)
   const editInputRef = useRef(null)
-
   const maxRetries = 5
 
   // Get the other participant for header display
@@ -85,7 +130,6 @@ export default function ChatArea({
       try {
         console.log('📥 Loading messages for conversation:', conversation.id)
         const response = await getConversationMessages(conversation.id)
-        
         if (componentMounted.current && response.data) {
           const fetchedMessages = response.data.results || response.data || []
           console.log('✅ Messages loaded successfully:', fetchedMessages.length, 'messages')
@@ -140,10 +184,8 @@ export default function ChatArea({
   useEffect(() => {
     const handleWebSocketMessage = (event) => {
       if (!componentMounted.current) return
-
       const { conversationId, data } = event.detail
       if (conversationId !== conversation?.id) return
-
       handleWebSocketData(data)
     }
 
@@ -161,7 +203,6 @@ export default function ChatArea({
       const socket = await getChatSocket(conversation.id, currentUser.id)
       if (socket && componentMounted.current) {
         console.log('🔌 WebSocket connection initiated')
-        
         const checkStatus = () => {
           if (!componentMounted.current) return
           const status = getConnectionStatus(conversation.id, currentUser.id)
@@ -172,7 +213,6 @@ export default function ChatArea({
             setConnectionStatus('error')
           }
         }
-
         setTimeout(checkStatus, 100)
       } else if (componentMounted.current) {
         setConnectionStatus('error')
@@ -187,6 +227,139 @@ export default function ChatArea({
     }
   }, [conversation?.id, currentUser?.id, connectionStatus])
 
+  const getReceiverId = useCallback(() => {
+    const possibleIds = [
+      activePatient?.id,
+      activePatient?.user_id,
+      activePatient?.participant_id
+    ]
+
+    for (const id of possibleIds) {
+      if (id) {
+        const normalizedId = String(id).trim()
+        if (normalizedId && normalizedId !== 'undefined' && normalizedId !== 'null') {
+          return normalizedId
+        }
+      }
+    }
+    return null
+  }, [activePatient])
+
+  const handleFileUpload = async (event) => {
+    const files = Array.from(event.target.files)
+    if (!files.length || !conversation || !componentMounted.current) return
+
+    const receiverId = getReceiverId()
+    if (!receiverId) {
+      alert('Cannot upload file: Recipient not found. Please refresh the page.')
+      return
+    }
+
+    const validFiles = []
+    const errors = []
+
+    // Validate each file
+    files.forEach(file => {
+      const validation = validateFileSize(file)
+      if (validation.valid) {
+        validFiles.push(file)
+      } else {
+        errors.push(`${file.name}: ${validation.error}`)
+      }
+    })
+
+    // Show errors if any
+    if (errors.length > 0) {
+      alert(`File validation errors:\n${errors.join('\n')}`)
+    }
+
+    // Process valid files only
+    for (const file of validFiles) {
+      const fileId = `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${currentUser.id}`
+
+      try {
+        setUploadingFiles(prev => new Set([...prev, fileId]))
+        console.log('📎 Uploading file:', file.name, formatFileSize(file.size))
+
+        const response = await uploadFile(file, conversation.id, receiverId)
+
+        if (response.data && response.data.id) {
+          console.log('✅ File uploaded successfully:', response.data)
+
+          const tempMessage = {
+            id: fileId,
+            temp_id: fileId,
+            file_url: response.data.url,
+            file_name: file.name,
+            file_type: file.type,
+            file_size: file.size,
+            sender: currentUser,
+            created_at: new Date().toISOString(),
+            conversation_id: conversation.id
+          }
+
+          if (!propMessages) {
+            setLocalMessages(prev => [...prev, tempMessage])
+          }
+
+          if (connectionStatus === 'connected') {
+            await notifyFileUploaded(conversation.id, response.data.id, currentUser.id)
+          }
+
+          if (onConversationUpdate) {
+            const updatedConversation = {
+              ...conversation,
+              last_message: tempMessage,
+              messages: [...(conversation.messages || []), tempMessage]
+            }
+            onConversationUpdate(updatedConversation)
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error uploading file:', error)
+        alert(`Failed to upload ${file.name}. Please try again.`)
+      } finally {
+        if (componentMounted.current) {
+          setUploadingFiles(prev => {
+            const newSet = new Set(prev)
+            newSet.delete(fileId)
+            return newSet
+          })
+        }
+      }
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleFileMessage = useCallback((fileMessage) => {
+    if (!componentMounted.current) return
+
+    console.log('📎 File message received:', fileMessage)
+
+    // Add file message to local messages if not using prop messages
+    if (!propMessages) {
+      setLocalMessages(prev => {
+        if (prev.some(msg => msg.id === fileMessage.id)) {
+          return prev
+        }
+        return [...prev, fileMessage]
+      })
+    }
+
+    // Update conversation
+    if (onConversationUpdate) {
+      const updatedConversation = {
+        ...conversation,
+        last_message: fileMessage,
+        messages: [...(conversation.messages || []), fileMessage]
+      }
+      onConversationUpdate(updatedConversation)
+    }
+  }, [propMessages, onConversationUpdate, conversation])
+
   const cleanupWebSocket = useCallback(() => {
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current)
@@ -196,7 +369,6 @@ export default function ChatArea({
       clearTimeout(reconnectTimeoutRef.current)
       reconnectTimeoutRef.current = null
     }
-
     if (conversation?.id && currentUser?.id) {
       closeChatSocket(conversation.id, currentUser.id)
     }
@@ -214,7 +386,7 @@ export default function ChatArea({
 
     const delay = Math.min(1000 * Math.pow(2, retryCount), 30000)
     console.log(`🔄 Scheduling reconnect in ${delay}ms (attempt ${retryCount + 1})`)
-    
+
     reconnectTimeoutRef.current = setTimeout(() => {
       if (componentMounted.current) {
         setRetryCount(prev => prev + 1)
@@ -223,85 +395,95 @@ export default function ChatArea({
     }, delay)
   }, [retryCount, initializeWebSocket])
 
-const handleWebSocketData = useCallback((data) => {
-  if (!componentMounted.current) return
-  
-  console.log('📨 Processing WebSocket message:', data)
-  
-  switch (data.type) {
-    case 'chat_message':
-      if (data.message && data.message.sender.id !== currentUser.id) {
-        handleNewMessage(data.message)
-      }
-      break
-      
-    case 'message_sent':
-      console.log('✅ Message sent confirmation received:', data.message)
-      if (data.message && data.message.sender.id === currentUser.id) {
-        handleMessageSentConfirmation(data.message)
-      }
-      break
-      
-    case 'typing_indicator':
-      handleTypingIndicator(data)
-      break
-      
-    case 'message_edited':
-      console.log('✅ Message edit confirmation received:', data.message)
-      // Now update the UI based on server confirmation
-      if (onEditMessage) {
-        onEditMessage(data.message.id, data.message.content)
-      } else {
-        handleLocalMessageEdit(data.message.id, data.message.content)
-      }
-      break
-      
-    case 'message_deleted':
-      console.log('✅ Message delete confirmation received:', data.message_id)
-      // Now update the UI based on server confirmation
-      if (onDeleteMessage) {
-        onDeleteMessage(data.message_id)
-      } else {
-        handleLocalMessageDelete(data.message_id)
-      }
-      break
-      
-    case 'message_read':
-      console.log('📖 Message marked as read:', data.message_id)
-      handleMessageRead(data.message_id, data.read_by)
-      break
-      
-    case 'connection_established':
-    case 'connection_confirmed':
-      console.log('✅ Connection confirmed by server')
-      setConnectionStatus('connected')
-      break
-      
-    case 'error':
-      if (!data.message.includes('typing_indicator')) {
-        console.error('❌ WebSocket error message:', data.message)
-        // Handle edit/delete errors specifically
-        if (data.message.includes('edit') || data.message.includes('delete')) {
-          alert('Operation failed: ' + data.message)
+  const handleWebSocketData = useCallback((data) => {
+    if (!componentMounted.current) return
+
+    console.log('📨 Processing WebSocket message:', data)
+
+    switch (data.type) {
+      case 'chat_message':
+        if (data.message && data.message.sender.id !== currentUser.id) {
+          handleNewMessage(data.message)
         }
-      }
-      break
-      
-    default:
-      console.log('🤷 Unknown message type:', data.type)
-  }
-}, [currentUser.id, onEditMessage, onDeleteMessage])
-
-
+        break
+      case 'message_sent':
+        console.log('✅ Message sent confirmation received:', data.message)
+        if (data.message && data.message.sender.id === currentUser.id) {
+          handleMessageSentConfirmation(data.message)
+        }
+        break
+      case 'typing_indicator':
+        handleTypingIndicator(data)
+        break
+      case 'message_edited':
+        console.log('✅ Message edit confirmation received:', data.message)
+        if (onEditMessage) {
+          onEditMessage(data.message.id, data.message.content)
+        } else {
+          handleLocalMessageEdit(data.message.id, data.message.content)
+        }
+        break
+      case 'message_deleted':
+        console.log('✅ Message delete confirmation received:', data.message_id)
+        if (onDeleteMessage) {
+          onDeleteMessage(data.message_id)
+        } else {
+          handleLocalMessageDelete(data.message_id)
+        }
+        break
+      case 'file_message':
+        if (data.message && data.message.sender.id !== currentUser.id) {
+          handleFileMessage(data.message)
+        }
+        break
+      case 'file_uploaded':
+        console.log('📎 File upload notification received:', data.message_id)
+        break
+      case 'message_read':
+        console.log('📖 Message marked as read:', data.message_id)
+        handleMessageRead(data.message_id, data.read_by)
+        break
+      case 'connection_established':
+      case 'connection_confirmed':
+        console.log('✅ Connection confirmed by server')
+        setConnectionStatus('connected')
+        break
+      case 'error':
+        if (!data.message.includes('typing_indicator')) {
+          console.error('❌ WebSocket error message:', data.message)
+          if (data.message.includes('edit') || data.message.includes('delete')) {
+            alert('Operation failed: ' + data.message)
+          }
+        }
+        break
+      default:
+        console.log('🤷 Unknown message type:', data.type)
+    }
+  }, [currentUser.id, onEditMessage, onDeleteMessage])
 
   const handleNewMessage = useCallback((newMessage) => {
     if (!componentMounted.current) return
 
     if (!propMessages) {
       setLocalMessages(prev => {
+        // Check if message already exists by ID
         if (prev.some(msg => msg.id === newMessage.id)) {
+          console.log('⚠️ Message already exists, skipping duplicate:', newMessage.id)
           return prev
         }
+
+        // Check for potential duplicates by content and timestamp (fallback)
+        const isDuplicate = prev.some(msg =>
+          msg.content === newMessage.content &&
+          msg.sender.id === newMessage.sender.id &&
+          Math.abs(new Date(msg.created_at) - new Date(newMessage.created_at)) < 1000 // Within 1 second
+        )
+
+        if (isDuplicate) {
+          console.log('⚠️ Potential duplicate message detected, skipping')
+          return prev
+        }
+
         return [...prev, newMessage]
       })
     }
@@ -326,49 +508,63 @@ const handleWebSocketData = useCallback((data) => {
     if (!componentMounted.current || propMessages) return
 
     console.log('✅ Message confirmation received:', confirmedMessage)
-    setLocalMessages(prev => prev.map(msg => {
-      const isMatch = (
-        (msg.temp_id && confirmedMessage.temp_id && msg.temp_id === confirmedMessage.temp_id) ||
-        (msg.content === confirmedMessage.content && msg.sender.id === currentUser.id)
-      )
 
-      if (isMatch) {
-        console.log('🔄 Updating message from temp to confirmed:', msg.id, '->', confirmedMessage.id)
-        return confirmedMessage
+    setLocalMessages(prev => {
+      // First, check if this confirmed message already exists
+      const existingIndex = prev.findIndex(msg => msg.id === confirmedMessage.id)
+      if (existingIndex !== -1) {
+        console.log('⚠️ Confirmed message already exists, skipping duplicate')
+        return prev
       }
-      return msg
-    }))
+
+      // Find and replace temporary message
+      const tempIndex = prev.findIndex(msg => {
+        const isMatch = (
+          (msg.temp_id && confirmedMessage.temp_id && msg.temp_id === confirmedMessage.temp_id) ||
+          (msg.content === confirmedMessage.content &&
+            msg.sender.id === currentUser.id &&
+            !msg.id)
+        )
+        return isMatch
+      })
+
+      if (tempIndex !== -1) {
+        console.log('🔄 Updating message from temp to confirmed:', prev[tempIndex].temp_id || prev[tempIndex].id, '->', confirmedMessage.id)
+        const newMessages = [...prev]
+        newMessages[tempIndex] = confirmedMessage
+        return newMessages
+      }
+
+      // If no temp message found, add as new (but this shouldn't normally happen)
+      console.log('⚠️ No matching temp message found, adding as new')
+      return [...prev, confirmedMessage]
+    })
   }, [propMessages, currentUser.id])
 
   const handleLocalMessageEdit = useCallback((messageId, newContent) => {
-  if (!componentMounted.current || propMessages) return
-  
-  console.log('🔄 Updating message locally after server confirmation:', messageId)
-  setLocalMessages(prev => 
-    prev.map(msg => 
-      msg.id === messageId 
-        ? { 
-            ...msg, 
-            content: newContent, 
-            edited: true, 
-            edited_at: new Date().toISOString() 
-          } 
-        : msg
-    )
-  )
-}, [propMessages])
+    if (!componentMounted.current || propMessages) return
 
-const handleLocalMessageDelete = useCallback((messageId) => {
-  if (!componentMounted.current || propMessages) return
-  
-  console.log('🗑️ Removing message locally after server confirmation:', messageId)
-  setLocalMessages(prev => prev.filter(msg => msg.id !== messageId))
-}, [propMessages])
+    setLocalMessages(prev =>
+      prev.map(msg =>
+        msg.id === messageId
+          ? { ...msg, content: newContent, edited: true }
+          : msg
+      )
+    )
+  }, [propMessages])
+
+  const handleLocalMessageDelete = useCallback((messageId) => {
+    if (!componentMounted.current || propMessages) return
+
+    console.log('🗑️ Removing message locally after server confirmation:', messageId)
+    setLocalMessages(prev => prev.filter(msg => msg.id !== messageId))
+  }, [propMessages])
 
   const handleTypingIndicator = useCallback((data) => {
     if (!componentMounted.current || data.user_id === currentUser.id) return
 
     console.log('⌨️ Typing indicator received:', data)
+
     setTypingUsers(prev => {
       const newSet = new Set(prev)
       if (data.is_typing) {
@@ -395,11 +591,13 @@ const handleLocalMessageDelete = useCallback((messageId) => {
   const handleMessageRead = useCallback((messageId, readBy) => {
     if (!componentMounted.current || propMessages) return
 
-    setLocalMessages(prev => prev.map(msg => 
-      msg.id === messageId 
-        ? { ...msg, read_by: [...(msg.read_by || []), readBy] } 
-        : msg
-    ))
+    setLocalMessages(prev =>
+      prev.map(msg =>
+        msg.id === messageId
+          ? { ...msg, read_by: [...(msg.read_by || []), readBy] }
+          : msg
+      )
+    )
   }, [propMessages])
 
   const handleSubmit = async (e) => {
@@ -407,31 +605,12 @@ const handleLocalMessageDelete = useCallback((messageId) => {
     if (!message.trim() || !conversation || !componentMounted.current || isSubmitting) return
 
     const messageText = message.trim()
-    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+    const tempId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}_${currentUser.id}`
 
     setIsSubmitting(true)
     setMessage("")
 
-    const getReceiverId = () => {
-      const possibleIds = [
-        activePatient?.id,
-        activePatient?.user_id,
-        activePatient?.participant_id
-      ]
-
-      for (const id of possibleIds) {
-        if (id) {
-          const normalizedId = String(id).trim()
-          if (normalizedId && normalizedId !== 'undefined' && normalizedId !== 'null') {
-            return normalizedId
-          }
-        }
-      }
-      return null
-    }
-
     const receiverId = getReceiverId()
-
     if (!receiverId) {
       console.error('❌ No valid receiver ID found')
       alert('Cannot send message: Recipient not found. Please refresh the page.')
@@ -455,14 +634,18 @@ const handleLocalMessageDelete = useCallback((messageId) => {
       }
 
       if (connectionStatus === 'connected') {
-        const result = await sendChatMessage(conversation.id, {
-          type: 'chat_message',
-          message: messageText,
-          content: messageText,
-          conversation_id: conversation.id,
-          receiver_id: receiverId,
-          temp_id: tempId
-        }, currentUser.id)
+        const result = await sendChatMessage(
+          conversation.id,
+          {
+            type: 'chat_message',
+            message: messageText,
+            content: messageText,
+            conversation_id: conversation.id,
+            receiver_id: receiverId,
+            temp_id: tempId
+          },
+          currentUser.id
+        )
 
         if (result.success) {
           console.log('📤 Message sent via WebSocket with temp_id:', tempId)
@@ -490,6 +673,7 @@ const handleLocalMessageDelete = useCallback((messageId) => {
 
   const handleInputChange = (e) => {
     if (!componentMounted.current) return
+
     setMessage(e.target.value)
 
     if (!isTyping && connectionStatus === 'connected') {
@@ -520,80 +704,79 @@ const handleLocalMessageDelete = useCallback((messageId) => {
   }, [connectionStatus, conversation?.id, currentUser?.id])
 
   const handleEditMessage = (msg) => {
-  if (!componentMounted.current) return
-  setEditingMessage(msg.id)
-  setEditText(msg.content)
-  setTimeout(() => editInputRef.current?.focus(), 0)
-}
+    if (!componentMounted.current) return
 
-const handleSaveEdit = async () => {
-  if (!editText.trim() || !editingMessage || !componentMounted.current) return
-  
-  const originalContent = editText.trim()
-  
-  try {
-    if (connectionStatus === 'connected') {
-      // Send the edit request via WebSocket
-      const result = await editChatMessage(conversation.id, editingMessage, originalContent, currentUser.id)
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to edit message')
+    setEditingMessage(msg.id)
+    setEditText(msg.content)
+    setTimeout(() => editInputRef.current?.focus(), 0)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editText.trim() || !editingMessage || !componentMounted.current) return
+
+    const originalContent = editText.trim()
+
+    try {
+      if (connectionStatus === 'connected') {
+        const result = await editChatMessage(
+          conversation.id,
+          editingMessage,
+          originalContent,
+          currentUser.id
+        )
+
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to edit message')
+        }
+
+        console.log('✅ Edit message sent, waiting for server confirmation...')
+        setEditingMessage(null)
+        setEditText("")
+      } else {
+        throw new Error('WebSocket not connected')
       }
-      
-      // DO NOT update UI here - wait for WebSocket confirmation
-      console.log('✅ Edit message sent, waiting for server confirmation...')
-      
-      // Clear editing state immediately after sending
+    } catch (error) {
+      console.error('❌ Error editing message:', error)
+      alert('Failed to edit message. Please try again.')
       setEditingMessage(null)
       setEditText("")
-      
-    } else {
-      throw new Error('WebSocket not connected')
     }
-    
-  } catch (error) {
-    console.error('❌ Error editing message:', error)
-    alert('Failed to edit message. Please try again.')
-    
-    // Reset editing state on error
+  }
+
+  const handleDeleteMessage = async (messageId) => {
+    if (!window.confirm('Are you sure you want to delete this message?')) return
+    if (!componentMounted.current) return
+
+    try {
+      if (connectionStatus === 'connected') {
+        const result = await deleteChatMessage(
+          conversation.id,
+          messageId,
+          currentUser.id
+        )
+
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to delete message')
+        }
+
+        console.log('✅ Delete message sent, waiting for server confirmation...')
+      } else {
+        throw new Error('WebSocket not connected')
+      }
+    } catch (error) {
+      console.error('❌ Error deleting message:', error)
+      alert('Failed to delete message. Please try again.')
+    }
+  }
+
+  const handleCancelEdit = () => {
     setEditingMessage(null)
     setEditText("")
   }
-}
 
-const handleDeleteMessage = async (messageId) => {
-  if (!window.confirm('Are you sure you want to delete this message?')) return
-  if (!componentMounted.current) return
-  
-  try {
-    if (connectionStatus === 'connected') {
-      // Send the delete request via WebSocket
-      const result = await deleteChatMessage(conversation.id, messageId, currentUser.id)
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to delete message')
-      }
-      
-      // DO NOT update UI here - wait for WebSocket confirmation
-      console.log('✅ Delete message sent, waiting for server confirmation...')
-      
-    } else {
-      throw new Error('WebSocket not connected')
-    }
-    
-  } catch (error) {
-    console.error('❌ Error deleting message:', error)
-    alert('Failed to delete message. Please try again.')
-  }
-}
-
-const handleCancelEdit = () => {
-  setEditingMessage(null)
-  setEditText("")
-}
-
-const handleMarkAsRead = useCallback((messageId) => {
+  const handleMarkAsRead = useCallback((messageId) => {
     if (!componentMounted.current) return
+
     const status = getConnectionStatus(conversation.id, currentUser.id)
     if (status.connected) {
       markMessageAsRead(conversation.id, messageId, currentUser.id)
@@ -603,6 +786,23 @@ const handleMarkAsRead = useCallback((messageId) => {
   const normalizeId = (id) => {
     if (!id) return ''
     return String(id).trim()
+  }
+
+  const handleFileClick = (fileUrl, fileName, fileType) => {
+    const category = getFileCategory(fileType)
+    if (category === 'image' || fileType === 'application/pdf') {
+      // Open in new tab for preview
+      window.open(fileUrl, '_blank')
+    } else {
+      // Download file
+      const link = document.createElement('a')
+      link.href = fileUrl
+      link.download = fileName
+      link.target = '_blank'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    }
   }
 
   if (!conversation) {
@@ -684,7 +884,7 @@ const handleMarkAsRead = useCallback((messageId) => {
             const msgSenderId = normalizeId(msg.sender?.id || msg.sender_id)
             const isCurrentUser = currentUserId && msgSenderId && (msgSenderId === currentUserId)
             const isEditing = editingMessage === msg.id
-            const messageKey = msg.id || msg.temp_id || `msg-${index}`
+            const messageKey = msg.id ? `msg-${msg.id}` : msg.temp_id ? `temp-${msg.temp_id}` : `fallback-${index}-${msg.created_at || Date.now()}`
 
             return (
               <div key={messageKey} className={`flex ${isCurrentUser ? "justify-end" : "justify-start"}`}>
@@ -724,40 +924,103 @@ const handleMarkAsRead = useCallback((messageId) => {
                       </div>
                     </div>
                   ) : (
-                    <div
-                      className={`px-4 py-2 rounded-lg cursor-pointer ${
-                        isCurrentUser
-                          ? "bg-blue-500 text-white rounded-br-sm"
-                          : "bg-white text-gray-900 border border-gray-200 rounded-bl-sm"
-                      }`}
-                      onClick={() => !isCurrentUser && handleMarkAsRead(msg.id)}
-                    >
-                      <p className="break-words">{msg.content}</p>
-                      <div className="flex items-center justify-between mt-1">
-                        <p className={`text-xs ${isCurrentUser ? "text-blue-100" : "text-gray-500"}`}>
-                          {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : msg.timestamp}
-                          {msg.edited && <span className="ml-1">(edited)</span>}
-                        </p>
-                        {isCurrentUser && (
-                          <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => handleEditMessage(msg)}
-                              className="text-xs text-blue-200 hover:text-white p-1 rounded"
-                              title="Edit message"
-                            >
-                              <Edit2 className="w-3 h-3" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteMessage(msg.id)}
-                              className="text-xs text-red-200 hover:text-white p-1 rounded"
-                              title="Delete message"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        )}
+                    <>
+                      <div
+                        className={`px-4 py-2 rounded-lg cursor-pointer ${
+                          isCurrentUser
+                            ? "bg-blue-500 text-white rounded-br-sm"
+                            : "bg-white text-gray-900 border border-gray-200 rounded-bl-sm"
+                        }`}
+                        onClick={() => !isCurrentUser && handleMarkAsRead(msg.id)}
+                      >
+                        <p className="break-words">{msg.content}</p>
+                        <div className="flex items-center justify-between mt-1">
+                          <p className={`text-xs ${isCurrentUser ? "text-blue-100" : "text-gray-500"}`}>
+                            {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : msg.timestamp}
+                            {msg.edited && <span className="ml-1">(edited)</span>}
+                          </p>
+                          {isCurrentUser && (
+                            <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleEditMessage(msg)
+                                }}
+                                className="text-xs text-blue-200 hover:text-white p-1 rounded"
+                                title="Edit message"
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteMessage(msg.id)
+                                }}
+                                className="text-xs text-red-200 hover:text-white p-1 rounded"
+                                title="Delete message"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+
+                      {/* File Attachment Rendering - INLINE within the message */}
+                      {msg.file_url && (
+                        <div className="mt-2">
+                          {/* Image Preview */}
+                          {getFileCategory(msg.file_type) === 'image' && (
+                            <div className="relative group">
+                              <img
+                                src={msg.file_url}
+                                alt={msg.file_name}
+                                className="max-w-xs rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                                onClick={() => handleFileClick(msg.file_url, msg.file_name, msg.file_type)}
+                                onError={(e) => {
+                                  e.target.style.display = 'none'
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 rounded-lg transition-all duration-200 flex items-center justify-center">
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Eye className="w-8 h-8 text-white" />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* File Attachment Card */}
+                          <div
+                            className={`inline-flex items-center space-x-3 px-4 py-3 rounded-lg cursor-pointer border transition-colors max-w-xs ${
+                              isCurrentUser
+                                ? 'bg-blue-100 border-blue-200 text-blue-800 hover:bg-blue-200'
+                                : 'bg-gray-100 border-gray-200 text-gray-800 hover:bg-gray-200'
+                            }`}
+                            onClick={() => handleFileClick(msg.file_url, msg.file_name, msg.file_type)}
+                          >
+                            <div className="flex-shrink-0">
+                              {getFileIcon(msg.file_type, 'w-6 h-6')}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">
+                                {msg.file_name}
+                              </p>
+                              <div className="flex items-center space-x-2 text-xs opacity-75">
+                                <span>{formatFileSize(msg.file_size)}</span>
+                                <span>•</span>
+                                <span className="capitalize">{getFileCategory(msg.file_type)}</span>
+                              </div>
+                            </div>
+                            <div className="flex-shrink-0 flex items-center space-x-1">
+                              {(getFileCategory(msg.file_type) === 'image' || msg.file_type === 'application/pdf') && (
+                                <Eye className="w-4 h-4" />
+                              )}
+                              <Download className="w-4 h-4" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               </div>
@@ -778,6 +1041,20 @@ const handleMarkAsRead = useCallback((messageId) => {
           </div>
         )}
 
+        {/* Upload progress indicator */}
+        {uploadingFiles.size > 0 && (
+          <div className="flex justify-end">
+            <div className="bg-blue-100 border border-blue-200 px-4 py-2 rounded-lg rounded-br-sm">
+              <div className="flex items-center space-x-2">
+                <div className="w-4 h-4 animate-spin rounded-full border-2 border-blue-500 border-t-transparent"></div>
+                <span className="text-sm text-blue-700">
+                  Uploading {uploadingFiles.size} file{uploadingFiles.size > 1 ? 's' : ''}...
+                </span>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div ref={messagesEndRef} />
       </div>
 
@@ -786,10 +1063,26 @@ const handleMarkAsRead = useCallback((messageId) => {
         <form onSubmit={handleSubmit} className="flex items-center space-x-3">
           <button
             type="button"
-            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingFiles.size > 0}
+            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 disabled:opacity-50"
           >
-            <Paperclip className="w-5 h-5" />
+            {uploadingFiles.size > 0 ? (
+              <div className="w-5 h-5 animate-spin rounded-full border-2 border-gray-400 border-t-transparent"></div>
+            ) : (
+              <Paperclip className="w-5 h-5" />
+            )}
           </button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={handleFileUpload}
+            className="hidden"
+            accept="*/*"
+          />
+
           <div className="flex-1">
             <input
               type="text"
@@ -800,6 +1093,7 @@ const handleMarkAsRead = useCallback((messageId) => {
               disabled={isSubmitting}
             />
           </div>
+
           <button
             type="submit"
             disabled={!message.trim() || isSubmitting}

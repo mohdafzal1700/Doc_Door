@@ -221,20 +221,38 @@ class MessageSerializer(serializers.ModelSerializer):
     receiver = UserSerializer(read_only=True)
     receiver_id = serializers.CharField(write_only=True, required=False)
     
+    # Add these file fields
+    file_url = serializers.SerializerMethodField()
+    is_file_message = serializers.SerializerMethodField()
+
     class Meta:
         model = Message
         fields = [
-            'id', 'conversation', 'sender', 'receiver', 'receiver_id',
-            'content', 'status', 'is_read', 'read_at', 'is_edited', 
-            'is_deleted', 'created_at', 'updated_at'
+            'id', 'conversation', 'sender', 'receiver', 'receiver_id', 'content',
+            'status', 'is_read', 'read_at', 'is_edited', 'is_deleted',
+            'created_at', 'updated_at',
+            # Add file fields
+            'file', 'file_name', 'file_size', 'file_type', 'mime_type',
+            'file_url', 'is_file_message'
         ]
-        read_only_fields = ['id', 'sender', 'created_at', 'updated_at', 'is_edited', 'read_at']
+        read_only_fields = [
+            'id', 'sender', 'created_at', 'updated_at', 'is_edited', 'read_at',
+            'file_url', 'is_file_message'
+        ]
+
+    def get_file_url(self, obj):
+        """Get the file URL from Cloudinary"""
+        return obj.file.url if obj.file else None
     
+    def get_is_file_message(self, obj):
+        """Check if this message contains a file"""
+        return bool(obj.file)
+
     def create(self, validated_data):
         request = self.context.get('request')
         if request and hasattr(request, 'user'):
             validated_data['sender'] = request.user
-        
+
         # Handle receiver_id
         receiver_id = validated_data.pop('receiver_id', None)
         if receiver_id:
@@ -243,7 +261,7 @@ class MessageSerializer(serializers.ModelSerializer):
                 validated_data['receiver'] = receiver
             except User.DoesNotExist:
                 raise serializers.ValidationError({'receiver_id': 'Invalid receiver ID'})
-        
+
         return super().create(validated_data)
 
 class NotificationSerializer(serializers.ModelSerializer):

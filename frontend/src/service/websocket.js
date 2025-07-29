@@ -394,6 +394,35 @@ export const markMessageAsRead = async (conversationId, messageId, currentUserId
   }
 }
 
+
+// NEW: Notify file upload completion
+export const notifyFileUploaded = async (conversationId, messageId, currentUserId = null) => {
+  const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
+  
+  if (!chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
+    return { success: false, error: 'Failed to establish socket connection' }
+  }
+
+  if (!messageId) {
+    return { success: false, error: 'Message ID is required' }
+  }
+
+  const fileUploadMessage = {
+    type: 'file_uploaded',
+    message_id: messageId,
+    conversation_id: conversationId,
+    timestamp: new Date().toISOString()
+  }
+
+  try {
+    chatSocket.send(JSON.stringify(fileUploadMessage))
+    return { success: true, messageId, conversationId }
+  } catch (error) {
+    console.error('Failed to send file upload notification:', error)
+    return { success: false, error: error.message }
+  }
+}
+
 // Send typing indicator
 export const sendTyping = async (conversationId, isTyping = true, currentUserId = null) => {
   const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
