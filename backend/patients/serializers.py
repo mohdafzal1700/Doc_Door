@@ -9,6 +9,9 @@ from django.utils import timezone as django_timezone
 from decimal import Decimal
 import uuid
 
+import razorpay
+from django.conf import settings
+
 from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
@@ -1648,3 +1651,41 @@ class PatientLocationUpdateSerializer(serializers.ModelSerializer):
         return data
     
     
+class PaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = ['id', 'appointment', 'amount', 'method', 'status', 
+                 'razorpay_order_id', 'razorpay_payment_id', 'paid_at', 'created_at']
+        read_only_fields = ['id', 'razorpay_order_id', 'razorpay_payment_id', 'created_at']
+
+class PaymentInitiationSerializer(serializers.Serializer):
+    """Serializer for initiating payment"""
+    method = serializers.ChoiceField(choices=Payment.PAYMENT_METHOD_CHOICES, default='razorpay')
+
+class PaymentVerificationSerializer(serializers.Serializer):
+    """Serializer for verifying Razorpay payment"""
+    razorpay_order_id = serializers.CharField()
+    razorpay_payment_id = serializers.CharField()
+    razorpay_signature = serializers.CharField()
+    
+    def validate(self, attrs):
+        """Verify Razorpay payment signature"""
+        try:
+            client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+            
+            # Verify payment signature
+            client.utility.verify_payment_signature({
+                'razorpay_order_id': attrs['razorpay_order_id'],
+                'razorpay_payment_id': attrs['razorpay_payment_id'],
+                'razorpay_signature': attrs['razorpay_signature']
+            })
+            
+            logger.info(f"Payment signature verified for order: {attrs['razorpay_order_id']}")
+            return attrs
+            
+        except razorpay.errors.SignatureVerificationError:
+            logger.error(f"Invalid payment signature for order: {attrs['razorpay_order_id']}")
+            raise serializers.ValidationError("Invalid payment signature.")
+        except Exception as e:
+            logger.error(f"Error verifying payment signature: {str(e)}")
+            raise serializers.ValidationError("Payment verification failed.")

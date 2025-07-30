@@ -150,9 +150,11 @@ export const getCurrentUserId = () => {
     const user = getStoredUserData();
 
     if (!user) return null;
+    console.log(`🧠 I am not afraid: ${user.id}`);
 
     // Some responses may use `id`, others might use `user_id`
     return user.id || user.user_id || null;
+
 };
 
 

@@ -1482,6 +1482,7 @@ class AppointmentDetailView(APIView):
                 'message': 'Failed to cancel appointment'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class DoctorBookingDetailView(APIView):
     """Doctor details for booking page"""
     permission_classes = [IsAuthenticated]
@@ -1981,4 +1982,185 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                 'data': [],
                 'count': 0,
                 'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
+class PaymentInitiationView(APIView):
+    """Initiate payment for confirmed appointment"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, appointment_id):
+        """Create Razorpay order for payment"""
+        try:
+            # Get appointment and verify ownership
+            appointment = get_object_or_404(
+                Appointment,
+                id=appointment_id,
+                patient__user=request.user
+            )
+            
+            # Check if appointment is confirmed and unpaid
+            if appointment.status != 'confirmed':
+                return Response({
+                    'success': False,
+                    'message': 'Appointment must be confirmed before payment'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if appointment.is_paid:
+                return Response({
+                    'success': False,
+                    'message': 'Payment already completed for this appointment'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get or create payment record
+            payment, created = Payment.objects.get_or_create(
+                appointment=appointment,
+                defaults={
+                    'amount': appointment.total_fee,
+                    'method': 'razorpay',
+                    'status': 'pending'
+                }
+            )
+            
+            # Create Razorpay order
+            order = payment.create_razorpay_order()
+            if not order:
+                return Response({
+                    'success': False,
+                    'message': 'Failed to create payment order'
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            return Response({
+                'success': True,
+                'message': 'Payment initiated successfully',
+                'data': {
+                    'payment_id': payment.id,
+                    'razorpay_order_id': order['id'],
+                    'amount': float(payment.amount),
+                    'currency': 'INR',
+                    'appointment': {
+                        'id': appointment.id,
+                        'doctor_name': f"{appointment.doctor.user.first_name} {appointment.doctor.user.last_name}",
+                        'appointment_date': appointment.appointment_date,
+                        'slot_time': appointment.slot_time.strftime('%H:%M'),
+                        'service': appointment.service.name if appointment.service else None
+                    }
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error initiating payment for appointment {appointment_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to initiate payment'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PaymentVerificationView(APIView):
+    """Verify and complete payment"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request, appointment_id):
+        """Verify Razorpay payment and update appointment status"""
+        try:
+            # Get appointment and verify ownership
+            appointment = get_object_or_404(
+                Appointment,
+                id=appointment_id,
+                patient__user=request.user
+            )
+            
+            # Get payment record
+            try:
+                payment = Payment.objects.get(appointment=appointment)
+            except Payment.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'message': 'Payment record not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Validate payment data
+            serializer = PaymentVerificationSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response({
+                    'success': False,
+                    'message': 'Invalid payment verification data',
+                    'field_errors': serializer.errors
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Verify that the order ID matches
+            if payment.razorpay_order_id != serializer.validated_data['razorpay_order_id']:
+                return Response({
+                    'success': False,
+                    'message': 'Order ID mismatch'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Update payment record with verification details
+            with transaction.atomic():
+                payment.razorpay_payment_id = serializer.validated_data['razorpay_payment_id']
+                payment.razorpay_signature = serializer.validated_data['razorpay_signature']
+                payment.status = 'success'
+                payment.paid_at = timezone.now()
+                payment.save()
+                
+                # Update appointment
+                appointment.is_paid = True
+                appointment.save()
+            
+            # Send confirmation (you can add email/SMS notification here)
+            logger.info(f"Payment completed for appointment {appointment_id}")
+            
+            return Response({
+                'success': True,
+                'message': 'Payment verified and completed successfully',
+                'data': {
+                    'payment_id': payment.id,
+                    'amount': float(payment.amount),
+                    'paid_at': payment.paid_at.isoformat(),
+                    'appointment_status': appointment.status
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error verifying payment for appointment {appointment_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Payment verification failed'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PaymentStatusView(APIView):
+    """Check payment status for an appointment"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request, appointment_id):
+        """Get payment status for appointment"""
+        try:
+            appointment = get_object_or_404(
+                Appointment,
+                id=appointment_id,
+                patient__user=request.user
+            )
+            
+            try:
+                payment = Payment.objects.get(appointment=appointment)
+                serializer = PaymentSerializer(payment)
+                
+                return Response({
+                    'success': True,
+                    'data': serializer.data
+                }, status=status.HTTP_200_OK)
+                
+            except Payment.DoesNotExist:
+                return Response({
+                    'success': True,
+                    'data': {
+                        'status': 'not_initiated',
+                        'message': 'Payment not yet initiated'
+                    }
+                }, status=status.HTTP_200_OK)
+                
+        except Exception as e:
+            logger.error(f"Error getting payment status for appointment {appointment_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to get payment status'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

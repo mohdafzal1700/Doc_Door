@@ -42,7 +42,7 @@ import ChatApp from "./Chat/chat"
 import ScheduleService from "./doctor/pages/Service&shcedule"
 import DocDashboard from "./doctor/pages/dashboard"
 import { VideoCallManager } from "./videocall/mainvideocall"
-import { getCurrentUserId } from '../auth';
+
 
 
 function App() {

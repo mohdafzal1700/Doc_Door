@@ -1,19 +1,18 @@
 import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
 import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff } from 'lucide-react';
 import { 
+  sendAnswer,
   getVideoCallConnectionStatus, 
   endCall as serviceEndCall, 
   acceptCall as serviceAcceptCall, 
   initiateCall as serviceInitiateCall, 
   rejectCall as serviceRejectCall, 
-  sendAnswer, 
   sendIceCandidate, 
   sendOffer, 
   connectVideoCallSocket, 
   closeVideoCallSocket 
 } from '../service/webrtc';
 
-// Video Call Context
 const VideoCallContext = createContext();
 
 export const useVideoCall = () => {
@@ -48,12 +47,15 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
   const remoteVideoRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  
+  // ICE candidate queue - this is the key addition
+  const iceCandidateQueueRef = useRef([]);
+  const isRemoteDescriptionSetRef = useRef(false);
 
   // Enhanced logging function
   const logWithTimestamp = (level, message, data = null) => {
     const timestamp = new Date().toISOString();
     const logMessage = `[${timestamp}] [VideoCall] ${message}`;
-    
     switch (level) {
       case 'success':
         console.log(`✅ ${logMessage}`, data || '');
@@ -69,6 +71,27 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
         break;
       default:
         console.log(logMessage, data || '');
+    }
+  };
+
+  // Process queued ICE candidates
+  const processQueuedCandidates = async () => {
+    if (!peerConnectionRef.current || !isRemoteDescriptionSetRef.current) {
+      return;
+    }
+
+    logWithTimestamp('info', `Processing ${iceCandidateQueueRef.current.length} queued ICE candidates`);
+    
+    const candidates = [...iceCandidateQueueRef.current];
+    iceCandidateQueueRef.current = [];
+
+    for (const candidate of candidates) {
+      try {
+        await peerConnectionRef.current.addIceCandidate(candidate);
+        logWithTimestamp('success', 'Queued ICE candidate added successfully');
+      } catch (error) {
+        logWithTimestamp('error', 'Error adding queued ICE candidate', error);
+      }
     }
   };
 
@@ -186,6 +209,10 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
   const initializePeerConnection = () => {
     logWithTimestamp('info', 'Initializing peer connection...');
     
+    // Reset ICE candidate queue and remote description flag
+    iceCandidateQueueRef.current = [];
+    isRemoteDescriptionSetRef.current = false;
+
     const configuration = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -219,10 +246,12 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
       peerConnectionRef.current.onconnectionstatechange = () => {
         const state = peerConnectionRef.current.connectionState;
         logWithTimestamp('info', `Peer connection state changed: ${state}`);
-        
         if (state === 'connected') {
           logWithTimestamp('success', 'Peer connection established successfully');
-          setCallState(prev => ({ ...prev, callStatus: 'connected' }));
+          setCallState(prev => ({
+            ...prev,
+            callStatus: 'connected'
+          }));
         } else if (state === 'failed' || state === 'disconnected') {
           logWithTimestamp('error', `Peer connection ${state}`);
         }
@@ -239,7 +268,6 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
   const startLocalVideo = async () => {
     logWithTimestamp('info', 'Starting local video stream...');
-    
     try {
       const constraints = {
         video: mediaState.isVideoEnabled,
@@ -248,7 +276,6 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
       logWithTimestamp('info', 'Requesting user media with constraints', constraints);
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      
       localStreamRef.current = stream;
       logWithTimestamp('success', `Local stream obtained. Tracks: ${stream.getTracks().length}`);
 
@@ -275,18 +302,21 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
   const handleOffer = async (offer) => {
     logWithTimestamp('info', 'Handling WebRTC offer...');
-    
     try {
       initializePeerConnection();
       await startLocalVideo();
       
       await peerConnectionRef.current.setRemoteDescription(offer);
+      isRemoteDescriptionSetRef.current = true;
       logWithTimestamp('success', 'Remote description set from offer');
-      
+
+      // Process any queued ICE candidates
+      await processQueuedCandidates();
+
       const answer = await peerConnectionRef.current.createAnswer();
       await peerConnectionRef.current.setLocalDescription(answer);
       logWithTimestamp('success', 'Local description set from answer');
-      
+
       await sendAnswer(currentUserId, callState.roomName, answer);
       logWithTimestamp('success', 'Answer sent successfully');
     } catch (error) {
@@ -296,10 +326,13 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
   const handleAnswer = async (answer) => {
     logWithTimestamp('info', 'Handling WebRTC answer...');
-    
     try {
       await peerConnectionRef.current.setRemoteDescription(answer);
+      isRemoteDescriptionSetRef.current = true;
       logWithTimestamp('success', 'Remote description set from answer');
+
+      // Process any queued ICE candidates
+      await processQueuedCandidates();
     } catch (error) {
       logWithTimestamp('error', 'Error handling answer', error);
     }
@@ -308,6 +341,17 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
   const handleIceCandidate = async (candidate) => {
     logWithTimestamp('info', 'Handling ICE candidate...');
     
+    if (!peerConnectionRef.current) {
+      logWithTimestamp('warning', 'No peer connection available, ignoring ICE candidate');
+      return;
+    }
+
+    if (!isRemoteDescriptionSetRef.current) {
+      logWithTimestamp('info', 'Remote description not set, queuing ICE candidate');
+      iceCandidateQueueRef.current.push(candidate);
+      return;
+    }
+
     try {
       await peerConnectionRef.current.addIceCandidate(candidate);
       logWithTimestamp('success', 'ICE candidate added successfully');
@@ -319,7 +363,6 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
   // Call control functions
   const initiateCall = async (calleeId) => {
     logWithTimestamp('info', `Initiating call to user: ${calleeId}`);
-    
     try {
       setCallState(prev => ({
         ...prev,
@@ -328,22 +371,26 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
       }));
 
       const result = await serviceInitiateCall(currentUserId, calleeId);
-      
       if (result.success) {
         logWithTimestamp('success', 'Call initiated successfully', result);
       } else {
         logWithTimestamp('error', 'Failed to initiate call', result.error);
-        setCallState(prev => ({ ...prev, callStatus: 'idle' }));
+        setCallState(prev => ({
+          ...prev,
+          callStatus: 'idle'
+        }));
       }
     } catch (error) {
       logWithTimestamp('error', 'Error initiating call', error);
-      setCallState(prev => ({ ...prev, callStatus: 'idle' }));
+      setCallState(prev => ({
+        ...prev,
+        callStatus: 'idle'
+      }));
     }
   };
 
   const acceptCall = async () => {
     logWithTimestamp('info', `Accepting call. Call ID: ${callState.callId}, Room: ${callState.roomName}`);
-    
     try {
       const result = await serviceAcceptCall(
         currentUserId,
@@ -353,7 +400,6 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
       if (result.success) {
         logWithTimestamp('success', 'Call accepted successfully', result);
-        
         setCallState(prev => ({
           ...prev,
           isIncomingCall: false,
@@ -370,7 +416,7 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
         await peerConnectionRef.current.setLocalDescription(offer);
         await sendOffer(currentUserId, callState.roomName, offer);
         logWithTimestamp('success', 'Offer created and sent');
-        
+
       } else {
         logWithTimestamp('error', 'Failed to accept call', result.error);
         resetCallState();
@@ -383,7 +429,6 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
   const rejectCall = async () => {
     logWithTimestamp('info', `Rejecting call. Call ID: ${callState.callId}`);
-    
     try {
       await serviceRejectCall(
         currentUserId,
@@ -400,7 +445,6 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
   const endCall = async () => {
     logWithTimestamp('info', `Ending call. Call ID: ${callState.callId}`);
-    
     try {
       if (callState.callId && callState.roomName) {
         await serviceEndCall(
@@ -435,6 +479,10 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
       logWithTimestamp('info', 'Peer connection closed');
     }
 
+    // Clear ICE candidate queue
+    iceCandidateQueueRef.current = [];
+    isRemoteDescriptionSetRef.current = false;
+
     // Reset video elements
     if (localVideoRef.current) {
       localVideoRef.current.srcObject = null;
@@ -463,7 +511,6 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
   const toggleVideo = () => {
     logWithTimestamp('info', 'Toggling video...');
-    
     if (localStreamRef.current) {
       const videoTrack = localStreamRef.current.getVideoTracks()[0];
       if (videoTrack) {
@@ -479,7 +526,6 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
 
   const toggleAudio = () => {
     logWithTimestamp('info', 'Toggling audio...');
-    
     if (localStreamRef.current) {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       if (audioTrack) {
@@ -513,6 +559,7 @@ export const VideoCallProvider = ({ children, currentUserId }) => {
   );
 };
 
+
 // Incoming Call Modal Component
 export const IncomingCallModal = () => {
   const { callState, acceptCall, rejectCall } = useVideoCall();
@@ -538,6 +585,7 @@ export const IncomingCallModal = () => {
             </div>
           </div>
         </div>
+
         <div className="flex justify-center space-x-6">
           <button
             onClick={rejectCall}
@@ -713,8 +761,8 @@ export const CallButton = ({ userId, userName, size = 'md', disabled = false }) 
       disabled={isDisabled}
       className={`
         ${sizeClasses[size]}
-        ${isDisabled
-          ? 'bg-gray-400 cursor-not-allowed'
+        ${isDisabled 
+          ? 'bg-gray-400 cursor-not-allowed' 
           : 'bg-green-500 hover:bg-green-600 transform hover:scale-105'
         }
         text-white rounded-full transition-all duration-200 shadow-lg
@@ -751,8 +799,8 @@ export const ConnectionStatus = ({ currentUserId }) => {
 
   return (
     <div className={`px-2 py-1 rounded-full text-xs font-medium ${
-      connectionStatus.connected
-        ? 'bg-green-100 text-green-600'
+      connectionStatus.connected 
+        ? 'bg-green-100 text-green-600' 
         : 'bg-red-100 text-red-600'
     }`}>
       {connectionStatus.connected ? 'Online' : 'Offline'}

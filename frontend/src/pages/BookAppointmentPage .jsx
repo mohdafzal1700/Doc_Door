@@ -960,8 +960,8 @@ export default function AppointmentBooking({ }) {
                                         !bookingData.patientInfo.email ||
                                         !bookingData.patientInfo.phone ||
                                         (bookingData.consultationMode === "offline" && 
-                                         !bookingData.selectedAddressId && 
-                                         !bookingData.patientInfo.address)
+                                        !bookingData.selectedAddressId && 
+                                        !bookingData.patientInfo.address)
                                     }
                                     className="flex-1 bg-black hover:bg-gray-800 text-white py-3 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >

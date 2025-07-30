@@ -5,6 +5,9 @@ from channels.db import database_sync_to_async
 from django.contrib.auth.models import User
 from .models import CallRecord, ActiveCall
 from django.utils import timezone
+from django.contrib.auth import get_user_model 
+
+User = get_user_model() 
 
 class VideoCallConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -22,14 +25,14 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
         await self.accept()
         print(f"[CONNECT] WebSocket connection accepted for user {self.user_id}")
         
-        await self.channel_layer.group_send(
-            self.user_group_name,
-            {
-                'type': 'user_status',
-                'status': 'online',
-                'user_id': self.user_id
-            }
-        )
+        # await self.channel_layer.group_send(
+        #     self.user_group_name,
+        #     {
+        #         'type': 'user_status',
+        #         'status': 'online',
+        #         'user_id': self.user_id
+        #     }
+        # )
         print(f"[CONNECT] Sent online status for user {self.user_id}")
 
     async def disconnect(self, close_code):
@@ -348,6 +351,19 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 print(f"[WEBRTC_ICE ERROR] Error sending ICE candidate: {e}")
         else:
             print(f"[WEBRTC_ICE] Ignoring own ICE candidate")
+            
+    # async def user_status(self, event):
+    #     """Handle user_status messages"""
+    #     print(f"[USER_STATUS] Event received: {event}")
+    #     try:
+    #         await self.send(text_data=json.dumps({
+    #             'type': 'user_status',
+    #             'status': event['status'],
+    #             'user_id': event['user_id']
+    #         }))
+    #         print(f"[USER_STATUS] Sent user status to client")
+    #     except Exception as e:
+    #         print(f"[USER_STATUS ERROR] Error sending user status: {e}")
 
     # Database operations
     @database_sync_to_async

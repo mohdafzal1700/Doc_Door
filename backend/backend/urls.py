@@ -23,5 +23,5 @@ urlpatterns = [
     path('api/doctor/', include('doctor.urls')),
     path('api/', include('adminside.urls')),
     path('api/chat/', include('chat.urls')),
-    path('api/video-call/', include('video_call.urls')), 
+    path('api/video-call/', include('videocall.urls')), 
 ]

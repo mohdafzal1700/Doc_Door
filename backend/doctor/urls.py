@@ -54,6 +54,8 @@ urlpatterns = [
 
     # For current subscription invoice
     path('invoice/subscription/', SubscriptionInvoiceView.as_view(), name='current-subscription-invoice'),
+    
+    
 ]
 
 

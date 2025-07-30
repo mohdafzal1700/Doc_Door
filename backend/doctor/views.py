@@ -1366,12 +1366,12 @@ class ScheduleView(APIView):
                         'message': 'You can only delete your own schedules.'
                     }, status=status.HTTP_403_FORBIDDEN)
             
-            # Check if schedule has bookings (if you have booking model)
-            if schedule.bookings.exists():
-                return Response({
-                    'success': False,
-                    'message': 'Cannot delete schedule with existing bookings.'
-                }, status=status.HTTP_400_BAD_REQUEST)
+            # # Check if schedule has bookings (if you have booking model)
+            # if schedule.bookings.exists():
+            #     return Response({
+            #         'success': False,
+            #         'message': 'Cannot delete schedule with existing bookings.'
+            #     }, status=status.HTTP_400_BAD_REQUEST)
             
             schedule.delete()
             

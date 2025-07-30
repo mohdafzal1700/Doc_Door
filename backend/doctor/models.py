@@ -886,11 +886,45 @@ class Payment(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
     status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
+    
+    razorpay_order_id = models.CharField(max_length=100, blank=True, null=True)
+    razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
+    razorpay_signature = models.CharField(max_length=200, blank=True, null=True)
+    
 
     remarks = models.TextField(blank=True, null=True)
 
     paid_at = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Payment for {self.appointment} - {self.status}"
+    
+    def create_razorpay_order(self):
+        """Create Razorpay order"""
+        try:
+            client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
+            
+            order_data = {
+                'amount': int(self.amount * 100),  # Amount in paise
+                'currency': 'INR',
+                'receipt': f'appointment_{self.appointment.id}',
+                'notes': {
+                    'appointment_id': str(self.appointment.id),
+                    'patient_email': self.appointment.patient.user.email,
+                    'doctor_name': f"{self.appointment.doctor.user.first_name} {self.appointment.doctor.user.last_name}"
+                }
+            }
+            
+            order = client.order.create(data=order_data)
+            self.razorpay_order_id = order['id']
+            self.status = 'initiated'
+            self.save()
+            
+            return order
+        except Exception as e:
+            logger.error(f"Error creating Razorpay order: {str(e)}")
+            return None
 
     def __str__(self):
         return f"Payment for {self.appointment} - {self.status}"
