@@ -9,18 +9,16 @@ django.setup()
 from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.security.websocket import AllowedHostsOriginValidator
 import chat.routing
-from chat.middleware import JWTAuthMiddleware  # Import your middleware
-
-# Choose one of the middleware options:
-# JWTAuthMiddleware - allows connections, sets user or AnonymousUser
-# JWTAuthRequiredMiddleware - rejects unauthenticated connections
+import videocall.routing  # Import your video call routing
+from chat.middleware import JWTAuthMiddleware
 
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
     "websocket": AllowedHostsOriginValidator(
-        JWTAuthMiddleware(  # Add JWT authentication middleware
+        JWTAuthMiddleware(
             URLRouter(
-                chat.routing.websocket_urlpatterns
+                chat.routing.websocket_urlpatterns + 
+                videocall.routing.websocket_urlpatterns  # Combine both routings
             )
         )
     ),

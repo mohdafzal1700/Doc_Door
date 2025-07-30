@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Star, MapPin, MessageCircle, Calendar, GraduationCap, Phone, Mail, Clock, Award, User, Stethoscope, DollarSign, Globe } from "lucide-react";
 import { getPatientDoctor, handleApiError } from '../endpoints/APIs'; 
 import Header from '../components/home/Header';
+import { CallButton } from '../videocall/videocall';
 
 export default function PatientDoctor() {
     const { id } = useParams();
@@ -241,6 +242,8 @@ export default function PatientDoctor() {
                                         </div>
                                     )}
                                 </div>
+
+                                <CallButton userId={id} userName={doctor.full_name || `Dr. ${doctor.doctor_first_name} ${doctor.doctor_last_name}`}/>
                                 
                                 <div className="flex items-center gap-2">
                                     <div className="flex">

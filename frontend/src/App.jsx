@@ -41,11 +41,19 @@ import ChoosePlanDashboard from "./doctor/pages/ChoosePlan"
 import ChatApp from "./Chat/chat"
 import ScheduleService from "./doctor/pages/Service&shcedule"
 import DocDashboard from "./doctor/pages/dashboard"
+import { VideoCallManager } from "./videocall/mainvideocall"
+import { getCurrentUserId } from '../auth';
 
 
 function App() {
+
+
+  
+
+
   return (
     <ToastProvider>
+      < VideoCallManager>
     <Router>
       <Routes>
         <Route path="/login" element={<Login />} />
@@ -93,6 +101,7 @@ function App() {
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>
     </Router>
+    </VideoCallManager>
     </ToastProvider>
   )
 }

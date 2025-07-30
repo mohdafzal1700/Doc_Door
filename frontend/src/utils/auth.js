@@ -145,6 +145,17 @@ export const setAuthData = (userDetails, tokens, userType = "patient") => {
     }
 };
 
+// Get current logged-in user's ID
+export const getCurrentUserId = () => {
+    const user = getStoredUserData();
+
+    if (!user) return null;
+
+    // Some responses may use `id`, others might use `user_id`
+    return user.id || user.user_id || null;
+};
+
+
 // Save doctor auth info
 export const setDoctorAuthData = (doctorDetails, tokens) => {
     return setAuthData(doctorDetails, tokens, "doctor");

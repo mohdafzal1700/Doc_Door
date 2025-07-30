@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     'patients',
     'doctor',
     'chat',
+    'videocall',
     
     'cloudinary_storage',
     'cloudinary',
@@ -347,4 +348,18 @@ LOGGING = {
             'level': 'DEBUG',
         },
     },
+}
+
+
+WEBRTC_CONFIG = {
+    'iceServers': [
+        {'urls': 'stun:stun.l.google.com:19302'},
+        {'urls': 'stun:stun1.l.google.com:19302'},
+        # Add TURN server if needed
+        # {
+        #     'urls': 'turn:your-turn-server.com:3478',
+        #     'username': 'your-username',
+        #     'credential': 'your-password'
+        # }
+    ]
 }
