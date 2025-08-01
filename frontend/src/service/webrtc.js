@@ -1,571 +1,448 @@
-// videoCallService.js - Video call WebSocket service with fixed reconnection logic
-import { getValidAccessToken, isUserAuthenticated } from "../utils/auth"
+// services/VideoCallService.js - One-on-One Call Service
+import { getStoredUserData, isUserAuthenticated, getValidAccessToken } from "../utils/auth"
 
-// Base URL for video call WebSocket connections
-const VIDEO_CALL_URL = "ws://localhost:8000/ws/video_call/"
-
-// WebSocket instances for video calls
-const videoCallSockets = new Map()
-const reconnectAttempts = new Map()
-const maxReconnectAttempts = 3 // Reduced from 5
-const connectionStates = new Map()
-const reconnectTimeouts = new Map() // Track active reconnection timeouts
-
-// Get JWT token
-const getJWTToken = () => {
-  try {
-    const token = getValidAccessToken()
-    return token || null
-  } catch (error) {
-    console.error('Error during token retrieval:', error)
-    return null
-  }
-}
-
-// Simple validation helper
-const isValidUserId = (userId) => {
-  return userId && (typeof userId === 'string' || typeof userId === 'number')
-}
-
-// Clear reconnection timeout for a socket
-const clearReconnectionTimeout = (socketKey) => {
-  const timeoutId = reconnectTimeouts.get(socketKey)
-  if (timeoutId) {
-    clearTimeout(timeoutId)
-    reconnectTimeouts.delete(socketKey)
-  }
-}
-
-// Connect to video call WebSocket
-export const connectVideoCallSocket = async (userId) => {
-  const socketKey = `video_call_${userId}`
-  
-  // Validate inputs
-  if (!isValidUserId(userId)) {
-    console.error('Invalid user ID provided')
-    return null
+class VideoCallService {
+  constructor() {
+    this.socket = null;
+    this.userId = null;
+    this.connected = false; // Fixed: use consistent property name
+    this.messageHandlers = new Map();
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectInterval = 3000;
+    this.messageQueue = []; // Queue messages while disconnected
+    this.currentCall = null; // Store current call info
+    this.roomName = null; // Store current room name
   }
 
-  if (!isUserAuthenticated()) {
-    console.error('User not authenticated - cannot create WebSocket')
-    return null
+  // Fixed: Consistent isConnected method
+  isConnected() {
+    return this.connected && 
+           this.socket && 
+           this.socket.readyState === WebSocket.OPEN;
   }
 
-  // Check for existing connection
-  const existingSocket = videoCallSockets.get(socketKey)
-  if (existingSocket && existingSocket.readyState === WebSocket.OPEN) {
-    console.log('Reusing existing video call WebSocket connection')
-    return existingSocket
-  } else if (existingSocket) {
+  // Get JWT token
+  getJWTToken() {
     try {
-      existingSocket.close(1000, "Replacing connection")
-    } catch (e) {
-      console.error('Error closing old video call connection:', e)
+      const token = getValidAccessToken();
+      return token || null;
+    } catch (error) {
+      console.error('Error during token retrieval:', error);
+      return null;
     }
-    videoCallSockets.delete(socketKey)
   }
 
-  // Clear any pending reconnection
-  clearReconnectionTimeout(socketKey)
-
-  // Check if already connecting
-  const currentState = connectionStates.get(socketKey)
-  if (currentState === 'connecting') {
-    console.log('Already connecting to video call, waiting...')
-    return new Promise((resolve) => {
-      const checkInterval = setInterval(() => {
-        const socket = videoCallSockets.get(socketKey)
-        const state = connectionStates.get(socketKey)
-        if (socket && socket.readyState === WebSocket.OPEN) {
-          clearInterval(checkInterval)
-          resolve(socket)
-        } else if (state !== 'connecting') {
-          clearInterval(checkInterval)
-          resolve(null)
-        }
-      }, 100)
-      
-      setTimeout(() => {
-        clearInterval(checkInterval)
-        resolve(null)
-      }, 10000)
-    })
+  // Get current user data
+  getCurrentUser() {
+    try {
+      return getStoredUserData();
+    } catch (error) {
+      console.error('Error getting user data:', error);
+      return null;
+    }
   }
 
-  connectionStates.set(socketKey, 'connecting')
-
-  const token = getJWTToken()
-  if (!token) {
-    console.error('No authentication token available')
-    connectionStates.delete(socketKey)
-    return null
-  }
-
-  const wsUrl = `${VIDEO_CALL_URL}${userId}/?token=${encodeURIComponent(token)}`
-
-  try {
-    const videoCallSocket = new WebSocket(wsUrl)
-    videoCallSockets.set(socketKey, videoCallSocket)
-
-    videoCallSocket.onopen = (event) => {
-      console.log('Video call WebSocket connected')
-      const currentSocket = videoCallSockets.get(socketKey)
-      if (currentSocket === videoCallSocket && videoCallSocket.readyState === WebSocket.OPEN) {
-        connectionStates.set(socketKey, 'connected')
-        reconnectAttempts.delete(socketKey) // Reset attempts on successful connection
-        clearReconnectionTimeout(socketKey) // Clear any pending reconnection
+  async connect(userId) {
+    // Close existing connection if different user or if connection exists
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      if (this.userId === userId) {
+        console.log('Already connected for the same user');
+        return Promise.resolve();
       }
+      this.disconnect();
     }
 
-    videoCallSocket.onclose = (event) => {
-      console.log('Video call WebSocket disconnected:', event.code, event.reason)
-      
-      const wasCurrentSocket = videoCallSockets.get(socketKey) === videoCallSocket
-      if (wasCurrentSocket) {
-        videoCallSockets.delete(socketKey)
-        connectionStates.delete(socketKey)
-      }
-
-      // Improved reconnection logic
-      const authErrors = [4000, 4001, 4003, 4004]
-      const serverErrors = [1011] // Add server internal error
-      const shouldNotReconnect = 
-        event.code === 1000 || // Normal closure
-        authErrors.includes(event.code) ||
-        serverErrors.includes(event.code) // Don't reconnect on server errors
-
-      const currentAttempts = reconnectAttempts.get(socketKey) || 0
-      const hasAttemptsLeft = currentAttempts < maxReconnectAttempts
-
-      if (!shouldNotReconnect && hasAttemptsLeft && wasCurrentSocket) {
-        const attempts = currentAttempts + 1
-        reconnectAttempts.set(socketKey, attempts)
-        
-        // Exponential backoff with jitter
-        const baseDelay = Math.min(1000 * Math.pow(2, attempts), 30000)
-        const jitter = Math.random() * 1000 // Add randomness to prevent thundering herd
-        const delay = baseDelay + jitter
-        
-        console.log(`Reconnecting video call in ${Math.round(delay)}ms (attempt ${attempts}/${maxReconnectAttempts})`)
-        
-        const timeoutId = setTimeout(() => {
-          // Only reconnect if no active socket exists
-          if (!videoCallSockets.has(socketKey)) {
-            console.log(`Attempting reconnection ${attempts}/${maxReconnectAttempts}`)
-            connectVideoCallSocket(userId)
-          } else {
-            console.log('Socket already exists, skipping reconnection')
-          }
-          reconnectTimeouts.delete(socketKey)
-        }, delay)
-        
-        reconnectTimeouts.set(socketKey, timeoutId)
-        
-      } else {
-        // Cleanup and stop reconnecting
-        reconnectAttempts.delete(socketKey)
-        clearReconnectionTimeout(socketKey)
-        
-        if (shouldNotReconnect) {
-          if (authErrors.includes(event.code)) {
-            console.error('Video call authentication/authorization failed - stopping reconnection')
-            window.dispatchEvent(new CustomEvent('video_call_auth_error', { 
-              detail: { 
-                code: event.code, 
-                reason: event.reason, 
-                userId, 
-                socketKey 
-              } 
-            }))
-          } else if (serverErrors.includes(event.code)) {
-            console.error('Server error - stopping reconnection')
-            window.dispatchEvent(new CustomEvent('video_call_server_error', { 
-              detail: { 
-                code: event.code, 
-                reason: event.reason, 
-                userId, 
-                socketKey 
-              } 
-            }))
-          }
-        } else if (!hasAttemptsLeft) {
-          console.error(`Max reconnection attempts (${maxReconnectAttempts}) reached for video call`)
-          window.dispatchEvent(new CustomEvent('video_call_max_retries_exceeded', { 
-            detail: { 
-              userId, 
-              socketKey,
-              attempts: currentAttempts
-            } 
-          }))
-        }
-      }
+    this.userId = userId;
+    const token = this.getJWTToken();
+    
+    if (!token) {
+      console.error("Cannot connect: token not found");
+      throw new Error("Authentication token not found");
     }
 
-    videoCallSocket.onerror = (error) => {
-      console.error('Video call WebSocket error:', error)
-      if (videoCallSockets.get(socketKey) === videoCallSocket) {
-        connectionStates.set(socketKey, 'error')
-      }
+    if (!isUserAuthenticated()) {
+      console.error("Cannot connect: user not authenticated");
+      throw new Error("User not authenticated");
     }
 
-    videoCallSocket.onmessage = (event) => {
+    const wsUrl = `ws://localhost:8000/ws/video_call/${userId}/`;
+
+    return new Promise((resolve, reject) => {
       try {
-        const data = JSON.parse(event.data)
-        if (data.type === 'error' && data.message && data.message.toLowerCase().includes('authentication')) {
-          // Stop reconnection on auth errors from server messages
-          reconnectAttempts.delete(socketKey)
-          clearReconnectionTimeout(socketKey)
-          
-          window.dispatchEvent(new CustomEvent('video_call_auth_error', { 
-            detail: { 
-              message: data.message, 
-              userId, 
-              socketKey, 
-              serverError: true 
-            } 
-          }))
-        }
-        
-        window.dispatchEvent(new CustomEvent('video_call_message', { 
-          detail: { 
-            userId, 
-            data, 
-            socketKey, 
-            timestamp: new Date().toISOString(), 
-            messageType: data.type 
-          } 
-        }))
-      } catch (parseError) {
-        console.error('Failed to parse video call server message:', parseError)
+        this.socket = new WebSocket(wsUrl);
+        this.setupEventListeners(resolve, reject);
+        console.log(`🔌 Connecting to video call service for user: ${userId}`);
+      } catch (error) {
+        console.error('VideoCall WebSocket connection error:', error);
+        reject(error);
       }
-    }
+    });
+  }
+
+  setupEventListeners(connectResolve = null, connectReject = null) {
+    if (!this.socket) return;
 
     // Connection timeout
-    const timeoutId = setTimeout(() => {
-      if (videoCallSocket.readyState === WebSocket.CONNECTING) {
-        console.error('Video call WebSocket connection timeout')
-        videoCallSocket.close()
-        if (videoCallSockets.get(socketKey) === videoCallSocket) {
-          videoCallSockets.delete(socketKey)
-          connectionStates.delete(socketKey)
+    const connectionTimeout = setTimeout(() => {
+      if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+        this.socket.close();
+        const error = new Error('Connection timeout');
+        console.error('❌ VideoCall connection timeout');
+        if (connectReject) connectReject(error);
+      }
+    }, 10000);
+
+    this.socket.onopen = () => {
+      clearTimeout(connectionTimeout);
+      console.log('✅ VideoCall WebSocket connected');
+      this.connected = true; // Fixed: use consistent property
+      this.reconnectAttempts = 0;
+
+      // Send queued messages
+      while (this.messageQueue.length > 0) {
+        const message = this.messageQueue.shift();
+        this.socket.send(JSON.stringify(message));
+      }
+
+      this.triggerHandler('connection', { status: 'connected' });
+      if (connectResolve) connectResolve();
+    };
+
+    this.socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log('📨 VideoCall message received:', data);
+        this.handleMessage(data);
+      } catch (error) {
+        console.error('❌ Error parsing VideoCall WebSocket message:', error);
+      }
+    };
+
+    this.socket.onclose = async (event) => {
+      clearTimeout(connectionTimeout);
+      console.log('🔌 VideoCall WebSocket disconnected:', event.code, event.reason);
+      this.connected = false; // Fixed: use consistent property
+      this.triggerHandler('connection', { status: 'disconnected' });
+      this.triggerHandler('disconnect', { code: event.code, reason: event.reason });
+
+      // Auto-reconnect logic (only if not a clean disconnect)
+      if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+        setTimeout(async () => {
+          this.reconnectAttempts++;
+          console.log(`🔄 Reconnecting... Attempt ${this.reconnectAttempts}`);
+          
+          const token = this.getJWTToken();
+          if (token && this.userId && isUserAuthenticated()) {
+            try {
+              await this.connect(this.userId);
+            } catch (error) {
+              console.error('❌ Reconnection failed:', error);
+            }
+          }
+        }, this.reconnectInterval);
+      }
+
+      // If initial connection failed
+      if (this.socket && this.socket.readyState === WebSocket.CONNECTING && connectReject) {
+        connectReject(new Error(`Connection failed: ${event.code} ${event.reason}`));
+      }
+    };
+
+    this.socket.onerror = (error) => {
+      clearTimeout(connectionTimeout);
+      console.error('❌ VideoCall WebSocket error:', error);
+      this.triggerHandler('error', { error });
+      
+      // If initial connection failed
+      if (connectReject) {
+        connectReject(error);
+      }
+    };
+  }
+
+  handleMessage(data) {
+    const { type } = data;
+    
+    switch (type) {
+      case 'incoming_call':
+        this.currentCall = {
+          callId: data.call_id,
+          callerId: data.caller_id,
+          callerName: data.caller_name,
+          roomName: data.room_name,
+          status: 'incoming'
+        };
+        this.triggerHandler('incoming_call', data);
+        break;
+
+      case 'call_initiated':
+        this.currentCall = {
+          callId: data.call_id,
+          roomName: data.room_name,
+          status: data.status || 'initiated'
+        };
+        this.roomName = data.room_name;
+        this.triggerHandler('call_initiated', data);
+        break;
+
+      case 'call_accepted':
+        if (this.currentCall) {
+          this.currentCall.status = 'accepted';
         }
+        this.triggerHandler('call_accepted', data);
+        break;
+
+      case 'call_rejected':
+        if (this.currentCall) {
+          this.currentCall.status = 'rejected';
+        }
+        this.triggerHandler('call_rejected', data);
+        break;
+
+      case 'call_ended':
+        if (this.currentCall) {
+          this.currentCall.status = 'ended';
+        }
+        this.triggerHandler('call_ended', data);
+        break;
+
+      case 'offer':
+        this.triggerHandler('webrtc_offer', data);
+        break;
+
+      case 'answer':
+        this.triggerHandler('webrtc_answer', data);
+        break;
+
+      case 'ice_candidate':
+        this.triggerHandler('ice_candidate', data);
+        break;
+
+      default:
+        console.log('❓ Unknown VideoCall message type:', type, data);
+        this.triggerHandler('unknown_message', data);
+    }
+  }
+
+  // Register event handlers
+  on(event, handler) {
+    if (!this.messageHandlers.has(event)) {
+      this.messageHandlers.set(event, []);
+    }
+    this.messageHandlers.get(event).push(handler);
+  }
+
+  // Remove event handlers
+  off(event, handler) {
+    if (this.messageHandlers.has(event)) {
+      const handlers = this.messageHandlers.get(event);
+      const index = handlers.indexOf(handler);
+      if (index > -1) {
+        handlers.splice(index, 1);
       }
-    }, 15000)
-
-    const clearTimeoutHandler = () => clearTimeout(timeoutId)
-    videoCallSocket.addEventListener('open', clearTimeoutHandler)
-    videoCallSocket.addEventListener('close', clearTimeoutHandler)
-
-    return videoCallSocket
-
-  } catch (error) {
-    console.error('Error creating video call WebSocket:', error)
-    videoCallSockets.delete(socketKey)
-    connectionStates.delete(socketKey)
-    return null
-  }
-}
-
-// Helper function to ensure socket connection
-const ensureVideoCallSocketConnection = async (userId) => {
-  const socketKey = `video_call_${userId}`
-  let socket = videoCallSockets.get(socketKey)
-  
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    console.log('Video call socket not connected, attempting to connect...')
-    socket = await connectVideoCallSocket(userId)
-  }
-  
-  return socket
-}
-
-// Initiate a video call
-export const initiateCall = async (userId, calleeId) => {
-  const socket = await ensureVideoCallSocketConnection(userId)
-  if (!socket) {
-    console.error('Failed to establish video call socket connection')
-    return { success: false, error: 'Failed to establish socket connection' }
+    }
   }
 
-  if (socket.readyState !== WebSocket.OPEN) {
-    console.error(`Video call WebSocket not connected. State: ${socket.readyState}`)
-    return { success: false, error: 'WebSocket not connected' }
+  // Remove all handlers for an event
+  removeAllHandlers(event) {
+    if (this.messageHandlers.has(event)) {
+      this.messageHandlers.delete(event);
+    }
   }
 
-  if (!calleeId) {
-    console.error('Callee ID is required')
-    return { success: false, error: 'Callee ID is required' }
+  // Fixed: Add removeAllListeners alias for compatibility
+  removeAllListeners(event) {
+    this.removeAllHandlers(event);
   }
 
-  const message = {
-    type: 'call_initiate',
-    callee_id: String(calleeId).trim(),
-    timestamp: new Date().toISOString()
+  // Trigger event handlers
+  triggerHandler(event, data) {
+    if (this.messageHandlers.has(event)) {
+      this.messageHandlers.get(event).forEach(handler => {
+        try {
+          handler(data);
+        } catch (error) {
+          console.error(`❌ Error in ${event} handler:`, error);
+        }
+      });
+    }
   }
 
-  try {
-    socket.send(JSON.stringify(message))
-    return { success: true, calleeId, message }
-  } catch (error) {
-    console.error('Failed to initiate call:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-// Accept an incoming call
-export const acceptCall = async (userId, callId, roomName) => {
-  const socket = await ensureVideoCallSocketConnection(userId)
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish socket connection' }
+  // Fixed: Add emit alias for compatibility
+  emit(event, data) {
+    this.triggerHandler(event, data);
   }
 
-  if (!callId || !roomName) {
-    return { success: false, error: 'Call ID and room name are required' }
+  // Send messages
+  send(data) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      try {
+        this.socket.send(JSON.stringify(data));
+        return true;
+      } catch (error) {
+        console.error('❌ Error sending message:', error);
+        return false;
+      }
+    } else {
+      // Queue message if not connected
+      this.messageQueue.push(data);
+      console.warn('⚠️ VideoCall WebSocket is not connected, message queued');
+      return false;
+    }
   }
 
-  const message = {
-    type: 'call_accept',
-    call_id: callId,
-    room_name: roomName,
-    timestamp: new Date().toISOString()
+  // Call management methods
+  initiateCall(calleeId) {
+    console.log(`📞 Initiating call to user: ${calleeId}`);
+    return this.send({
+      type: 'call_initiate',
+      callee_id: calleeId
+    });
   }
 
-  try {
-    socket.send(JSON.stringify(message))
-    return { success: true, callId, roomName, message }
-  } catch (error) {
-    console.error('Failed to accept call:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-// Reject an incoming call
-export const rejectCall = async (userId, callId, roomName) => {
-  const socket = await ensureVideoCallSocketConnection(userId)
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish socket connection' }
+  acceptCall(callId, roomName) {
+    console.log(`✅ Accepting call: ${callId}`);
+    this.roomName = roomName;
+    return this.send({
+      type: 'call_accept',
+      call_id: callId,
+      room_name: roomName
+    });
   }
 
-  if (!callId || !roomName) {
-    return { success: false, error: 'Call ID and room name are required' }
+  rejectCall(callId, roomName) {
+    console.log(`❌ Rejecting call: ${callId}`);
+    return this.send({
+      type: 'call_reject',
+      call_id: callId,
+      room_name: roomName
+    });
   }
 
-  const message = {
-    type: 'call_reject',
-    call_id: callId,
-    room_name: roomName,
-    timestamp: new Date().toISOString()
+  endCall(callId, roomName) {
+    console.log(`🔚 Ending call: ${callId}`);
+    return this.send({
+      type: 'call_end',
+      call_id: callId,
+      room_name: roomName || this.roomName
+    });
   }
 
-  try {
-    socket.send(JSON.stringify(message))
-    return { success: true, callId, roomName, message }
-  } catch (error) {
-    console.error('Failed to reject call:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-// End an active call
-export const endCall = async (userId, callId, roomName) => {
-  const socket = await ensureVideoCallSocketConnection(userId)
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish socket connection' }
+  // WebRTC signaling methods
+  sendOffer(offer, roomName) {
+    console.log(`📤 Sending WebRTC offer to room: ${roomName}`);
+    return this.send({
+      type: 'offer',
+      offer: offer,
+      room_name: roomName || this.roomName
+    });
   }
 
-  if (!callId || !roomName) {
-    return { success: false, error: 'Call ID and room name are required' }
+  sendAnswer(answer, roomName) {
+    console.log(`📤 Sending WebRTC answer to room: ${roomName}`);
+    return this.send({
+      type: 'answer',
+      answer: answer,
+      room_name: roomName || this.roomName
+    });
   }
 
-  const message = {
-    type: 'call_end',
-    call_id: callId,
-    room_name: roomName,
-    timestamp: new Date().toISOString()
+  sendICECandidate(candidate, roomName) {
+    console.log(`🧊 Sending ICE candidate to room: ${roomName}`);
+    return this.send({
+      type: 'ice_candidate',
+      candidate: candidate,
+      room_name: roomName || this.roomName
+    });
   }
 
-  try {
-    socket.send(JSON.stringify(message))
-    return { success: true, callId, roomName, message }
-  } catch (error) {
-    console.error('Failed to end call:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-// WebRTC signaling functions
-// Send WebRTC offer
-export const sendOffer = async (userId, roomName, offer) => {
-  const socket = await ensureVideoCallSocketConnection(userId)
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish socket connection' }
+  // Utility methods
+  getCurrentCall() {
+    return this.currentCall;
   }
 
-  if (!roomName || !offer) {
-    return { success: false, error: 'Room name and offer are required' }
+  getCurrentRoomName() {
+    return this.roomName;
   }
 
-  const message = {
-    type: 'offer',
-    room_name: roomName,
-    offer: offer,
-    timestamp: new Date().toISOString()
-  }
-
-  try {
-    socket.send(JSON.stringify(message))
-    return { success: true, roomName, offer, message }
-  } catch (error) {
-    console.error('Failed to send offer:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-// Send WebRTC answer
-export const sendAnswer = async (userId, roomName, answer) => {
-  const socket = await ensureVideoCallSocketConnection(userId)
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish socket connection' }
-  }
-
-  if (!roomName || !answer) {
-    return { success: false, error: 'Room name and answer are required' }
-  }
-
-  const message = {
-    type: 'answer',
-    room_name: roomName,
-    answer: answer,
-    timestamp: new Date().toISOString()
-  }
-
-  try {
-    socket.send(JSON.stringify(message))
-    return { success: true, roomName, answer, message }
-  } catch (error) {
-    console.error('Failed to send answer:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-// Send ICE candidate
-export const sendIceCandidate = async (userId, roomName, candidate) => {
-  const socket = await ensureVideoCallSocketConnection(userId)
-  if (!socket || socket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish socket connection' }
-  }
-
-  if (!roomName || !candidate) {
-    return { success: false, error: 'Room name and candidate are required' }
-  }
-
-  const message = {
-    type: 'ice_candidate',
-    room_name: roomName,
-    candidate: candidate,
-    timestamp: new Date().toISOString()
-  }
-
-  try {
-    socket.send(JSON.stringify(message))
-    return { success: true, roomName, candidate, message }
-  } catch (error) {
-    console.error('Failed to send ICE candidate:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-// Get video call connection status
-export const getVideoCallConnectionStatus = (userId = null) => {
-  if (userId) {
-    const socketKey = `video_call_${userId}`
-    const socket = videoCallSockets.get(socketKey)
-    const state = connectionStates.get(socketKey) || 'disconnected'
-    const reconnectCount = reconnectAttempts.get(socketKey) || 0
-    const hasReconnectTimeout = reconnectTimeouts.has(socketKey)
+  // Fixed: Complete getConnectionStatus method
+  getConnectionStatus() {
+    if (!this.socket) return 'disconnected';
     
+    switch (this.socket.readyState) {
+      case WebSocket.CONNECTING:
+        return 'connecting';
+      case WebSocket.OPEN:
+        return 'connected';
+      case WebSocket.CLOSING:
+        return 'closing';
+      case WebSocket.CLOSED:
+        return 'disconnected';
+      default:
+        return 'unknown';
+    }
+  }
+
+  isInCall() {
+    return this.currentCall && ['calling', 'accepted', 'initiated'].includes(this.currentCall.status);
+  }
+
+  // Clean up current call
+  clearCurrentCall() {
+    this.currentCall = null;
+    this.roomName = null;
+  }
+
+  disconnect() {
+    console.log('🔌 Disconnecting VideoCall WebSocket');
+    
+    // End current call if active
+    if (this.isInCall()) {
+      this.endCall(this.currentCall?.callId, this.roomName);
+    }
+
+    // Close socket cleanly
+    if (this.socket) {
+      try {
+        this.socket.close(1000, 'User disconnected');
+      } catch (error) {
+        console.error('Error closing socket:', error);
+      }
+      this.socket = null;
+    }
+    
+    // Reset all state
+    this.connected = false;
+    this.userId = null;
+    this.messageQueue = [];
+    this.reconnectAttempts = 0;
+    this.clearCurrentCall();
+    
+    // Clear all handlers
+    this.messageHandlers.clear();
+  }
+
+  // Debug methods
+  getDebugInfo() {
     return {
-      connected: socket?.readyState === WebSocket.OPEN,
-      state: state,
-      readyState: socket?.readyState || WebSocket.CLOSED,
-      socketExists: !!socket,
-      socketKey: socketKey,
-      reconnectAttempts: reconnectCount,
-      isReconnecting: hasReconnectTimeout
-    }
-  }
-
-  const status = {
-    videoCallSockets: {},
-    totalSockets: videoCallSockets.size,
-    connectionStates: Object.fromEntries(connectionStates),
-    reconnectAttempts: Object.fromEntries(reconnectAttempts),
-    activeReconnections: reconnectTimeouts.size
-  }
-
-  videoCallSockets.forEach((socket, key) => {
-    status.videoCallSockets[key] = {
-      connected: socket.readyState === WebSocket.OPEN,
-      readyState: socket.readyState,
-      state: connectionStates.get(key) || 'unknown',
-      reconnectAttempts: reconnectAttempts.get(key) || 0,
-      isReconnecting: reconnectTimeouts.has(key)
-    }
-  })
-
-  return status
-}
-
-// Close specific video call socket
-export const closeVideoCallSocket = (userId = null) => {
-  if (userId) {
-    const socketKey = `video_call_${userId}`
-    const socket = videoCallSockets.get(socketKey)
-    
-    // Clear any pending reconnection
-    clearReconnectionTimeout(socketKey)
-    
-    if (socket) {
-      try {
-        socket.close(1000, "Manual close")
-      } catch (e) {
-        console.error('Error closing video call socket:', e)
-      }
-      videoCallSockets.delete(socketKey)
-      connectionStates.delete(socketKey)
-      reconnectAttempts.delete(socketKey)
-    }
-  } else {
-    // Close all video call sockets
-    videoCallSockets.forEach((socket, key) => {
-      clearReconnectionTimeout(key)
-      try {
-        socket.close(1000, "Manual close all")
-      } catch (e) {
-        console.error(`Error closing video call socket ${key}:`, e)
-      }
-    })
-    videoCallSockets.clear()
-    connectionStates.clear()
-    reconnectAttempts.clear()
-    reconnectTimeouts.clear()
+      isConnected: this.isConnected(),
+      connected: this.connected,
+      userId: this.userId,
+      currentCall: this.currentCall,
+      roomName: this.roomName,
+      messageQueueLength: this.messageQueue.length,
+      socketState: this.getConnectionStatus(),
+      reconnectAttempts: this.reconnectAttempts,
+      handlersCount: Array.from(this.messageHandlers.entries()).map(([event, handlers]) => ({
+        event,
+        count: handlers.length
+      }))
+    };
   }
 }
 
-// Force stop all reconnections
-export const stopAllReconnections = () => {
-  reconnectTimeouts.forEach((timeoutId, socketKey) => {
-    clearTimeout(timeoutId)
-    console.log(`Stopped reconnection for ${socketKey}`)
-  })
-  reconnectTimeouts.clear()
-  reconnectAttempts.clear()
-}
+// Create singleton instance
+const videoCallService = new VideoCallService();
 
-// Legacy function for backward compatibility
-export const getVideoCallSocket = connectVideoCallSocket
-
-// Close all video call sockets
-export const closeAllVideoCallSockets = () => {
-  closeVideoCallSocket()
-}
+export default videoCallService;

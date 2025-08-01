@@ -41,8 +41,8 @@ import ChoosePlanDashboard from "./doctor/pages/ChoosePlan"
 import ChatApp from "./Chat/chat"
 import ScheduleService from "./doctor/pages/Service&shcedule"
 import DocDashboard from "./doctor/pages/dashboard"
-import { VideoCallManager } from "./videocall/mainvideocall"
-
+import VideoCallPage from "./vo/VideoCallPage"
+import { CallProvider } from "./vo/callprovider"
 
 
 function App() {
@@ -53,8 +53,9 @@ function App() {
 
   return (
     <ToastProvider>
-      < VideoCallManager>
+      
     <Router>
+      <CallProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
@@ -95,13 +96,15 @@ function App() {
         <Route path='/doctor/choosePlan' element={<ChoosePlanDashboard/>} />
         <Route path="/chat/:userId?" element={<ChatApp />} />
         <Route path='/doctor/dashboard' element={<DocDashboard/>}/>
+        <Route path="/video-call/:receiverId" element={<VideoCallPage />} />
         
         
         
         <Route path="/" element={<Navigate to="/login" replace />} />
       </Routes>
+      </CallProvider>
     </Router>
-    </VideoCallManager>
+   
     </ToastProvider>
   )
 }

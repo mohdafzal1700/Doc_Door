@@ -1984,34 +1984,37 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            
+import razorpay
+from django.conf import settings
+from patients.serializers import PaymentInitiationSerializer,PaymentVerificationSerializer,PaymentSerializer  
+          
 class PaymentInitiationView(APIView):
     """Initiate payment for confirmed appointment"""
     permission_classes = [IsAuthenticated]
-    
+
     def post(self, request, appointment_id):
         """Create Razorpay order for payment"""
         try:
             # Get appointment and verify ownership
             appointment = get_object_or_404(
-                Appointment,
-                id=appointment_id,
+                Appointment, 
+                id=appointment_id, 
                 patient__user=request.user
             )
-            
+
             # Check if appointment is confirmed and unpaid
             if appointment.status != 'confirmed':
                 return Response({
                     'success': False,
                     'message': 'Appointment must be confirmed before payment'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
+
             if appointment.is_paid:
                 return Response({
                     'success': False,
                     'message': 'Payment already completed for this appointment'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
+
             # Get or create payment record
             payment, created = Payment.objects.get_or_create(
                 appointment=appointment,
@@ -2021,7 +2024,7 @@ class PaymentInitiationView(APIView):
                     'status': 'pending'
                 }
             )
-            
+
             # Create Razorpay order
             order = payment.create_razorpay_order()
             if not order:
@@ -2029,25 +2032,27 @@ class PaymentInitiationView(APIView):
                     'success': False,
                     'message': 'Failed to create payment order'
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
+
             return Response({
                 'success': True,
                 'message': 'Payment initiated successfully',
                 'data': {
+                    'key': settings.RAZORPAY_KEY_ID,  # ✅ Add this line
                     'payment_id': payment.id,
                     'razorpay_order_id': order['id'],
-                    'amount': float(payment.amount),
+                    'order_id': order['id'],  # Alternative name for frontend
+                    'amount': int(payment.amount * 100),  # Amount in paise
                     'currency': 'INR',
                     'appointment': {
                         'id': appointment.id,
                         'doctor_name': f"{appointment.doctor.user.first_name} {appointment.doctor.user.last_name}",
                         'appointment_date': appointment.appointment_date,
                         'slot_time': appointment.slot_time.strftime('%H:%M'),
-                        'service': appointment.service.name if appointment.service else None
+                        'service': appointment.service.service_name if appointment.service else None
                     }
                 }
             }, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             logger.error(f"Error initiating payment for appointment {appointment_id}: {str(e)}")
             return Response({

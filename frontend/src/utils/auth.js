@@ -158,6 +158,7 @@ export const getCurrentUserId = () => {
 };
 
 
+
 // Save doctor auth info
 export const setDoctorAuthData = (doctorDetails, tokens) => {
     return setAuthData(doctorDetails, tokens, "doctor");

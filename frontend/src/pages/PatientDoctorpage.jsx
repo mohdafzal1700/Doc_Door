@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Star, MapPin, MessageCircle, Calendar, GraduationCap, Phone, Mail, Clock, Award, User, Stethoscope, DollarSign, Globe } from "lucide-react";
 import { getPatientDoctor, handleApiError } from '../endpoints/APIs'; 
 import Header from '../components/home/Header';
-import { CallButton } from '../videocall/videocall';
 
 export default function PatientDoctor() {
     const { id } = useParams();
@@ -38,9 +37,12 @@ export default function PatientDoctor() {
         navigate(`/patient/appointmentBooking/${id}`);
     };
 
-    // const handleSendMessage = () => {
-    //     navigate(`/patient/messages/${id}`);
-    // };
+    const handleVideoCall = () => {
+    // Navigate to the video call page with the doctor's/user's ID
+    navigate(`/video-call/${id}`);
+  };
+
+  
     const handleSendMessage = () => {
     // Make sure we're passing the doctor's ID, not the current user's ID
     console.log('Navigating to chat with doctor ID:', doctor.id);
@@ -243,8 +245,15 @@ export default function PatientDoctor() {
                                     )}
                                 </div>
 
-                                <CallButton userId={id} userName={doctor.full_name || `Dr. ${doctor.doctor_first_name} ${doctor.doctor_last_name}`}/>
-                                
+                                 <button
+      onClick={handleVideoCall}
+      className="flex items-center justify-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+      title={`Start video call with ${doctor.full_name}`}
+    >
+      <Phone className="w-4 h-4" />
+      <span className="hidden sm:inline">Video Call</span>
+      <span className="sm:hidden">Call</span>
+    </button>
                                 <div className="flex items-center gap-2">
                                     <div className="flex">
                                         {renderStars(4.5)}

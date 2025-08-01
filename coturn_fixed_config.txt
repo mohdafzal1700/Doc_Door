@@ -1,0 +1,54 @@
+# Fixed Coturn Configuration
+# Save this as /etc/turnserver.conf
+
+# Network Configuration
+listening-port=3478
+listening-ip=0.0.0.0
+external-ip=111.92.15.216
+realm=111.92.15.216
+
+# Authentication - Use simple authentication for testing
+user=webrtcuser:strongpassword
+# Comment out no-auth for now - we'll enable it later if needed
+# no-auth
+
+# Security
+fingerprint
+lt-cred-mech
+
+# Port Range for TURN relay
+min-port=49152
+max-port=65535
+
+# Logging
+verbose
+simple-log
+no-cli
+
+# Performance
+no-multicast-peers
+no-ipv6
+
+# Rate limiting
+bps-capacity=0
+user-quota=12
+total-quota=1200
+stale-nonce=600
+
+# Additional settings for stability
+no-tls
+no-dtls
+no-tlsv1
+no-tlsv1_1
+no-tlsv1_2
+no-tlsv1_3
+
+# Disable CLI for security
+no-cli
+
+# Set process user/group if needed
+# user=daemon
+# group=daemon
+
+# Log file location
+log-file=/var/log/coturn.log 

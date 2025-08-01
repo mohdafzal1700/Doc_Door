@@ -21,7 +21,7 @@ export default function DocHeader() {
   const navItems = [
     { name: "Home", icon: Home, path: "/doctor/home" },
     { name: "Appointments", icon: Calendar, path: '/doctor/currentSubscription' },
-    { name: "Messages", icon: MessageSquare, path: "/subscription-management" },
+    { name: "Messages", icon: MessageSquare, path: "/video-call/" },
     { name: "Notifications", icon: Bell, path: "/chat" },
   ]
 

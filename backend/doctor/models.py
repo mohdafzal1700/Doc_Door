@@ -10,7 +10,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from django.core.exceptions import ValidationError
 from math import radians, cos, sin, asin, sqrt
-
+import razorpay
+from django.conf import settings
 
 import logging
 

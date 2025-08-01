@@ -86,7 +86,7 @@ urlpatterns = [
     path('search/nearby-doctors/', SearchNearbyDoctorsView.as_view(), name='search-nearby-doctors'),
 
     # Payments
-    path('appointments/<uuid:appointment_id>/payment/initiate/', PaymentInitiationView.as_view(), name='payment-initiate'),
-    path('appointments/<uuid:appointment_id>/payment/verify/', PaymentVerificationView.as_view(), name='payment-verify'),
-    path('appointments/<uuid:appointment_id>/payment/status/', PaymentStatusView.as_view(), name='payment-status'),
+    path('appointments/<int:appointment_id>/payment/initiate/', PaymentInitiationView.as_view(), name='payment-initiate'),
+    path('appointments/<int:appointment_id>/payment/verify/', PaymentVerificationView.as_view(), name='payment-verify'),
+    path('appointments/<int:appointment_id>/payment/status/', PaymentStatusView.as_view(), name='payment-status'),
 ]

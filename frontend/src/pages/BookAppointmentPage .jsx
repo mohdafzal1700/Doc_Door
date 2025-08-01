@@ -5,6 +5,7 @@ import { useState, useEffect } from "react"
 import { Calendar, Clock, MapPin, User, CreditCard, FileText, ChevronLeft, ChevronRight, Check, AlertCircle, Info } from "lucide-react"
 import Button from "../components/ui/Button"
 import Input from "../components/ui/Input"
+import { useNavigate } from "react-router-dom";
 import { getUserProfile, getAddresses, 
     getMedicalRecord, 
     getDoctorBookingDetail, 
@@ -24,6 +25,7 @@ export default function AppointmentBooking({ }) {
     const [showNotification, setShowNotification] = useState(false)
     const [notificationMessage, setNotificationMessage] = useState("")
     const [initialLoading, setInitialLoading] = useState(true)
+    const navigate=useNavigate()
     
     const [bookingData, setBookingData] = useState({
         consultationMode: "online",
@@ -266,11 +268,41 @@ export default function AppointmentBooking({ }) {
             }
 
             const result = await createAppointment(bookingPayload)
-            
+
             
 
             if (result && (result.success || result.status === 201 || result.status === 200 || (result.data && !result.error))) {
+                console.log(result.data.data)
+                const appointmentId = result.data.data?.id || result.id;
+                if (!appointmentId) {
+                console.error('Missing appointmentId from API response');
+                setError('Failed to get appointment ID. Please try again.');
+                return;
+            }
+            
+                const navigationData = {
+                appointmentId,
+                appointmentData: {
+                    doctorName: doctor?.data?.full_name, 
+                    clinicName: doctor?.data?.hospital,  
+                    appointmentDate: bookingData.appointmentDate,
+                            slotTime: bookingData.selectedSlot?.startTime || bookingData.selectedSlot?.start_time,
+                            consultationMode: bookingData.consultationMode,
+                            serviceName: selectedService?.service_name,
+                            totalAmount: calculateTotalFee(),
+                            patientInfo: bookingData.patientInfo    
+                }
+            };
+
+
                 showSuccessNotification("Appointment booked successfully!")
+
+                setTimeout(() => {
+                navigate('/confirm-payment', {
+                    state: navigationData 
+                });
+                console.log('Navigating with:', { navigationData });
+            }, 1500);
                 
                 setCurrentStep(1)
                 setBookingData({
@@ -953,27 +985,49 @@ export default function AppointmentBooking({ }) {
                                     Back
                                 </Button>
                                 <Button
-                                    onClick={handleSubmitBooking}
-                                    disabled={
-                                        loading ||
-                                        !bookingData.patientInfo.name ||
-                                        !bookingData.patientInfo.email ||
-                                        !bookingData.patientInfo.phone ||
-                                        (bookingData.consultationMode === "offline" && 
-                                        !bookingData.selectedAddressId && 
-                                        !bookingData.patientInfo.address)
-                                    }
-                                    className="flex-1 bg-black hover:bg-gray-800 text-white py-3 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    {loading ? (
-                                        <>
-                                            <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                                            Booking...
-                                        </>
-                                    ) : (
-                                        "Confirm Booking"
+                                        onClick={handleSubmitBooking}
+                                        disabled={
+                                            loading ||
+                                            !bookingData.patientInfo.name ||
+                                            !bookingData.patientInfo.email ||
+                                            !bookingData.patientInfo.phone ||
+                                            (bookingData.consultationMode === "offline" &&
+                                                !bookingData.selectedAddressId &&
+                                                !bookingData.patientInfo.address)
+                                        }
+                                        className="flex-1 bg-black hover:bg-gray-800 text-white py-3 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+                                    >
+                                        {loading ? (
+                                            <>
+                                                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                                                Booking...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Calendar className="h-4 w-4 mr-2" />
+                                                Confirm & Proceed to Payment
+                                            </>
+                                        )}
+                                    </Button>
+
+                                    {/* Success/Error Notifications */}
+                                    {showNotification && (
+                                        <div className="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg z-50">
+                                            <div className="flex items-center">
+                                                <Check className="h-4 w-4 mr-2" />
+                                                {notificationMessage}
+                                            </div>
+                                        </div>
                                     )}
-                                </Button>
+
+                                    {error && (
+                                        <div className="fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg z-50">
+                                            <div className="flex items-center">
+                                                <AlertCircle className="h-4 w-4 mr-2" />
+                                                {error}
+                                            </div>
+                                        </div>
+                                    )}
                             </div>
                         </div>
                     </div>
