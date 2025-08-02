@@ -2,8 +2,6 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import videoCallService from '../service/webrtc';
 
-
-
 // WebRTC Configuration
 const rtcConfiguration = {
   iceServers: [
@@ -28,13 +26,14 @@ export const VideoCallProvider = ({ children }) => {
   const [currentCall, setCurrentCall] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
-
-  // WebRTC refs
+  
+  const isInitiator = useRef(false);
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
   const remoteStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  const currentRoomRef = useRef(null); // Add room tracking
 
   // Initialize WebRTC peer connection
   const createPeerConnection = useCallback(() => {
@@ -46,9 +45,9 @@ export const VideoCallProvider = ({ children }) => {
 
     // Handle ICE candidates
     peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        console.log('🧊 Sending ICE candidate');
-        videoCallService.sendICECandidate(event.candidate);
+      if (event.candidate && currentRoomRef.current) {
+        console.log('🧊 Sending ICE candidate for room:', currentRoomRef.current);
+        videoCallService.sendICECandidate(event.candidate, currentRoomRef.current);
       }
     };
 
@@ -65,6 +64,10 @@ export const VideoCallProvider = ({ children }) => {
     peerConnection.onconnectionstatechange = () => {
       console.log('🔗 Connection state:', peerConnection.connectionState);
       setConnectionStatus(peerConnection.connectionState);
+      
+      if (peerConnection.connectionState === 'connected') {
+        console.log('✅ WebRTC connection established successfully!');
+      }
     };
 
     peerConnectionRef.current = peerConnection;
@@ -100,6 +103,8 @@ export const VideoCallProvider = ({ children }) => {
       peerConnectionRef.current = null;
     }
     remoteStreamRef.current = null;
+    currentRoomRef.current = null;
+    isInitiator.current = false;
   }, []);
 
   // Initialize video call service connection
@@ -132,6 +137,8 @@ export const VideoCallProvider = ({ children }) => {
 
     const handleCallInitiated = (data) => {
       console.log('📞 Call initiated:', data);
+      isInitiator.current = true; // Only the call initiator should be true
+      currentRoomRef.current = data.room_name;
       setCurrentCall({
         callId: data.call_id,
         roomName: data.room_name,
@@ -145,18 +152,26 @@ export const VideoCallProvider = ({ children }) => {
       setIsCalling(true);
       setIsReceiving(false);
       setIncomingCall(null);
+      currentRoomRef.current = data.room_name;
 
       try {
         const stream = await getUserMedia();
         const peerConnection = createPeerConnection();
-
+        
+        // Add local stream tracks to connection
         stream.getTracks().forEach(track => {
           peerConnection.addTrack(track, stream);
         });
 
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        videoCallService.sendOffer(offer);
+        // Only the initiator creates the offer
+        if (isInitiator.current) {
+          console.log('📤 Creating offer as initiator');
+          const offer = await peerConnection.createOffer();
+          await peerConnection.setLocalDescription(offer);
+          videoCallService.sendOffer(offer, data.room_name);
+        } else {
+          console.log('📥 Waiting for offer as receiver');
+        }
       } catch (error) {
         console.error('❌ Error setting up WebRTC connection:', error);
       }
@@ -182,18 +197,31 @@ export const VideoCallProvider = ({ children }) => {
 
     const handleWebRTCOffer = async (data) => {
       console.log('📤 Received WebRTC offer:', data);
+      
+      // Make sure we're not the initiator when receiving an offer
+      if (isInitiator.current) {
+        console.warn('⚠️ Received offer but we are the initiator - ignoring');
+        return;
+      }
+
       try {
         const stream = await getUserMedia();
         const peerConnection = createPeerConnection();
-
+        
+        // Add local stream tracks
         stream.getTracks().forEach(track => {
           peerConnection.addTrack(track, stream);
         });
 
-        await peerConnection.setRemoteDescription(data.offer);
+        // Set remote description (offer)
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+        
+        // Create and send answer
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
-        videoCallService.sendAnswer(answer);
+        
+        videoCallService.sendAnswer(answer, currentRoomRef.current);
+        console.log('📥 Answer sent successfully');
       } catch (error) {
         console.error('❌ Error handling WebRTC offer:', error);
       }
@@ -201,23 +229,46 @@ export const VideoCallProvider = ({ children }) => {
 
     const handleWebRTCAnswer = async (data) => {
       console.log('📥 Received WebRTC answer:', data);
-      if (peerConnectionRef.current) {
-        try {
-          await peerConnectionRef.current.setRemoteDescription(data.answer);
-        } catch (error) {
-          console.error('❌ Error setting remote description:', error);
-        }
+      const peerConnection = peerConnectionRef.current;
+      
+      if (!peerConnection) {
+        console.warn('⚠️ No peer connection available.');
+        return;
+      }
+
+      // Check if we're in the correct state to receive an answer
+      if (peerConnection.signalingState !== "have-local-offer") {
+        console.warn('⚠️ Cannot set answer in state:', peerConnection.signalingState);
+        return;
+      }
+
+      // Only the initiator should process answers
+      if (!isInitiator.current) {
+        console.warn('⚠️ Received answer but we are not the initiator - ignoring');
+        return;
+      }
+
+      try {
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+        console.log('✅ Remote description (answer) set successfully');
+      } catch (error) {
+        console.error('❌ Error setting remote description (answer):', error);
       }
     };
 
     const handleICECandidate = async (data) => {
       console.log('🧊 Received ICE candidate:', data);
-      if (peerConnectionRef.current && peerConnectionRef.current.remoteDescription) {
+      const peerConnection = peerConnectionRef.current;
+      
+      if (peerConnection && peerConnection.remoteDescription) {
         try {
-          await peerConnectionRef.current.addIceCandidate(data.candidate);
+          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+          console.log('✅ ICE candidate added successfully');
         } catch (error) {
           console.error('❌ Error adding ICE candidate:', error);
         }
+      } else {
+        console.warn('⚠️ Cannot add ICE candidate - no remote description set');
       }
     };
 
@@ -263,9 +314,16 @@ export const VideoCallProvider = ({ children }) => {
   const acceptCall = useCallback(async (callId, roomName) => {
     try {
       console.log('✅ Accepting call:', callId);
+      isInitiator.current = false; // Receiver is not the initiator
+      currentRoomRef.current = roomName;
+      
       const success = videoCallService.acceptCall(callId, roomName);
       if (success) {
-        setCurrentCall({ callId, roomName, status: 'accepted' });
+        setCurrentCall({
+          callId,
+          roomName,
+          status: 'accepted'
+        });
         setIncomingCall(null);
         setIsReceiving(false);
         setIsCalling(true);
@@ -308,13 +366,11 @@ export const VideoCallProvider = ({ children }) => {
     currentCall,
     incomingCall,
     connectionStatus,
-    
     // Refs
     localVideoRef,
     remoteVideoRef,
     localStream: localStreamRef.current,
     remoteStream: remoteStreamRef.current,
-    
     // Actions
     initiateCall,
     acceptCall,

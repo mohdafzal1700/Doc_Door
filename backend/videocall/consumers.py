@@ -17,7 +17,6 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             self.user_group_name,
             self.channel_name
         )
-        
         await self.accept()
         print(f"✅ User {self.user_id} connected")
 
@@ -33,10 +32,9 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data)
             message_type = data.get('type')
-            
             print(f"📨 Received message: {message_type} from user {self.user_id}")
             print(f"📨 Message data: {data}")
-            
+
             if message_type == 'call_initiate':
                 await self.initiate_call(data)
             elif message_type == 'call_accept':
@@ -53,7 +51,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 await self.handle_ice_candidate(data)
             else:
                 print(f"❓ Unknown message type: {message_type}")
-                
+
         except json.JSONDecodeError as e:
             print(f"❌ Invalid JSON received: {e}")
         except Exception as e:
@@ -64,9 +62,8 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
     async def initiate_call(self, data):
         caller_id = self.user_id
         callee_id = data.get('callee_id')
-        
         print(f"🎯 CALL INITIATION: {caller_id} calling {callee_id}")
-        
+
         if not callee_id:
             print("❌ No callee_id provided")
             await self.send(text_data=json.dumps({
@@ -74,7 +71,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 'message': 'No recipient specified'
             }))
             return
-            
+
         try:
             # Check if callee exists
             callee_exists = await self.check_user_exists(callee_id)
@@ -85,7 +82,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                     'message': 'User not found'
                 }))
                 return
-            
+
             # Create call record
             call_record = await self.create_call_record(caller_id, callee_id)
             print(f"✅ Call record created: {call_record.id}")
@@ -95,14 +92,13 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             # Add caller to room
             await self.channel_layer.group_add(room_name, self.channel_name)
             print(f"✅ Caller {caller_id} added to room {room_name}")
-            
+
             # Get caller name
             caller_name = await self.get_user_name(caller_id)
-            
+
             # Send to callee
             callee_group = f'user_{callee_id}'
             print(f"📞 Sending incoming call to group: {callee_group}")
-            
             await self.channel_layer.group_send(
                 callee_group,
                 {
@@ -113,7 +109,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                     'room_name': room_name
                 }
             )
-            
+
             # Confirm to caller
             await self.send(text_data=json.dumps({
                 'type': 'call_initiated',
@@ -121,14 +117,12 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 'room_name': room_name,
                 'status': 'calling'
             }))
-            
             print(f"📞 Call initiated successfully: {caller_id} → {callee_id}")
-            
+
         except Exception as e:
             print(f"❌ Call initiation failed: {e}")
             import traceback
             traceback.print_exc()
-            
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': 'Failed to initiate call'
@@ -137,29 +131,28 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
     async def accept_call(self, data):
         call_id = data.get('call_id')
         room_name = data.get('room_name')
-        
         print(f"✅ ACCEPTING CALL: {call_id} in room {room_name} by user {self.user_id}")
-        
+
         try:
             await self.update_call_status(call_id, 'answered')
             print(f"✅ Call status updated to answered")
-            
+
             # Add callee to room
             await self.channel_layer.group_add(room_name, self.channel_name)
             print(f"✅ Callee {self.user_id} added to room {room_name}")
-            
-            # Notify room members
+
+            # ✅ FIXED: Include room_name in the call_accepted event
             await self.channel_layer.group_send(
                 room_name,
                 {
                     'type': 'call_accepted',
                     'call_id': call_id,
+                    'room_name': room_name,  # ✅ Added room_name
                     'accepter_id': self.user_id
                 }
             )
-            
             print(f"✅ Call accepted notification sent to room {room_name}")
-            
+
         except Exception as e:
             print(f"❌ Call acceptance failed: {e}")
             import traceback
@@ -172,15 +165,16 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
         try:
             await self.update_call_status(call_id, 'rejected')
             
+            # ✅ FIXED: Include room_name in call_rejected event
             await self.channel_layer.group_send(
                 room_name,
                 {
                     'type': 'call_rejected',
                     'call_id': call_id,
+                    'room_name': room_name,  # ✅ Added room_name
                     'rejector_id': self.user_id
                 }
             )
-            
             await self.cleanup_call(call_id)
             print(f"❌ Call rejected: {call_id}")
             
@@ -194,15 +188,16 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
         try:
             await self.end_call_record(call_id)
             
+            # ✅ FIXED: Include room_name in call_ended event
             await self.channel_layer.group_send(
                 room_name,
                 {
                     'type': 'call_ended',
                     'call_id': call_id,
+                    'room_name': room_name,  # ✅ Added room_name
                     'ended_by': self.user_id
                 }
             )
-            
             await self.cleanup_call(call_id)
             print(f"🔚 Call ended: {call_id}")
             
@@ -212,58 +207,56 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
     async def handle_offer(self, data):
         room_name = data.get('room_name')
         offer = data.get('offer')
-        
         print(f"📤 OFFER: Broadcasting from {self.user_id} to room {room_name}")
-        
+
         try:
             await self.channel_layer.group_send(
                 room_name,
                 {
                     'type': 'webrtc_offer',
                     'offer': offer,
+                    'room_name': room_name,  # ✅ Include room_name for consistency
                     'sender_id': self.user_id
                 }
             )
             print(f"✅ Offer broadcast successful")
-            
         except Exception as e:
             print(f"❌ Offer handling failed: {e}")
 
     async def handle_answer(self, data):
         room_name = data.get('room_name')
         answer = data.get('answer')
-        
         print(f"📥 ANSWER: Broadcasting from {self.user_id} to room {room_name}")
-        
+
         try:
             await self.channel_layer.group_send(
                 room_name,
                 {
                     'type': 'webrtc_answer',
                     'answer': answer,
+                    'room_name': room_name,  # ✅ Include room_name for consistency
                     'sender_id': self.user_id
                 }
             )
             print(f"✅ Answer broadcast successful")
-            
         except Exception as e:
             print(f"❌ Answer handling failed: {e}")
 
     async def handle_ice_candidate(self, data):
         room_name = data.get('room_name')
         candidate = data.get('candidate')
-        
+
         try:
             await self.channel_layer.group_send(
                 room_name,
                 {
                     'type': 'webrtc_ice_candidate',
                     'candidate': candidate,
+                    'room_name': room_name,  # ✅ Include room_name for consistency
                     'sender_id': self.user_id
                 }
             )
             print(f"🧊 ICE candidate sent to room: {room_name}")
-            
         except Exception as e:
             print(f"❌ ICE candidate handling failed: {e}")
 
@@ -287,6 +280,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({
                 'type': 'call_accepted',
                 'call_id': event['call_id'],
+                'room_name': event['room_name'],  # ✅ Include room_name
                 'accepter_id': event['accepter_id']
             }))
         except Exception as e:
@@ -297,6 +291,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({
                 'type': 'call_rejected',
                 'call_id': event['call_id'],
+                'room_name': event['room_name'],  # ✅ Include room_name
                 'rejector_id': event['rejector_id']
             }))
         except Exception as e:
@@ -307,6 +302,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json.dumps({
                 'type': 'call_ended',
                 'call_id': event['call_id'],
+                'room_name': event['room_name'],  # ✅ Include room_name
                 'ended_by': event['ended_by']
             }))
         except Exception as e:
@@ -319,6 +315,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 await self.send(text_data=json.dumps({
                     'type': 'webrtc_offer',
                     'offer': event['offer'],
+                    'room_name': event.get('room_name'),  # ✅ Include room_name
                     'sender_id': event['sender_id']
                 }))
                 print(f"✅ Offer forwarded to {self.user_id}")
@@ -332,6 +329,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 await self.send(text_data=json.dumps({
                     'type': 'webrtc_answer',
                     'answer': event['answer'],
+                    'room_name': event.get('room_name'),  # ✅ Include room_name
                     'sender_id': event['sender_id']
                 }))
                 print(f"✅ Answer forwarded to {self.user_id}")
@@ -344,30 +342,27 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 await self.send(text_data=json.dumps({
                     'type': 'ice_candidate',
                     'candidate': event['candidate'],
+                    'room_name': event.get('room_name'),  # ✅ Include room_name
                     'sender_id': event['sender_id']
                 }))
             except Exception as e:
                 print(f"❌ Error forwarding ICE candidate: {e}")
 
-    # Database operations with proper decorators
+    # Database operations remain the same...
     @database_sync_to_async
     def create_call_record(self, caller_id, callee_id):
         """Create a new call record in the database"""
         try:
             print(f"🔄 Creating call record: {caller_id} -> {callee_id}")
-            
             caller = User.objects.get(id=caller_id)
             callee = User.objects.get(id=callee_id)
-            
             call_record = CallRecord.objects.create(
                 caller=caller,
                 callee=callee,
                 status='initiated'
             )
-            
             print(f"✅ Call record created with ID: {call_record.id}")
             return call_record
-            
         except User.DoesNotExist as e:
             print(f"❌ User not found: {e}")
             raise

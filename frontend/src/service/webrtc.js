@@ -333,31 +333,52 @@ class VideoCallService {
 
   // WebRTC signaling methods
   sendOffer(offer, roomName) {
-    console.log(`📤 Sending WebRTC offer to room: ${roomName}`);
-    return this.send({
-      type: 'offer',
-      offer: offer,
-      room_name: roomName || this.roomName
-    });
+  if (!roomName) {
+    console.error('❌ Room name is required to send offer');
+    return;
   }
+  
+  const message = {
+    type: 'offer',
+    offer: offer,
+    room_name: roomName
+  };
+  
+  console.log('📤 Sending WebRTC offer to room:', roomName);
+  this.send(message);
+}
 
   sendAnswer(answer, roomName) {
-    console.log(`📤 Sending WebRTC answer to room: ${roomName}`);
-    return this.send({
-      type: 'answer',
-      answer: answer,
-      room_name: roomName || this.roomName
-    });
+  if (!roomName) {
+    console.error('❌ Room name is required to send answer');
+    return;
   }
+  
+  const message = {
+    type: 'answer',
+    answer: answer,
+    room_name: roomName
+  };
+  
+  console.log('📤 Sending WebRTC answer to room:', roomName);
+  this.send(message);
+}
 
   sendICECandidate(candidate, roomName) {
-    console.log(`🧊 Sending ICE candidate to room: ${roomName}`);
-    return this.send({
-      type: 'ice_candidate',
-      candidate: candidate,
-      room_name: roomName || this.roomName
-    });
+  if (!roomName) {
+    console.error('❌ Room name is required to send ICE candidate');
+    return;
   }
+  
+  const message = {
+    type: 'ice_candidate',
+    candidate: candidate,
+    room_name: roomName
+  };
+  
+  console.log('🧊 Sending ICE candidate to room:', roomName);
+  this.send(message);
+}
 
   // Utility methods
   getCurrentCall() {
