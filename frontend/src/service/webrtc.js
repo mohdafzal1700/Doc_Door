@@ -208,10 +208,12 @@ class VideoCallService {
         break;
 
       case 'offer':
+      case 'webrtc_offer':
         this.triggerHandler('webrtc_offer', data);
         break;
 
       case 'answer':
+      case 'webrtc_answer':
         this.triggerHandler('webrtc_answer', data);
         break;
 

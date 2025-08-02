@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Star, MapPin, MessageCircle, Calendar, GraduationCap, Phone, Mail, Clock, Award, User, Stethoscope, DollarSign, Globe } from "lucide-react";
 import { getPatientDoctor, handleApiError } from '../endpoints/APIs'; 
 import Header from '../components/home/Header';
+import CallButton from '../videocall/callbutton';
 
 export default function PatientDoctor() {
     const { id } = useParams();
@@ -245,15 +246,12 @@ export default function PatientDoctor() {
                                     )}
                                 </div>
 
-                                 <button
-      onClick={handleVideoCall}
-      className="flex items-center justify-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors shadow-sm"
-      title={`Start video call with ${doctor.full_name}`}
-    >
-      <Phone className="w-4 h-4" />
-      <span className="hidden sm:inline">Video Call</span>
-      <span className="sm:hidden">Call</span>
-    </button>
+                                 <CallButton 
+                                        receiverId={id} 
+                                        doctorName={doctor.full_name || `Dr. ${doctor.doctor_first_name} ${doctor.doctor_last_name}`} 
+                                        />
+
+      
                                 <div className="flex items-center gap-2">
                                     <div className="flex">
                                         {renderStars(4.5)}
