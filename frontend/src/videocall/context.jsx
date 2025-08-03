@@ -26,7 +26,8 @@ export const VideoCallProvider = ({ children }) => {
   const [currentCall, setCurrentCall] = useState(null);
   const [incomingCall, setIncomingCall] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  
+  const pendingIceCandidatesRef = useRef([]);
+  const remoteDescriptionSetRef = useRef(false);
   const isInitiator = useRef(false);
   const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -35,8 +36,30 @@ export const VideoCallProvider = ({ children }) => {
   const remoteVideoRef = useRef(null);
   const currentRoomRef = useRef(null); // Add room tracking
 
+
+  // ADD THIS ENTIRE FUNCTION:
+const processQueuedIceCandidates = useCallback(async () => {
+  const peerConnection = peerConnectionRef.current;
+  if (!peerConnection || pendingIceCandidatesRef.current.length === 0) return;
+
+  console.log(`🧊 Processing ${pendingIceCandidatesRef.current.length} queued ICE candidates`);
+  
+  for (const candidateData of pendingIceCandidatesRef.current) {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+      console.log('✅ Queued ICE candidate added successfully');
+    } catch (error) {
+      console.error('❌ Error adding queued ICE candidate:', error);
+    }
+  }
+  
+  pendingIceCandidatesRef.current = [];
+}, []);
+
   // Initialize WebRTC peer connection
   const createPeerConnection = useCallback(() => {
+    pendingIceCandidatesRef.current = [];
+    remoteDescriptionSetRef.current = false;
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
     }
@@ -105,6 +128,8 @@ export const VideoCallProvider = ({ children }) => {
     remoteStreamRef.current = null;
     currentRoomRef.current = null;
     isInitiator.current = false;
+    pendingIceCandidatesRef.current = [];
+remoteDescriptionSetRef.current = false;
   }, []);
 
   // Initialize video call service connection

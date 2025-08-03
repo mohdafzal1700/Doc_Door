@@ -252,7 +252,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 {
                     'type': 'webrtc_ice_candidate',
                     'candidate': candidate,
-                    'room_name': room_name,  # ✅ Include room_name for consistency
+                    'room_name': room_name,  
                     'sender_id': self.user_id
                 }
             )

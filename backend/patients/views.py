@@ -217,23 +217,37 @@ class CustomTokenRefreshView(TokenRefreshView):
 
             token = response.data
             access_token = token["access"]
+            refresh_token = token.get("refresh")
             
             # logger.info(f"New access token generated: {access_token[:50]}...")
             
             res = Response(status=status.HTTP_200_OK)
             res.data = {"success": True, "message": "Access token refreshed"}
 
-            res.set_cookie(
-                key="access_token",
-                value=access_token,
-                httponly=True,
-                secure=False,  # Set to True in production
-                samesite="Lax",
-                path='/',
-                max_age=3600
-            )
+            if access_token:
+                res.set_cookie(
+                    key="access_token",
+                    value=access_token,
+                    httponly=True,
+                    secure=False,  # Change to True in production with HTTPS
+                    samesite="Lax",
+                    path="/",
+                    max_age=60 * 60  # 1 hour
+                )
 
-            logger.info(" Access token cookie updated")
+            #  Set refresh token cookie 
+            if refresh_token:
+                res.set_cookie(
+                    key="refresh_token",
+                    value=refresh_token,
+                    httponly=True,
+                    secure=False,
+                    samesite="Lax",
+                    path="/",
+                    max_age=7 * 24 * 60 * 60  # 7 days
+                )
+                logger.info("🔁 Refresh token cookie updated")
+
             return res
             
         except Exception as e:

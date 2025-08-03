@@ -1307,6 +1307,7 @@ class BookingDoctorDetailSerializer(serializers.ModelSerializer):
             logger.error(f"Error in get_services: {e}")
             return []
         
+        
 class ScheduleDetailSerializer(serializers.ModelSerializer):
     """Schedule details with individual time slots"""
     
@@ -1415,34 +1416,6 @@ class PaymentSerializer(serializers.ModelSerializer):
         
           
 
-
-
-
-
-# class DoctorLocationSerializer(serializers.ModelSerializer):
-#     """Serializer for doctor location data"""
-    
-#     doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
-#     doctor_id = serializers.IntegerField(source='doctor.id', read_only=True)
-#     distance = serializers.FloatField(read_only=True)
-    
-#     class Meta:
-#         model = DoctorLocation
-#         fields = [
-#             'id', 'name', 'latitude', 'longitude', 'loc_name', 'is_active',
-#             'doctor_name', 'doctor_id', 'distance', 'created_at'
-#         ]
-#         read_only_fields = ['id', 'created_at']
-    
-#     def to_representation(self, instance):
-#         """Custom representation to format distance"""
-#         data = super().to_representation(instance)
-        
-#         # Format distance to 2 decimal places if it exists
-#         if 'distance' in data and data['distance'] is not None:
-#             data['distance'] = round(float(data['distance']), 2)
-        
-#         return data
 
 class DoctorLocationSerializer(serializers.ModelSerializer):
     """Serializer for doctor locations with distance"""
