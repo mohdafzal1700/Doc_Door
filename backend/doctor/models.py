@@ -798,7 +798,7 @@ class Appointment(models.Model):
     doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE, related_name='appointments')
     schedule = models.ForeignKey('Schedules', on_delete=models.CASCADE, related_name='appointments')
     service = models.ForeignKey('Service', on_delete=models.SET_NULL, null=True, blank=True)
-    
+    duration = models.DurationField(default=timedelta(minutes=15))
     appointment_date = models.DateField()  
     slot_time = models.TimeField()  
     mode = models.CharField(max_length=20, choices=[('online', 'Online'), ('offline', 'Offline')])

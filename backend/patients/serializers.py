@@ -684,7 +684,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
     # Override the slot_time field to handle string inputs
     slot_time = serializers.TimeField(format='%H:%M')
     
-
+    end_time = serializers.SerializerMethodField()
     doctor = serializers.CharField(write_only=True)
 
     class Meta:
@@ -693,7 +693,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
             'id', 'patient', 'doctor', 'service', 'schedule',
             'appointment_date', 'slot_time', 'mode', 'address',
             'status', 'total_fee', 'is_paid', 'notes',
-            'created_at', 'updated_at', 'medical_record','service_id',
+            'created_at', 'updated_at', 'medical_record','service_id', 'duration',
             # Computed fields
             'patient_name', 'doctor_name', 'service_name','doctor_id',
             'formatted_date_time', 'status_display',
@@ -701,6 +701,12 @@ class AppointmentSerializer(serializers.ModelSerializer):
             'patient_phone', 'patient_profile_image',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
+        
+        
+    def get_end_time(self, obj):
+        start = datetime.combine(obj.appointment_date, obj.slot_time)
+        end = start + obj.duration
+        return end.strftime('%I:%M %p') 
 
     def get_patient_name(self, obj):
         user = obj.patient.user

@@ -155,12 +155,17 @@ export default function AppointmentBooking({ }) {
                 
                 const schedules = response.data.schedules || response.data || [];
                 const allSlots = [];
-                
                 schedules.forEach((schedule) => {
-                    if (schedule.time_slots && Array.isArray(schedule.time_slots)) {
-                        allSlots.push(...schedule.time_slots);
-                    }
-                });
+                const duration = schedule.slot_duration;  
+                if (Array.isArray(schedule.time_slots)) {
+                    schedule.time_slots.forEach((slot) => {
+                        allSlots.push({
+                            ...slot,
+                            duration: duration  
+                        });
+                    });
+                }
+            });
                 
                 setAvailableSlots(allSlots);
             } catch (error) {
@@ -232,6 +237,7 @@ export default function AppointmentBooking({ }) {
                 slot_time: bookingData.selectedSlot?.startTime || bookingData.selectedSlot?.start_time,
                 mode: bookingData.consultationMode,
                 notes: bookingData.patientInfo.notes || "",
+                duration: bookingData.selectedSlot?.duration || null, 
                 
             }
             console.log('Doctor ID from params:', doctorId);
