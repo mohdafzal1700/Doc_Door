@@ -717,3 +717,165 @@ class AdminAppointmentDetailView(APIView):
                 'success': False,
                 'message': 'Failed to retrieve appointment'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
+from django.db.models import Q, Count, Avg
+from doctor.models import DoctorReview
+from patients.serializers import  DoctorReviewSerializer,AdminReviewModerationSerializer
+
+
+class AdminReviewListView(APIView):
+    """Admin view to list all reviews with filtering"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        # Verify admin/staff access
+        if not request.user.is_staff:
+            return Response({
+                'success': False,
+                'message': 'Admin access required'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            queryset = DoctorReview.objects.select_related(
+                'patient__user', 'doctor__user', 'appointment', 'reviewed_by'
+            ).order_by('-created_at')
+            
+            # Filtering
+            status_filter = request.query_params.get('status', 'pending')  # Default to pending
+            doctor_filter = request.query_params.get('doctor')
+            patient_filter = request.query_params.get('patient')
+            rating_filter = request.query_params.get('rating')
+            search = request.query_params.get('search')
+            
+            if status_filter:
+                queryset = queryset.filter(status=status_filter)
+            if doctor_filter:
+                queryset = queryset.filter(doctor_id=doctor_filter)
+            if patient_filter:
+                queryset = queryset.filter(patient_id=patient_filter)
+            if rating_filter:
+                queryset = queryset.filter(rating=rating_filter)
+            if search:
+                queryset = queryset.filter(
+                    Q(patient__user__first_name__icontains=search) |
+                    Q(patient__user__last_name__icontains=search) |
+                    Q(doctor__user__first_name__icontains=search) |
+                    Q(doctor__user__last_name__icontains=search) |
+                    Q(description__icontains=search)
+                )
+            
+            # Pagination
+            page = request.query_params.get('page', 1)
+            page_size = request.query_params.get('page_size', 20)
+            
+            try:
+                page = int(page)
+                page_size = int(page_size)
+                page_size = min(page_size, 100)
+            except ValueError:
+                page = 1
+                page_size = 20
+            
+            paginator = Paginator(queryset, page_size)
+            
+            try:
+                reviews_page = paginator.page(page)
+            except PageNotAnInteger:
+                reviews_page = paginator.page(1)
+            except EmptyPage:
+                reviews_page = paginator.page(paginator.num_pages)
+            
+            serializer = DoctorReviewSerializer(reviews_page, many=True)
+            
+            # Get summary statistics
+            total_reviews = DoctorReview.objects.count()
+            status_counts = DoctorReview.objects.values('status').annotate(count=Count('status'))
+            avg_rating = DoctorReview.objects.filter(status='approved').aggregate(
+                avg_rating=Avg('rating')
+            )['avg_rating'] or 0
+            
+            return Response({
+                'success': True,
+                'data': serializer.data,
+                'pagination': {
+                    'current_page': reviews_page.number,
+                    'total_pages': paginator.num_pages,
+                    'total_count': paginator.count,
+                    'has_next': reviews_page.has_next(),
+                    'has_previous': reviews_page.has_previous(),
+                },
+                'summary': {
+                    'total_reviews': total_reviews,
+                    'status_breakdown': list(status_counts),
+                    'average_rating': round(avg_rating, 2)
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error listing admin reviews: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to retrieve reviews'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class AdminReviewModerationView(APIView):
+    """Admin approve/reject review"""
+    permission_classes = [IsAuthenticated]
+    
+    def patch(self, request, review_id):
+        if not request.user.is_staff:
+            return Response({
+                'success': False,
+                'message': 'Admin access required'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            review = DoctorReview.objects.select_related(
+                'patient__user', 'doctor__user'
+            ).get(id=review_id)
+            
+            if review.status != 'pending':
+                return Response({
+                    'success': False,
+                    'message': 'Review has already been moderated'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            serializer = AdminReviewModerationSerializer(
+                review, 
+                data=request.data, 
+                partial=True
+            )
+            
+            if serializer.is_valid():
+                review = serializer.save(
+                    reviewed_by=request.user,
+                    reviewed_at=timezone.now()
+                )
+                
+                response_serializer = DoctorReviewSerializer(review)
+                action = 'approved' if review.status == 'approved' else 'rejected'
+                
+                return Response({
+                    'success': True,
+                    'message': f'Review {action} successfully',
+                    'data': response_serializer.data
+                }, status=status.HTTP_200_OK)
+            
+            return Response({
+                'success': False,
+                'message': 'Invalid data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except DoctorReview.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'Review not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error moderating review {review_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to moderate review'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

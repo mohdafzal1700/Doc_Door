@@ -2131,3 +2131,153 @@ class PaymentStatusView(APIView):
                 'success': False,
                 'message': 'Failed to get payment status'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+from doctor.models import DoctorReview
+from patients.serializers import PatientReviewCreateSerializer , DoctorReviewSerializer      
+
+class PatientReviewCreateView(APIView):
+    """Patient submits a new review"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        # Ensure user is a patient
+        if not hasattr(request.user, 'patient'):
+            return Response({
+                'success': False,
+                'message': 'Only patients can submit reviews'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            serializer = PatientReviewCreateSerializer(data=request.data, context={'request': request})
+            if serializer.is_valid():
+                review = serializer.save(
+                    patient=request.user.patient,
+                    status='pending'
+                )
+                
+                response_serializer = DoctorReviewSerializer(review)
+                return Response({
+                    'success': True,
+                    'message': 'Review submitted successfully and is pending approval',
+                    'data': response_serializer.data
+                }, status=status.HTTP_201_CREATED)
+            
+            return Response({
+                'success': False,
+                'message': 'Invalid data',
+                'errors': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            logger.error(f"Error creating review: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to submit review'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PatientReviewListView(APIView):
+    """List all reviews by the logged-in patient"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        if not hasattr(request.user, 'patient'):
+            return Response({
+                'success': False,
+                'message': 'Only patients can view reviews'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            queryset = DoctorReview.objects.filter(
+                patient=request.user.patient
+            ).select_related(
+                'doctor__user', 'appointment', 'reviewed_by'
+            ).order_by('-created_at')
+            
+            # Optional filtering
+            status_filter = request.query_params.get('status')
+            if status_filter:
+                queryset = queryset.filter(status=status_filter)
+            
+            # Pagination
+            page = request.query_params.get('page', 1)
+            page_size = request.query_params.get('page_size', 10)
+            
+            try:
+                page = int(page)
+                page_size = int(page_size)
+                page_size = min(page_size, 50)
+            except ValueError:
+                page = 1
+                page_size = 10
+            
+            paginator = Paginator(queryset, page_size)
+            
+            try:
+                reviews_page = paginator.page(page)
+            except PageNotAnInteger:
+                reviews_page = paginator.page(1)
+            except EmptyPage:
+                reviews_page = paginator.page(paginator.num_pages)
+            
+            serializer = DoctorReviewSerializer(reviews_page, many=True)
+            
+            return Response({
+                'success': True,
+                'data': serializer.data,
+                'pagination': {
+                    'current_page': reviews_page.number,
+                    'total_pages': paginator.num_pages,
+                    'total_count': paginator.count,
+                    'has_next': reviews_page.has_next(),
+                    'has_previous': reviews_page.has_previous(),
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error listing patient reviews: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to retrieve reviews'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class PatientReviewDeleteView(APIView):
+    """Delete a review (only if still pending)"""
+    permission_classes = [IsAuthenticated]
+    
+    def delete(self, request, review_id):
+        if not hasattr(request.user, 'patient'):
+            return Response({
+                'success': False,
+                'message': 'Only patients can delete reviews'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            review = DoctorReview.objects.get(
+                id=review_id,
+                patient=request.user.patient
+            )
+            
+            if review.status != 'pending':
+                return Response({
+                    'success': False,
+                    'message': 'You can only delete pending reviews'
+                }, status=status.HTTP_400_BAD_REQUEST)
+            
+            review.delete()
+            
+            return Response({
+                'success': True,
+                'message': 'Review deleted successfully'
+            }, status=status.HTTP_200_OK)
+            
+        except DoctorReview.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'Review not found'
+            }, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error deleting review {review_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to delete review'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

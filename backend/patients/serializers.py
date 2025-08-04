@@ -1697,3 +1697,71 @@ class PaymentVerificationSerializer(serializers.Serializer):
         except Exception as e:
             logger.error(f"Error verifying payment signature: {str(e)}")
             raise serializers.ValidationError("Payment verification failed.")
+        
+from doctor.models import DoctorReview
+
+class DoctorReviewSerializer(serializers.ModelSerializer):
+    patient_name = serializers.CharField(source='patient.user.get_full_name', read_only=True)
+    doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
+    appointment_date = serializers.DateTimeField(source='appointment.appointment_date', read_only=True)
+    reviewed_by_name = serializers.CharField(source='reviewed_by.get_full_name', read_only=True)
+    
+    class Meta:
+        model = DoctorReview
+        fields = [
+            'id', 'patient', 'doctor', 'appointment', 'rating', 'description', 
+            'status', 'created_at', 'updated_at', 'reviewed_at', 'admin_notes',
+            'patient_name', 'doctor_name', 'appointment_date', 'reviewed_by_name'
+        ]
+        read_only_fields = ['patient', 'status', 'reviewed_by', 'reviewed_at', 'admin_notes']
+
+class PatientReviewCreateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DoctorReview
+        fields = ['doctor', 'appointment', 'rating', 'description']
+    
+    def validate(self, data):
+        patient = self.context['request'].user.patient
+        doctor = data['doctor']
+        appointment = data.get('appointment')
+        
+        # Check if patient has had an appointment with this doctor
+        if appointment:
+            if appointment.patient != patient:
+                raise serializers.ValidationError("You can only review appointments that belong to you")
+            if appointment.doctor != doctor:
+                raise serializers.ValidationError("Appointment doctor doesn't match review doctor")
+            if appointment.status != 'completed':
+                raise serializers.ValidationError("You can only review completed appointments")
+        else:
+            # If no specific appointment, check if patient has any completed appointment with doctor
+            has_appointment = Appointment.objects.filter(
+                patient=patient,
+                doctor=doctor,
+                status='completed'
+            ).exists()
+            if not has_appointment:
+                raise serializers.ValidationError("You can only review doctors you've had appointments with")
+        
+        # Check for duplicate reviews
+        existing_review = DoctorReview.objects.filter(
+            patient=patient,
+            doctor=doctor,
+            appointment=appointment
+        ).first()
+        
+        if existing_review:
+            raise serializers.ValidationError("You have already reviewed this appointment/doctor")
+        
+        return data
+
+class AdminReviewModerationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DoctorReview
+        fields = ['status', 'admin_notes']
+    
+    def validate_status(self, value):
+        if value not in ['approved', 'rejected']:
+            raise serializers.ValidationError("Status must be 'approved' or 'rejected'")
+        return value
+

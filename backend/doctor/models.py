@@ -1095,3 +1095,67 @@ class DoctorEarning(models.Model):
     
     def __str__(self):
         return f"{self.doctor} - {self.type} - {self.amount}"
+
+
+from django.db import models
+from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
+from django.utils import timezone
+
+class DoctorReview(models.Model):
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('approved', 'Approved'),
+        ('rejected', 'Rejected'),
+    ]
+    
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='reviews')
+    doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE, related_name='reviews')
+    appointment = models.ForeignKey('Appointment', on_delete=models.SET_NULL, null=True, blank=True, related_name='review')
+    
+    rating = models.IntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(5)],
+        help_text="Rating from 1 to 5 stars"
+    )
+    description = models.TextField(help_text="Review description")
+    status = models.CharField(
+        max_length=10, 
+        choices=STATUS_CHOICES, 
+        default='pending',
+        help_text="Review moderation status"
+    )
+    
+    # Admin moderation fields
+    reviewed_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name='reviewed_doctor_reviews',
+        help_text="Admin who reviewed this"
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    admin_notes = models.TextField(blank=True, help_text="Internal admin notes")
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = ['patient', 'doctor', 'appointment']  # One review per appointment
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['doctor', 'status']),
+            models.Index(fields=['patient', 'status']),
+            models.Index(fields=['status', 'created_at']),
+        ]
+    
+    def __str__(self):
+        return f"{self.patient.user.get_full_name()} - {self.doctor.user.get_full_name()} ({self.rating}★)"
+    
+    def save(self, *args, **kwargs):
+        # Set reviewed_at when status changes from pending
+        if self.pk:
+            old_instance = DoctorReview.objects.get(pk=self.pk)
+            if old_instance.status == 'pending' and self.status != 'pending':
+                self.reviewed_at = timezone.now()
+        super().save(*args, **kwargs)
