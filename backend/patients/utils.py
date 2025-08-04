@@ -154,3 +154,101 @@ def test_email_configs():
             print(f"Configuration {i} failed: {e}")
     
     return None
+
+
+from django.db import transaction
+from django.utils import timezone
+from decimal import Decimal
+import logging
+from doctor.models import DoctorEarning
+
+logger = logging.getLogger(__name__)
+
+class DoctorEarningsManager:
+    """Utility class to manage doctor earnings (credits/debits)"""
+    
+    @staticmethod
+    @transaction.atomic
+    def add_credit(doctor, appointment, amount, remarks=None):
+        """
+        Add credit to doctor's earnings
+        
+        Args:
+            doctor: Doctor instance
+            appointment: Appointment instance
+            amount: Decimal amount to credit
+            remarks: Optional remarks for the transaction
+            
+        Returns:
+            DoctorEarning instance or None if failed
+        """
+        try:
+            # Check if credit already exists for this appointment
+            existing_credit = DoctorEarning.objects.filter(
+                doctor=doctor,
+                appointment=appointment,
+                type='credit'
+            ).first()
+            
+            if existing_credit:
+                logger.warning(f"Credit already exists for appointment {appointment.id}")
+                return existing_credit
+            
+            # Create credit entry
+            earning = DoctorEarning.objects.create(
+                doctor=doctor,
+                appointment=appointment,
+                amount=Decimal(str(amount)),
+                type='credit',
+                remarks=remarks or f"Payment received for appointment on {appointment.appointment_date}"
+            )
+            
+            logger.info(f"Credit added: {amount} to doctor {doctor.id} for appointment {appointment.id}")
+            return earning
+            
+        except Exception as e:
+            logger.error(f"Error adding credit to doctor {doctor.id}: {str(e)}")
+            return None
+    
+    @staticmethod
+    @transaction.atomic
+    def add_debit(doctor, appointment, amount, remarks=None):
+        """
+        Add debit to doctor's earnings
+        
+        Args:
+            doctor: Doctor instance
+            appointment: Appointment instance
+            amount: Decimal amount to debit
+            remarks: Optional remarks for the transaction
+            
+        Returns:
+            DoctorEarning instance or None if failed
+        """
+        try:
+            # Check if debit already exists for this appointment
+            existing_debit = DoctorEarning.objects.filter(
+                doctor=doctor,
+                appointment=appointment,
+                type='debit'
+            ).first()
+            
+            if existing_debit:
+                logger.warning(f"Debit already exists for appointment {appointment.id}")
+                return existing_debit
+            
+            # Create debit entry
+            earning = DoctorEarning.objects.create(
+                doctor=doctor,
+                appointment=appointment,
+                amount=Decimal(str(amount)),
+                type='debit',
+                remarks=remarks or f"Appointment cancelled on {timezone.now().date()}"
+            )
+            
+            logger.info(f"Debit added: {amount} from doctor {doctor.id} for appointment {appointment.id}")
+            return earning
+            
+        except Exception as e:
+            logger.error(f"Error adding debit to doctor {doctor.id}: {str(e)}")
+            return None

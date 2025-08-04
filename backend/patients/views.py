@@ -471,7 +471,7 @@ class UserProfileView(APIView):
     
     def get(self, request):
         try:
-            logger.info(" Request User:", request.user)
+            logger.info(f"Request User:, {request.user}")
             serializer = UserProfileSerializer(request.user)
             return Response({
                 'success': True,
@@ -1587,59 +1587,7 @@ class DoctorSchedulesView(APIView):
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class PaymentView(APIView):
-    """Payment processing for appointments"""
-    permission_classes = [IsAuthenticated]
 
-    def post(self, request, appointment_id):
-        try:
-            appointment = get_object_or_404(
-                Appointment,
-                id=appointment_id,
-                patient__user=request.user
-            )
-
-            # Get or create payment record
-            payment, created = Payment.objects.get_or_create(
-                appointment=appointment,
-                defaults={
-                    'amount': appointment.total_fee,
-                    'method': request.data.get('method', 'card'),
-                    'status': 'pending'
-                }
-            )
-
-            # Update payment details
-            payment.method = request.data.get('method', payment.method)
-            payment.status = request.data.get('status', 'success')
-            payment.remarks = request.data.get('remarks', '')
-
-            if payment.status == 'success':
-                payment.paid_at = timezone.now()
-                appointment.is_paid = True
-                appointment.status = 'confirmed'
-                appointment.save()
-
-            payment.save()
-
-            serializer = PaymentSerializer(payment)
-            return Response({
-                'message': 'Payment processed successfully',
-                'payment': serializer.data
-            }, status=status.HTTP_200_OK)
-
-        except Exception as e:
-            return Response({
-                'error': 'Payment processing failed',
-                'details': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-
-
-
-
-# Set up logger
-logger = logging.getLogger(__name__)
 
 class UpdatePatientLocationView(generics.CreateAPIView):
     """POST /patients/location/update/"""
@@ -2051,11 +1999,11 @@ class PaymentInitiationView(APIView):
                 'success': True,
                 'message': 'Payment initiated successfully',
                 'data': {
-                    'key': settings.RAZORPAY_KEY_ID,  # ✅ Add this line
+                    'key': settings.RAZORPAY_KEY_ID,  
                     'payment_id': payment.id,
                     'razorpay_order_id': order['id'],
-                    'order_id': order['id'],  # Alternative name for frontend
-                    'amount': int(payment.amount * 100),  # Amount in paise
+                    'order_id': order['id'],  
+                    'amount': int(payment.amount * 100),  
                     'currency': 'INR',
                     'appointment': {
                         'id': appointment.id,

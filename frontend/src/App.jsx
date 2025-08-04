@@ -44,6 +44,7 @@ import DocDashboard from "./doctor/pages/dashboard"
 
 import { VideoCallProvider } from "./videocall/context"
 import GlobalVideoCallWrapper from "./videocall/wrapper"
+import PaymentPage from "./pages/payment_conformation"
 
 
 function App() {
@@ -99,7 +100,7 @@ function App() {
         <Route path='/doctor/choosePlan' element={<ChoosePlanDashboard/>} />
         <Route path="/chat/:userId?" element={<ChatApp />} />
         <Route path='/doctor/dashboard' element={<DocDashboard/>}/>
-      
+        <Route path='/confirm-payment' element={<PaymentPage/>}/>
         
         
         

@@ -863,8 +863,8 @@ class Appointment(models.Model):
 
     def __str__(self):
         return f"Appointment: {self.patient.user.email} with {self.doctor.user.email} on {self.appointment_date} at {self.slot_time}"
-    
-    
+
+
 
 
 class Payment(models.Model):
@@ -890,7 +890,7 @@ class Payment(models.Model):
     
     razorpay_order_id = models.CharField(max_length=100, blank=True, null=True)
     razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
-    razorpay_signature = models.CharField(max_length=200, blank=True, null=True)
+    razorpay_signature = models.CharField(max_length=200, blank=True, null=True) 
     
 
     remarks = models.TextField(blank=True, null=True)
@@ -907,7 +907,7 @@ class Payment(models.Model):
             client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
             
             order_data = {
-                'amount': int(self.amount * 100),  # Amount in paise
+                'amount': int(self.amount * 100),  
                 'currency': 'INR',
                 'receipt': f'appointment_{self.appointment.id}',
                 'notes': {
@@ -1074,3 +1074,24 @@ class SubscriptionUpgrade(models.Model):
     
     def __str__(self):
         return f"Upgrade {self.old_plan.get_name_display()} -> {self.new_plan.get_name_display()}"
+    
+
+class DoctorEarning(models.Model):
+    EARNING_TYPE_CHOICES = [
+        ('credit', 'Credit'),
+        ('debit', 'Debit'),
+    ]
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE, related_name='earnings')
+    appointment = models.ForeignKey('Appointment', on_delete=models.CASCADE, related_name='earnings')
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    type = models.CharField(max_length=10, choices=EARNING_TYPE_CHOICES)
+    remarks = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-created_at']
+    
+    def __str__(self):
+        return f"{self.doctor} - {self.type} - {self.amount}"

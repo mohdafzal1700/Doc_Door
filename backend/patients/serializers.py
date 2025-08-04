@@ -698,7 +698,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
             'patient_name', 'doctor_name', 'service_name','doctor_id',
             'formatted_date_time', 'status_display',
             'can_cancel', 'can_reschedule','patient_age', 'patient_gender', 'patient_email', 
-            'patient_phone', 'patient_profile_image',
+            'patient_phone', 'patient_profile_image','end_time'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
         
@@ -1021,20 +1021,27 @@ class AppointmentSerializer(serializers.ModelSerializer):
         """Validate address ID for offline appointments"""
         if not value:
             return None
-        
+            
         if isinstance(value, str):
+            # Check if it's a direct address string (not a UUID)
             try:
-                # Check if it's a string address (direct address input)
-                if not value.isdigit():
-                    # This is a direct address string, not an ID
-                    return value
-                # It's an ID, get the Address object
-                address_id = int(value)
-                if not Address.objects.filter(id=address_id).exists():
-                    raise serializers.ValidationError(f"Address with ID {address_id} does not exist.")
-                return Address.objects.get(id=address_id)
+                # Try to parse as UUID first
+                address_uuid = uuid.UUID(value)
+                try:
+                    return Address.objects.get(id=address_uuid)
+                except Address.DoesNotExist:
+                    raise serializers.ValidationError(f"Address with ID {value} does not exist.")
             except ValueError:
-                raise serializers.ValidationError("Invalid address ID format.")
+                # If it's not a valid UUID, treat as direct address string
+                if not value.isdigit():
+                    return value
+                # If it's numeric, try as integer ID
+                try:
+                    address_id = int(value)
+                    return Address.objects.get(id=address_id)
+                except Address.DoesNotExist:
+                    raise serializers.ValidationError(f"Address with ID {address_id} does not exist.")
+        
         return value
 
     def validate_medical_record(self, value):
@@ -1105,18 +1112,25 @@ class AppointmentSerializer(serializers.ModelSerializer):
         
         # Handle address assignment
         if address_data:
-            if isinstance(address_data, str) and not address_data.isdigit():
-                # It's a direct address string, store it in notes or handle as needed
-                if appointment.notes:
-                    appointment.notes += f"\nAddress: {address_data}"
-                else:
-                    appointment.notes = f"Address: {address_data}"
-                appointment.save()
+            if isinstance(address_data, str):
+                # Check if it's a UUID string or direct address
+                try:
+                    uuid.UUID(address_data)                   
+                    try:
+                        address_obj = Address.objects.get(id=address_data)
+                        appointment.address = address_obj
+                    except Address.DoesNotExist:
+                        # Fallback: store as notes
+                        appointment.notes = f"Address: {address_data}" if not appointment.notes else f"{appointment.notes}\nAddress: {address_data}"
+                except ValueError:
+                    # It's a direct address string
+                    appointment.notes = f"Address: {address_data}" if not appointment.notes else f"{appointment.notes}\nAddress: {address_data}"
             else:
                 # It's an Address object
                 appointment.address = address_data
-                appointment.save()
-        
+            
+            appointment.save()
+    
         return appointment
 
     def update(self, instance, validated_data):
@@ -1130,24 +1144,39 @@ class AppointmentSerializer(serializers.ModelSerializer):
         
         # Handle address assignment
         if address_data:
-            if isinstance(address_data, str) and not address_data.isdigit():
-                # It's a direct address string
-                if instance.notes:
-                    # Remove old address from notes if present
-                    notes_lines = instance.notes.split('\n')
-                    notes_lines = [line for line in notes_lines if not line.startswith('Address:')]
-                    instance.notes = '\n'.join(notes_lines)
-                    instance.notes += f"\nAddress: {address_data}"
-                else:
-                    instance.notes = f"Address: {address_data}"
-                instance.address = None
+            if isinstance(address_data, str):
+                
+                try:
+                    uuid.UUID(address_data)  # Test if it's a valid UUID
+                    try:
+                        address_obj = Address.objects.get(id=address_data)
+                        instance.address = address_obj
+                    except Address.DoesNotExist:
+                        # Remove old address from notes if present
+                        if instance.notes:
+                            notes_lines = instance.notes.split('\n')
+                            notes_lines = [line for line in notes_lines if not line.startswith('Address:')]
+                            instance.notes = '\n'.join(notes_lines)
+                            instance.notes += f"\nAddress: {address_data}"
+                        else:
+                            instance.notes = f"Address: {address_data}"
+                        instance.address = None
+                except ValueError:
+                    # It's a direct address string
+                    if instance.notes:
+                        notes_lines = instance.notes.split('\n')
+                        notes_lines = [line for line in notes_lines if not line.startswith('Address:')]
+                        instance.notes = '\n'.join(notes_lines)
+                        instance.notes += f"\nAddress: {address_data}"
+                    else:
+                        instance.notes = f"Address: {address_data}"
+                    instance.address = None
             else:
                 # It's an Address object
                 instance.address = address_data
         
         instance.save()
         return instance
-    
 class BookingDoctorDetailSerializer(serializers.ModelSerializer):
     """Doctor details for booking page"""
     
