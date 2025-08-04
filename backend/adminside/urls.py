@@ -9,7 +9,9 @@ from .views import (
     DoctorApplicationDetailView,
     DoctorApprovalActionView,
     SubscriptionPlanListCreateView,
-    SubscriptionPlanDetailView
+    SubscriptionPlanDetailView,
+    AdminAppointmentDetailView,
+    AdminAppointmentListView
     
 )
 
@@ -28,4 +30,10 @@ urlpatterns = [
     path('admins/doctor-applications/<uuid:id>/action/', DoctorApprovalActionView.as_view(), name='doctor-approval-action'),
     path('admins/subscription-plans/',SubscriptionPlanListCreateView.as_view(), name='plan-list-create'),
     path('admins/subscription-plans/<int:pk>/',SubscriptionPlanDetailView.as_view(), name='plan-list-create'),
+    
+    path('admin/appointments/', AdminAppointmentListView.as_view(), name='admin_appointment_list'),
+    
+    
+    path('admin/appointments/<int:appointment_id>/', AdminAppointmentDetailView.as_view(), name='admin_appointment_detail'),
+    
 ]
