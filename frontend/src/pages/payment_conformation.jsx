@@ -142,7 +142,7 @@ const PaymentPage = () => {
                 
                 // Navigate to success page
                 setTimeout(() => {
-                    navigate('/patient/appointments', {
+                    navigate('/patient/myAppointments', {
                         state: {
                             appointmentId,
                             paymentSuccess: true,

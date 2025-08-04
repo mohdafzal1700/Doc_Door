@@ -6,7 +6,8 @@ import Button from "../components/ui/Button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import Header from '../components/home/Header';
 import toast from 'react-hot-toast';
-
+import { useNavigate } from 'react-router-dom';
+import CallButton from "../videocall/callbutton";
 
 const formatCurrency = (amount) => {
   if (amount === null || amount === undefined || amount === '') {
@@ -50,6 +51,7 @@ const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirm
 };
 
 export default function PatientAppointments() {
+  const navigate = useNavigate();
   const [appointments, setAppointments] = useState([]);
   const [selectedAppointment, setSelectedAppointment] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -82,7 +84,6 @@ export default function PatientAppointments() {
       setLoading(true);
       setError(null);
       const response = await getAppointments();
-      
       if (response?.data?.success) {
         setAppointments(response.data.data || []);
       } else {
@@ -115,28 +116,65 @@ export default function PatientAppointments() {
     try {
       setConfirmModal(prev => ({ ...prev, loading: true }));
       const response = await cancelAppointment(appointmentId);
-      
       if (response?.status >= 200 && response?.status < 300) {
-        setAppointments(prev => prev.map(apt => 
-          apt.id === appointmentId 
-            ? { ...apt, status: 'cancelled', status_display: 'Cancelled', can_cancel: false, can_reschedule: false }
-            : apt
-        ));
-        
+        setAppointments(prev =>
+          prev.map(apt =>
+            apt.id === appointmentId
+              ? {
+                  ...apt,
+                  status: 'cancelled',
+                  status_display: 'Cancelled',
+                  can_cancel: false,
+                  can_reschedule: false
+                }
+              : apt
+          )
+        );
         if (selectedAppointment?.id === appointmentId) {
           setIsModalOpen(false);
           setSelectedAppointment(null);
         }
-        
-        setConfirmModal({ isOpen: false, appointmentId: null, loading: false });
+        setConfirmModal({
+          isOpen: false,
+          appointmentId: null,
+          loading: false
+        });
+        toast.success("Appointment cancelled successfully!");
       }
     } catch (err) {
       console.error('Error cancelling appointment:', err);
+      toast.error("Failed to cancel appointment");
     } finally {
       setConfirmModal(prev => ({ ...prev, loading: false }));
     }
   };
 
+  const handlePayment = (appointment) => {
+  const navigationData = {
+    appointmentId: appointment.id,
+    appointmentData: {
+      doctorName: appointment.doctor_name,
+      doctor_id:appointment.doctor_id,
+      clinicName: appointment.doctor_hospital || appointment.clinic_name,
+      appointmentDate: appointment.appointment_date,
+      slotTime: appointment.slot_time,
+      consultationMode: appointment.mode,
+      serviceName: appointment.service_name,
+      totalAmount: appointment.total_fee,
+      patientInfo: {
+        name: appointment.patient_name || "Patient", // Use dynamic data
+        email: appointment.patient_email || "email@example.com", // Use dynamic data
+        phone: appointment.patient_phone || "+1 (555) 000-0000" // Use dynamic data
+      }
+    }
+  };
+  
+  toast.success("Redirecting to payment...");
+  setTimeout(() => {
+    navigate('/confirm-payment', { state: navigationData });
+    console.log('Navigating with:', { navigationData });
+  }, 1000);
+};
   const handleViewAppointment = async (appointment) => {
     try {
       setIsModalOpen(true);
@@ -153,98 +191,148 @@ export default function PatientAppointments() {
   };
 
   const handleInitiateReschedule = (appointment) => {
-    const appointmentDate = new Date(appointment.appointment_date);
-    const currentDate = new Date();
-    const timeDiff = appointmentDate.getTime() - currentDate.getTime();
-    const hoursDiff = timeDiff / (1000 * 3600);
+  const appointmentDate = new Date(appointment.appointment_date);
+  const currentDate = new Date();
+  const timeDiff = appointmentDate.getTime() - currentDate.getTime();
+  const hoursDiff = timeDiff / (1000 * 3600);
 
-    if (hoursDiff < 24) {
-      alert("Cannot reschedule appointments less than 24 hours in advance");
-      return;
+  if (hoursDiff < 24) {
+    toast.error("Cannot reschedule appointments less than 24 hours in advance");
+    return;
+  }
+
+  // Extract doctor ID properly
+  let doctorId = null;
+  if (appointment.doctor_id) {
+    doctorId = appointment.doctor_id.toString();
+  } else if (appointment.doctor && typeof appointment.doctor === 'object' && appointment.doctor.id) {
+    doctorId = appointment.doctor.id.toString();
+  }
+
+  if (!doctorId) {
+    toast.error("Doctor information not available for rescheduling");
+    return;
+  }
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowStr = tomorrow.toISOString().split('T')[0];
+
+  setRescheduleData({
+    appointmentId: appointment.id,
+    doctorId: doctorId, // Use extracted doctor ID
+    newDate: tomorrowStr,
+    newSlot: null,
+    showRescheduleModal: true,
+    originalAppointment: appointment
+  });
+};
+
+
+useEffect(() => {
+  const fetchAvailableSlots = async () => {
+    if (rescheduleData.newDate && rescheduleData.appointmentId && rescheduleData.doctorId) {
+      try {
+        setSlotsLoading(true);
+        
+        // Updated API call with proper parameters
+        const response = await getDoctorSchedulesWithParams(
+          rescheduleData.doctorId,
+          rescheduleData.newDate,
+          rescheduleData.originalAppointment?.mode || 'online',
+          rescheduleData.originalAppointment?.service_id || null
+        );
+        
+        if (response?.data && response.data.success !== false) {
+          const schedules = response.data.schedules || response.data || [];
+          const allSlots = schedules.flatMap(schedule => schedule.time_slots || []) || [];
+          
+          // Filter out past slots for today
+          const today = new Date().toISOString().split('T')[0];
+          const currentTime = new Date();
+          const filteredSlots = allSlots.filter(slot => {
+            if (rescheduleData.newDate === today) {
+              const slotTime = new Date();
+              const timeStr = slot.start_time || slot.startTime || slot.time;
+              if (!timeStr) return false;
+              const [hours, minutes] = timeStr.split(':');
+              slotTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+              return slotTime > currentTime;
+            }
+            return true;
+          });
+          
+          setAvailableSlots(filteredSlots);
+        } else {
+          setAvailableSlots([]);
+          toast.error(response?.data?.message || "Failed to fetch available slots");
+        }
+      } catch (error) {
+        console.error('Error fetching available slots:', error);
+        setAvailableSlots([]);
+        toast.error(error?.response?.data?.message || "Failed to fetch available slots");
+      } finally {
+        setSlotsLoading(false);
+      }
+    } else {
+      setAvailableSlots([]);
     }
-
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const tomorrowStr = tomorrow.toISOString().split('T')[0];
-
-    setRescheduleData({
-      appointmentId: appointment.id,
-      doctorId: appointment.doctor_id || '1',
-      newDate: tomorrowStr,
-      newSlot: null,
-      showRescheduleModal: true,
-      originalAppointment: appointment
-    });
   };
 
-  useEffect(() => {
-    const fetchAvailableSlots = async () => {
-      if (rescheduleData.newDate && rescheduleData.appointmentId && rescheduleData.doctorId) {
-        try {
-          setSlotsLoading(true);
-          const response = await getDoctorSchedules(rescheduleData.doctorId, rescheduleData.newDate);
-          
-          if (response?.data && response.data.success !== false) {
-            const schedules = response.data.schedules || response.data || [];
-            const allSlots = schedules.flatMap(schedule => schedule.time_slots || []) || [];
-            setAvailableSlots(allSlots);
-          } else {
-            setAvailableSlots([]);
-          }
-        } catch (error) {
-          console.error('Error fetching available slots:', error);
-          setAvailableSlots([]);
-        } finally {
-          setSlotsLoading(false);
-        }
-      } else {
-        setAvailableSlots([]);
-      }
-    };
-
-    fetchAvailableSlots();
-  }, [rescheduleData.newDate, rescheduleData.appointmentId, rescheduleData.doctorId]);
+  fetchAvailableSlots();
+}, [rescheduleData.newDate, rescheduleData.appointmentId, rescheduleData.doctorId]);
 
   const handleConfirmReschedule = async () => {
-    if (!rescheduleData.newDate || !rescheduleData.newSlot) {
-      alert("Please select both date and time slot");
-      return;
-    }
+  if (!rescheduleData.newDate || !rescheduleData.newSlot) {
+    toast.error("Please select both date and time slot");
+    return;
+  }
 
-    try {
-      setActionLoading(`reschedule-${rescheduleData.appointmentId}`);
-      const slotTime = rescheduleData.newSlot.start_time;
-      
-      const updateData = {
-        appointment_date: rescheduleData.newDate,
-        slot_time: slotTime,
-        slot_id: rescheduleData.newSlot.id
-      };
+  try {
+    setActionLoading(`reschedule-${rescheduleData.appointmentId}`);
+    
+    const slotTime = rescheduleData.newSlot.start_time || rescheduleData.newSlot.startTime || rescheduleData.newSlot.time;
+    
+    const updateData = {
+      appointment_date: rescheduleData.newDate,
+      slot_time: slotTime,
+      slot_id: rescheduleData.newSlot.id
+    };
 
-      const response = await updateAppointment(rescheduleData.appointmentId, updateData);
+    const response = await updateAppointment(rescheduleData.appointmentId, updateData);
+    
+    if (response?.data?.success || (response?.status >= 200 && response?.status < 300)) {
+      setAppointments(prev => prev.map(apt => 
+        apt.id === rescheduleData.appointmentId 
+          ? { 
+              ...apt, 
+              appointment_date: rescheduleData.newDate, 
+              slot_time: slotTime,
+              formatted_date_time: formatDateTime(rescheduleData.newDate, slotTime)
+            } 
+          : apt
+      ));
       
-      if (response?.status >= 200 && response?.status < 300) {
-        setAppointments(prev => prev.map(apt => 
-          apt.id === rescheduleData.appointmentId
-            ? { ...apt, appointment_date: rescheduleData.newDate, slot_time: slotTime }
-            : apt
-        ));
-        
-        setRescheduleData({
-          appointmentId: null,
-          doctorId: null,
-          newDate: "",
-          newSlot: null,
-          showRescheduleModal: false,
-          originalAppointment: null
-        });
-      }
-    } catch (err) {
-      console.error('Error rescheduling appointment:', err);
-    } finally {
-      setActionLoading(null);
+      setRescheduleData({
+        appointmentId: null,
+        doctorId: null,
+        newDate: "",
+        newSlot: null,
+        showRescheduleModal: false,
+        originalAppointment: null
+      });
+      
+      toast.success(response?.data?.message || "Appointment rescheduled successfully!");
+    } else {
+      toast.error(response?.data?.message || "Failed to reschedule appointment");
     }
-  };
+  } catch (err) {
+    console.error('Error rescheduling appointment:', err);
+    toast.error(err?.response?.data?.message || "Failed to reschedule appointment");
+  } finally {
+    setActionLoading(null);
+  }
+};
 
   const handleCloseRescheduleModal = () => {
     setRescheduleData({
@@ -300,6 +388,7 @@ export default function PatientAppointments() {
         month: 'short',
         day: 'numeric'
       });
+
       const timeFormatted = timeObj.toLocaleTimeString('en-US', {
         hour: 'numeric',
         minute: '2-digit',
@@ -363,9 +452,19 @@ export default function PatientAppointments() {
                 <User className="w-8 h-8 text-blue-600" />
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">John Doe</h1>
-                <p className="text-gray-600">ID: #12345 • john.doe@email.com</p>
-                <p className="text-sm text-gray-500 mt-1">Patient since January 2023</p>
+                 <h1 className="text-2xl font-bold text-gray-900">
+                    {appointments.length > 0 ? appointments[0].patient_name : "Patient"}
+                  </h1>
+                  <p className="text-gray-600">
+                    {appointments.length > 0 && appointments[0].patient_email && (
+                      <>ID: #{appointments[0].id} • {appointments[0].patient_email}</>
+                    )}
+                  </p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    {appointments.length > 0 && appointments[0].patient_age && appointments[0].patient_gender && (
+                      `Age: ${appointments[0].patient_age} • ${appointments[0].patient_gender}`
+                    )}
+                  </p>
               </div>
             </div>
             <button
@@ -410,7 +509,10 @@ export default function PatientAppointments() {
             ) : (
               <div className="space-y-4">
                 {appointments.map((appointment) => (
-                  <div key={appointment.id} className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-all duration-200 bg-white">
+                  <div
+                    key={appointment.id}
+                    className="border border-gray-200 rounded-xl p-6 hover:shadow-md transition-all duration-200 bg-white"
+                  >
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center space-x-4">
                         <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
@@ -480,7 +582,17 @@ export default function PatientAppointments() {
                         <Eye className="w-4 h-4 mr-2" />
                         View Details
                       </button>
-                      
+
+                      {!appointment.is_paid && (
+                        <button
+                          onClick={() => handlePayment(appointment)}
+                          className="flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 border border-green-600 rounded-lg hover:bg-green-700 transition-colors"
+                        >
+                          <CreditCard className="w-4 h-4 mr-2" />
+                          Pay Now
+                        </button>
+                      )}
+
                       {appointment.can_reschedule && (
                         <button
                           onClick={() => handleInitiateReschedule(appointment)}
@@ -497,11 +609,24 @@ export default function PatientAppointments() {
                       )}
 
                       {appointment.mode === "online" && appointment.status === "confirmed" && (
-                        <button className="flex items-center px-4 py-2 text-sm font-medium text-green-700 bg-green-50 border border-green-200 rounded-lg hover:bg-green-100 transition-colors">
-                          <Video className="w-4 h-4 mr-2" />
-                          Join Call
-                        </button>
-                      )}
+                          <div className="flex items-center gap-2">
+                            <CallButton
+                              receiverId={appointment.doctor_id}
+                              appointmentId={appointment.id}
+                              appointmentData={{
+                                appointment_date: appointment.appointment_date,
+                                slot_time: appointment.slot_time,
+                                mode: appointment.mode,
+                                status: appointment.status
+                              }}
+                              doctorName={appointment.doctor_name}
+                              className="mr-2"
+                              size="md"
+                            />
+                            <span className="text-sm text-green-700">Join Video Call</span>
+                          </div>
+                        )}
+
 
                       {appointment.can_cancel && (
                         <button
@@ -569,11 +694,13 @@ export default function PatientAppointments() {
                 <input
                   type="date"
                   value={rescheduleData.newDate}
-                  onChange={(e) => setRescheduleData(prev => ({
-                    ...prev,
-                    newDate: e.target.value,
-                    newSlot: null
-                  }))}
+                  onChange={(e) =>
+                    setRescheduleData(prev => ({
+                      ...prev,
+                      newDate: e.target.value,
+                      newSlot: null
+                    }))
+                  }
                   min={new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split("T")[0]}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
@@ -602,10 +729,12 @@ export default function PatientAppointments() {
                                 ? "border-blue-500 bg-blue-50 text-blue-700"
                                 : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
                             }`}
-                            onClick={() => setRescheduleData(prev => ({
-                              ...prev,
-                              newSlot: slot
-                            }))}
+                            onClick={() =>
+                              setRescheduleData(prev => ({
+                                ...prev,
+                                newSlot: slot
+                              }))
+                            }
                           >
                             <div className="flex items-center justify-center gap-1">
                               <Clock className="w-4 h-4" />
@@ -767,12 +896,36 @@ export default function PatientAppointments() {
 
               {/* Action Buttons */}
               <div className="flex flex-wrap gap-3">
-                {selectedAppointment.status === "confirmed" && selectedAppointment.mode === "online" && (
-                  <button className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center">
-                    <Video className="w-4 h-4 mr-2" />
-                    Join Video Call
+                {!selectedAppointment.is_paid && (
+                  <button
+                    onClick={() => {
+                      handlePayment(selectedAppointment);
+                      handleCloseModal();
+                    }}
+                    className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center"
+                  >
+                    <CreditCard className="w-4 h-4 mr-2" />
+                    Pay Now
                   </button>
                 )}
+
+                {selectedAppointment.status === "confirmed" && selectedAppointment.mode === "online" && (
+  <div className="flex items-center gap-2">
+    <CallButton
+      receiverId={selectedAppointment.doctor_id}
+      appointmentId={selectedAppointment.id}
+      appointmentData={{
+        appointment_date: selectedAppointment.appointment_date,
+        slot_time: selectedAppointment.slot_time,
+        mode: selectedAppointment.mode,
+        status: selectedAppointment.status
+      }}
+      doctorName={selectedAppointment.doctor_name}
+      size="md"
+    />
+    <span className="text-white">Join Video Call</span>
+  </div>
+)}
 
                 <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 flex items-center">
                   <MessageCircle className="w-4 h-4 mr-2" />

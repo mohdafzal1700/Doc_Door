@@ -19,7 +19,7 @@ class CallRecord(models.Model):
     started_at = models.DateTimeField(default=timezone.now)
     ended_at = models.DateTimeField(null=True, blank=True)
     duration = models.DurationField(null=True, blank=True)
-    
+    appointment_id = models.IntegerField(null=True, blank=True) 
     class Meta:
         ordering = ['-started_at']
     

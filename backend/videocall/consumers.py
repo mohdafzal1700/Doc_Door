@@ -5,7 +5,7 @@ from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from .models import CallRecord, ActiveCall
 from django.utils import timezone
-
+from doctor.models import Appointment
 User = get_user_model()
 
 class VideoCallConsumer(AsyncWebsocketConsumer):
@@ -62,7 +62,8 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
     async def initiate_call(self, data):
         caller_id = self.user_id
         callee_id = data.get('callee_id')
-        print(f"🎯 CALL INITIATION: {caller_id} calling {callee_id}")
+        appointment_id = data.get('appointment_id')
+        print(f"🎯 CALL INITIATION: {caller_id} calling {callee_id} for appointment {appointment_id}")
 
         if not callee_id:
             print("❌ No callee_id provided")
@@ -72,7 +73,25 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             }))
             return
 
+        if not appointment_id:
+            print("❌ No appointment_id provided")
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Appointment ID required for call'
+            }))
+            return
+
         try:
+            # Validate appointment
+            appointment_validation = await self.validate_appointment_call(caller_id, callee_id, appointment_id)
+            if not appointment_validation['valid']:
+                print(f"❌ Appointment validation failed: {appointment_validation['reason']}")
+                await self.send(text_data=json.dumps({
+                    'type': 'error',
+                    'message': appointment_validation['reason']
+                }))
+                return
+
             # Check if callee exists
             callee_exists = await self.check_user_exists(callee_id)
             if not callee_exists:
@@ -83,12 +102,12 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 }))
                 return
 
-            # Create call record
-            call_record = await self.create_call_record(caller_id, callee_id)
+            # Create call record - FIXED: Pass appointment_id as third parameter
+            call_record = await self.create_call_record(caller_id, callee_id, appointment_id)
             print(f"✅ Call record created: {call_record.id}")
-            
+
             room_name = f"call_{call_record.id}_{uuid.uuid4().hex[:8]}"
-            
+
             # Add caller to room
             await self.channel_layer.group_add(room_name, self.channel_name)
             print(f"✅ Caller {caller_id} added to room {room_name}")
@@ -106,7 +125,8 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                     'caller_id': caller_id,
                     'caller_name': caller_name,
                     'call_id': call_record.id,
-                    'room_name': room_name
+                    'room_name': room_name,
+                    'appointment_id': appointment_id
                 }
             )
 
@@ -115,7 +135,8 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 'type': 'call_initiated',
                 'call_id': call_record.id,
                 'room_name': room_name,
-                'status': 'calling'
+                'status': 'calling',
+                'appointment_id': appointment_id
             }))
             print(f"📞 Call initiated successfully: {caller_id} → {callee_id}")
 
@@ -127,7 +148,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
                 'type': 'error',
                 'message': 'Failed to initiate call'
             }))
-
+            
     async def accept_call(self, data):
         call_id = data.get('call_id')
         room_name = data.get('room_name')
@@ -350,7 +371,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
 
     # Database operations remain the same...
     @database_sync_to_async
-    def create_call_record(self, caller_id, callee_id):
+    def create_call_record(self, caller_id, callee_id,appointment_id=None):
         """Create a new call record in the database"""
         try:
             print(f"🔄 Creating call record: {caller_id} -> {callee_id}")
@@ -359,7 +380,8 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             call_record = CallRecord.objects.create(
                 caller=caller,
                 callee=callee,
-                status='initiated'
+                status='initiated',
+                appointment_id=appointment_id,
             )
             print(f"✅ Call record created with ID: {call_record.id}")
             return call_record
@@ -440,3 +462,59 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             print(f"❌ Database error - get user name: {e}")
             return f"User {user_id}"
+        
+        
+    @database_sync_to_async
+    def validate_appointment_call(self, caller_id, callee_id, appointment_id):
+        """Simple validation for appointment call"""
+        try:
+        
+            from doctor.models import Appointment 
+            
+            # Get the appointment
+            appointment = Appointment.objects.get(id=appointment_id)
+            
+            # Basic checks
+            if appointment.status.lower() != 'confirmed':
+                return {'valid': False, 'reason': 'Appointment must be confirmed'}
+            
+            if appointment.mode != 'online':
+                return {'valid': False, 'reason': 'Only online appointments support video calls'}
+            
+            # Check if users are part of this appointment
+            
+            if not (str(appointment.patient_id) == str(caller_id) or 
+                    str(appointment.doctor_id) == str(caller_id) or
+                    str(appointment.patient_id) == str(callee_id) or 
+                    str(appointment.doctor_id) == str(callee_id)):
+                return {'valid': False, 'reason': 'You are not part of this appointment'}
+            
+            # Simple time check
+            from datetime import datetime, timedelta
+            from django.utils import timezone
+            
+            # Parse appointment time
+            appointment_date = appointment.appointment_date
+            time_parts = appointment.slot_time.split(':')
+            appointment_datetime = datetime.combine(
+                appointment_date,
+                datetime.min.time().replace(hour=int(time_parts[0]), minute=int(time_parts[1]))
+            )
+            appointment_datetime = timezone.make_aware(appointment_datetime)
+            
+            now = timezone.now()
+            
+            # Allow calls 10 minutes before to 30 minutes after
+            start_time = appointment_datetime - timedelta(minutes=10)
+            end_time = appointment_datetime + timedelta(minutes=30)
+            
+            if now < start_time:
+                return {'valid': False, 'reason': 'Call will be available 10 minutes before appointment'}
+            elif now > end_time:
+                return {'valid': False, 'reason': 'Call window has expired'}
+            
+            return {'valid': True, 'reason': 'Call is allowed'}
+            
+        except Exception as e:
+            print(f"Error validating appointment: {e}")
+            return {'valid': False, 'reason': 'Error validating appointment'}
