@@ -4,6 +4,7 @@ import { Star, MapPin, MessageCircle, Calendar, GraduationCap, Phone, Mail, Cloc
 import { getPatientDoctor, handleApiError } from '../endpoints/APIs'; 
 import Header from '../components/home/Header';
 import CallButton from '../videocall/callbutton';
+import Button from '../components/ui/Button';
 
 export default function PatientDoctor() {
     const { id } = useParams();
@@ -37,6 +38,17 @@ export default function PatientDoctor() {
     const handleBookAppointment = () => {
         navigate(`/patient/appointmentBooking/${id}`);
     };
+
+    const handleReview = () => {
+    navigate("/doctor-feedback", {
+    state: {
+        doctorId: doctor.id,
+        doctorName: doctor.full_name,
+        doctorDept: doctor.doctor_department,
+        
+        },
+    });
+};
 
     const handleVideoCall = () => {
     // Navigate to the video call page with the doctor's/user's ID
@@ -455,10 +467,11 @@ export default function PatientDoctor() {
                         <div className="space-y-4">
                             <div className="text-center py-8 text-gray-500">
                                 <MessageCircle className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                              
                                 <p>No reviews available yet.</p>
                                 <button 
                                     className="mt-4 text-blue-600 hover:text-blue-800 font-medium"
-                                    onClick={() => navigate(`/patient/write-review/${id}`)}
+                                    onClick={handleReview}
                                 >
                                     Be the first to review
                                 </button>

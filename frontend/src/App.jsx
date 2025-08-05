@@ -25,7 +25,7 @@ import PortalCertification from "./doctor/components/DocCertification"
 import ManageQualifications from "./doctor/components/DocEducation"
 import DoctorProfilePage from "./doctor/components/DocProfile"
 import { ToastProvider } from "./components/ui/Toast"
-
+import DoctorFeedbackForm from "./pages/reviewcreate"
 import PatientDoctor from "./pages/PatientDoctorpage"
 import MedicalRecordForm from "./pages/medical_records"
 import AppointmentBooking from "./pages/BookAppointmentPage "
@@ -101,6 +101,7 @@ function App() {
         <Route path="/chat/:userId?" element={<ChatApp />} />
         <Route path='/doctor/dashboard' element={<DocDashboard/>}/>
         <Route path='/confirm-payment' element={<PaymentPage/>}/>
+        <Route path='/doctor-feedback' element={<DoctorFeedbackForm/>}/>
         
         
         
@@ -109,7 +110,7 @@ function App() {
     
     </Router>
     </GlobalVideoCallWrapper>
-   </VideoCallProvider>
+  </VideoCallProvider>
     </ToastProvider>
   )
 }

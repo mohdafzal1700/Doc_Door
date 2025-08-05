@@ -177,10 +177,18 @@ export const getAppointmentLocationDetail = (appointmentId) =>
 export const initiatePayment = (appointmentId, data) => 
     axios.post(`appointments/${appointmentId}/payment/initiate/`, data);
 
-// Verify payment for an appointment (usually with Razorpay signature & payment_id)
+
 export const verifyPayment = (appointmentId, data) => 
     axios.post(`appointments/${appointmentId}/payment/verify/`, data);
 
-// Get current payment status (pending, success, failed)
+
 export const getPaymentStatus = (appointmentId) => 
     axios.get(`appointments/${appointmentId}/payment/status/`);
+
+
+export const createReview = (data) => axios.post('reviews/create/', data);
+
+export const getAllReviews = () => axios.get('reviews/');
+
+
+export const deleteReview = (reviewId) => axios.delete(`reviews/delete/${reviewId}/`);

@@ -64,3 +64,10 @@ export const updateSubscriptionPlan = (planId, updatedData) =>
 
 export const deleteSubscriptionPlan = (planId) => 
     adminAxios.delete(`subscription-plans/${planId}/`);
+
+export const getAllAdminAppointments = () =>
+  adminAxios.get('appointments/');
+
+// Get a single appointment by ID
+export const getAdminAppointmentById = (appointmentId) =>
+  adminAxios.get(`appointments/${appointmentId}/`);

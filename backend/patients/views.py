@@ -2140,18 +2140,56 @@ class PatientReviewCreateView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        # Ensure user is a patient
-        if not hasattr(request.user, 'patient'):
+        # Debug: Print user and check patient relationship
+        print(f"User: {request.user}")
+        print(f"User ID: {request.user.id}")
+        print(f"User Role: {request.user.role}")
+        print(f"Request Data: {request.data}")
+        
+        # Check if user is a patient by role
+        if request.user.role != 'patient':
             return Response({
                 'success': False,
-                'message': 'Only patients can submit reviews'
+                'message': 'Only patients can submit reviews.'
             }, status=status.HTTP_403_FORBIDDEN)
         
+        # Get patient object
+        patient = None
         try:
-            serializer = PatientReviewCreateSerializer(data=request.data, context={'request': request})
+            patient = Patient.objects.get(user=request.user)
+            print(f"Found patient: {patient}")
+        except Patient.DoesNotExist:
+            return Response({
+                'success': False,
+                'message': 'Patient profile not found. Please contact support.'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Validate that the doctor exists before creating serializer
+        doctor_user_id = request.data.get('doctor')
+        if doctor_user_id:
+            try:
+                from doctor.models import Doctor
+                doctor = Doctor.objects.get(user__id=doctor_user_id)
+                # Replace the user ID with doctor ID in request data
+                request.data['doctor'] = doctor.id
+            except Doctor.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'message': f'Doctor with ID {doctor_user_id} not found.',
+                    'errors': {'doctor': ['Doctor not found']}
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            serializer = PatientReviewCreateSerializer(
+                data=request.data,
+                context={'request': request, 'patient': patient}
+            )
+            
+            print(f"Serializer validation errors: {serializer.errors if not serializer.is_valid() else 'None'}")
+            
             if serializer.is_valid():
                 review = serializer.save(
-                    patient=request.user.patient,
+                    patient=patient,
                     status='pending'
                 )
                 
@@ -2170,11 +2208,14 @@ class PatientReviewCreateView(APIView):
             
         except Exception as e:
             logger.error(f"Error creating review: {str(e)}")
+            print(f"Exception in review creation: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return Response({
                 'success': False,
-                'message': 'Failed to submit review'
+                'message': f'Failed to submit review: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            
 class PatientReviewListView(APIView):
     """List all reviews by the logged-in patient"""
     permission_classes = [IsAuthenticated]

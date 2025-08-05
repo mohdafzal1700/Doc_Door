@@ -570,13 +570,11 @@ class SubscriptionPlanDetailView(generics.RetrieveUpdateDestroyAPIView):
         )
         
 class AdminAppointmentListView(APIView):
-    """
-    Admin appointment list view - GET method for listing all appointments
-    """
+    """ Admin appointment list view - GET method for listing all appointments """
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        """Get list of all appointments with filtering and pagination"""
+        """Get list of all appointments with filtering"""
         # Verify user is staff/admin
         if not request.user.is_staff:
             return Response({
@@ -587,9 +585,9 @@ class AdminAppointmentListView(APIView):
         try:
             # Base queryset with optimized queries
             queryset = Appointment.objects.select_related(
-                'patient__user',
-                'doctor__user',
-                'service',
+                'patient__user', 
+                'doctor__user', 
+                'service', 
                 'schedule'
             ).order_by('-created_at')
 
@@ -599,64 +597,32 @@ class AdminAppointmentListView(APIView):
             patient_filter = request.query_params.get('patient')
             date_from = request.query_params.get('date_from')
             date_to = request.query_params.get('date_to')
-            search = request.query_params.get('search')  # Search by patient/doctor name
 
             if status_filter:
                 queryset = queryset.filter(status=status_filter)
+            
             if doctor_filter:
                 queryset = queryset.filter(doctor_id=doctor_filter)
+            
             if patient_filter:
                 queryset = queryset.filter(patient_id=patient_filter)
+            
             if date_from:
                 queryset = queryset.filter(appointment_date__gte=date_from)
+            
             if date_to:
                 queryset = queryset.filter(appointment_date__lte=date_to)
-            if search:
-                queryset = queryset.filter(
-                    Q(patient__user__first_name__icontains=search) |
-                    Q(patient__user__last_name__icontains=search) |
-                    Q(doctor__user__first_name__icontains=search) |
-                    Q(doctor__user__last_name__icontains=search)
-                )
-
-            # Pagination
-            page = request.query_params.get('page', 1)
-            page_size = request.query_params.get('page_size', 20)
-            
-            try:
-                page = int(page)
-                page_size = int(page_size)
-                page_size = min(page_size, 100)  # Max 100 items per page
-            except ValueError:
-                page = 1
-                page_size = 20
-
-            paginator = Paginator(queryset, page_size)
-            
-            try:
-                appointments_page = paginator.page(page)
-            except PageNotAnInteger:
-                appointments_page = paginator.page(1)
-            except EmptyPage:
-                appointments_page = paginator.page(paginator.num_pages)
 
             # Serialize data
-            serializer = AppointmentSerializer(appointments_page, many=True)
-            
+            serializer = AppointmentSerializer(queryset, many=True)
+
             # Get summary statistics
             total_appointments = queryset.count()
             status_counts = queryset.values('status').annotate(count=Count('status'))
-            
+
             return Response({
                 'success': True,
                 'data': serializer.data,
-                'pagination': {
-                    'current_page': appointments_page.number,
-                    'total_pages': paginator.num_pages,
-                    'total_count': paginator.count,
-                    'has_next': appointments_page.has_next(),
-                    'has_previous': appointments_page.has_previous(),
-                },
                 'summary': {
                     'total_appointments': total_appointments,
                     'status_breakdown': list(status_counts)
@@ -669,7 +635,6 @@ class AdminAppointmentListView(APIView):
                 'success': False,
                 'message': 'Failed to retrieve appointments'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class AdminAppointmentDetailView(APIView):
     """
@@ -725,7 +690,7 @@ from patients.serializers import  DoctorReviewSerializer,AdminReviewModerationSe
 
 
 class AdminReviewListView(APIView):
-    """Admin view to list all reviews with filtering"""
+    """Admin view to list all reviews - simplified version"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
@@ -738,76 +703,31 @@ class AdminReviewListView(APIView):
         
         try:
             queryset = DoctorReview.objects.select_related(
-                'patient__user', 'doctor__user', 'appointment', 'reviewed_by'
+                'patient__user', 
+                'doctor__user', 
+                'appointment'
             ).order_by('-created_at')
             
-            # Filtering
-            status_filter = request.query_params.get('status', 'pending')  # Default to pending
-            doctor_filter = request.query_params.get('doctor')
-            patient_filter = request.query_params.get('patient')
-            rating_filter = request.query_params.get('rating')
-            search = request.query_params.get('search')
-            
-            if status_filter:
-                queryset = queryset.filter(status=status_filter)
-            if doctor_filter:
-                queryset = queryset.filter(doctor_id=doctor_filter)
-            if patient_filter:
-                queryset = queryset.filter(patient_id=patient_filter)
-            if rating_filter:
-                queryset = queryset.filter(rating=rating_filter)
-            if search:
-                queryset = queryset.filter(
-                    Q(patient__user__first_name__icontains=search) |
-                    Q(patient__user__last_name__icontains=search) |
-                    Q(doctor__user__first_name__icontains=search) |
-                    Q(doctor__user__last_name__icontains=search) |
-                    Q(description__icontains=search)
-                )
-            
-            # Pagination
-            page = request.query_params.get('page', 1)
-            page_size = request.query_params.get('page_size', 20)
-            
-            try:
-                page = int(page)
-                page_size = int(page_size)
-                page_size = min(page_size, 100)
-            except ValueError:
-                page = 1
-                page_size = 20
-            
-            paginator = Paginator(queryset, page_size)
-            
-            try:
-                reviews_page = paginator.page(page)
-            except PageNotAnInteger:
-                reviews_page = paginator.page(1)
-            except EmptyPage:
-                reviews_page = paginator.page(paginator.num_pages)
-            
-            serializer = DoctorReviewSerializer(reviews_page, many=True)
+            serializer = DoctorReviewSerializer(queryset, many=True)
             
             # Get summary statistics
-            total_reviews = DoctorReview.objects.count()
-            status_counts = DoctorReview.objects.values('status').annotate(count=Count('status'))
-            avg_rating = DoctorReview.objects.filter(status='approved').aggregate(
+            total_reviews = queryset.count()
+            pending_count = queryset.filter(status='pending').count()
+            approved_count = queryset.filter(status='approved').count()
+            rejected_count = queryset.filter(status='rejected').count()
+            
+            avg_rating = queryset.filter(status='approved').aggregate(
                 avg_rating=Avg('rating')
             )['avg_rating'] or 0
             
             return Response({
                 'success': True,
                 'data': serializer.data,
-                'pagination': {
-                    'current_page': reviews_page.number,
-                    'total_pages': paginator.num_pages,
-                    'total_count': paginator.count,
-                    'has_next': reviews_page.has_next(),
-                    'has_previous': reviews_page.has_previous(),
-                },
                 'summary': {
                     'total_reviews': total_reviews,
-                    'status_breakdown': list(status_counts),
+                    'pending_count': pending_count,
+                    'approved_count': approved_count,
+                    'rejected_count': rejected_count,
                     'average_rating': round(avg_rating, 2)
                 }
             }, status=status.HTTP_200_OK)
@@ -818,6 +738,7 @@ class AdminReviewListView(APIView):
                 'success': False,
                 'message': 'Failed to retrieve reviews'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class AdminReviewModerationView(APIView):
     """Admin approve/reject review"""
@@ -832,7 +753,8 @@ class AdminReviewModerationView(APIView):
         
         try:
             review = DoctorReview.objects.select_related(
-                'patient__user', 'doctor__user'
+                'patient__user', 
+                'doctor__user'
             ).get(id=review_id)
             
             if review.status != 'pending':
@@ -873,6 +795,7 @@ class AdminReviewModerationView(APIView):
                 'success': False,
                 'message': 'Review not found'
             }, status=status.HTTP_404_NOT_FOUND)
+            
         except Exception as e:
             logger.error(f"Error moderating review {review_id}: {str(e)}")
             return Response({

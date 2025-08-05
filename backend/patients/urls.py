@@ -35,6 +35,10 @@ from .views import (
     PaymentInitiationView,
     PaymentVerificationView,
     PaymentStatusView,
+    
+    PatientReviewCreateView,
+    PatientReviewDeleteView,
+    PatientReviewListView
 )
 
 urlpatterns = [
@@ -89,4 +93,7 @@ urlpatterns = [
     path('appointments/<int:appointment_id>/payment/initiate/', PaymentInitiationView.as_view(), name='payment-initiate'),
     path('appointments/<int:appointment_id>/payment/verify/', PaymentVerificationView.as_view(), name='payment-verify'),
     path('appointments/<int:appointment_id>/payment/status/', PaymentStatusView.as_view(), name='payment-status'),
+    path('reviews/', PatientReviewListView.as_view(), name='patient-review-list'),
+    path('reviews/create/', PatientReviewCreateView.as_view(), name='patient-review-create'),
+    path('reviews/delete/<int:pk>/', PatientReviewDeleteView.as_view(), name='patient-review-delete'),
 ]

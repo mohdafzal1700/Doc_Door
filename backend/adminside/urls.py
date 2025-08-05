@@ -31,9 +31,9 @@ urlpatterns = [
     path('admins/subscription-plans/',SubscriptionPlanListCreateView.as_view(), name='plan-list-create'),
     path('admins/subscription-plans/<int:pk>/',SubscriptionPlanDetailView.as_view(), name='plan-list-create'),
     
-    path('admin/appointments/', AdminAppointmentListView.as_view(), name='admin_appointment_list'),
+    path('admins/appointments/', AdminAppointmentListView.as_view(), name='admin_appointment_list'),
     
     
-    path('admin/appointments/<int:appointment_id>/', AdminAppointmentDetailView.as_view(), name='admin_appointment_detail'),
+    path('admins/appointments/<int:appointment_id>/', AdminAppointmentDetailView.as_view(), name='admin_appointment_detail'),
     
 ]
