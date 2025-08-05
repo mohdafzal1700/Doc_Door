@@ -684,28 +684,71 @@ class AdminAppointmentDetailView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             
-from django.db.models import Q, Count, Avg
+            
+            
+            
+            
+            
+            
 from doctor.models import DoctorReview
-from patients.serializers import  DoctorReviewSerializer,AdminReviewModerationSerializer
+from patients.serializers import DoctorReviewSerializer, AdminReviewModerationSerializer
+from django.db.models import Avg
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
+import logging
 
+logger = logging.getLogger(__name__)
 
 class AdminReviewListView(APIView):
-    """Admin view to list all reviews - simplified version"""
+    """Admin view to list all reviews - fixed version"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        # Verify admin/staff access
-        if not request.user.is_staff:
+        # Debug: Print user information
+        print(f"User: {request.user}")
+        print(f"is_staff: {request.user.is_staff}")
+        print(f"is_superuser: {request.user.is_superuser}")
+        print(f"is_authenticated: {request.user.is_authenticated}")
+        
+        # Check if user has admin access
+        has_admin_access = False
+        admin_check_details = {
+            'is_staff': request.user.is_staff,
+            'is_superuser': request.user.is_superuser,
+            'user_id': request.user.id,
+            'username': request.user.username,
+            'email': getattr(request.user, 'email', 'No email'),
+        }
+        
+        # Check for admin profile
+        try:
+            has_admin_profile = hasattr(request.user, 'admin_profile') and request.user.admin_profile is not None
+            admin_check_details['has_admin_profile'] = has_admin_profile
+        except:
+            has_admin_profile = False
+            admin_check_details['has_admin_profile'] = False
+        
+        # Allow access if user is staff OR superuser OR has admin profile
+        if request.user.is_staff or request.user.is_superuser or has_admin_profile:
+            has_admin_access = True
+        
+        if not has_admin_access:
             return Response({
                 'success': False,
-                'message': 'Admin access required'
+                'message': 'Admin access required',
+                'debug_info': admin_check_details
             }, status=status.HTTP_403_FORBIDDEN)
         
         try:
+            # Get all reviews with related data
             queryset = DoctorReview.objects.select_related(
                 'patient__user', 
                 'doctor__user', 
-                'appointment'
+                'appointment',
+                'reviewed_by'  # Add this for reviewed_by information
             ).order_by('-created_at')
             
             serializer = DoctorReviewSerializer(queryset, many=True)
@@ -716,6 +759,7 @@ class AdminReviewListView(APIView):
             approved_count = queryset.filter(status='approved').count()
             rejected_count = queryset.filter(status='rejected').count()
             
+            # Calculate average rating for approved reviews only
             avg_rating = queryset.filter(status='approved').aggregate(
                 avg_rating=Avg('rating')
             )['avg_rating'] or 0
@@ -728,41 +772,62 @@ class AdminReviewListView(APIView):
                     'pending_count': pending_count,
                     'approved_count': approved_count,
                     'rejected_count': rejected_count,
-                    'average_rating': round(avg_rating, 2)
+                    'average_rating': round(float(avg_rating), 2)
                 }
             }, status=status.HTTP_200_OK)
             
         except Exception as e:
             logger.error(f"Error listing admin reviews: {str(e)}")
+            print(f"Error in AdminReviewListView: {str(e)}")  # Debug print
             return Response({
                 'success': False,
-                'message': 'Failed to retrieve reviews'
+                'message': 'Failed to retrieve reviews',
+                'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class AdminReviewModerationView(APIView):
-    """Admin approve/reject review"""
+    """Admin approve/reject review - fixed version"""
     permission_classes = [IsAuthenticated]
     
     def patch(self, request, review_id):
-        if not request.user.is_staff:
+        # Debug: Print user information
+        print(f"Moderation request from user: {request.user}")
+        print(f"Review ID: {review_id}")
+        print(f"Request data: {request.data}")
+        
+        # Check admin access (same logic as list view)
+        has_admin_access = False
+        
+        try:
+            has_admin_profile = hasattr(request.user, 'admin_profile') and request.user.admin_profile is not None
+        except:
+            has_admin_profile = False
+        
+        if request.user.is_staff or request.user.is_superuser or has_admin_profile:
+            has_admin_access = True
+        
+        if not has_admin_access:
             return Response({
                 'success': False,
                 'message': 'Admin access required'
             }, status=status.HTTP_403_FORBIDDEN)
         
         try:
+            # Get the review
             review = DoctorReview.objects.select_related(
                 'patient__user', 
                 'doctor__user'
             ).get(id=review_id)
             
+            # Check if review is still pending
             if review.status != 'pending':
                 return Response({
                     'success': False,
-                    'message': 'Review has already been moderated'
+                    'message': f'Review has already been {review.status}. Cannot moderate again.'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
+            # Validate the request data
             serializer = AdminReviewModerationSerializer(
                 review, 
                 data=request.data, 
@@ -770,11 +835,13 @@ class AdminReviewModerationView(APIView):
             )
             
             if serializer.is_valid():
+                # Save the review with moderation info
                 review = serializer.save(
                     reviewed_by=request.user,
                     reviewed_at=timezone.now()
                 )
                 
+                # Return updated review data
                 response_serializer = DoctorReviewSerializer(review)
                 action = 'approved' if review.status == 'approved' else 'rejected'
                 
@@ -786,7 +853,7 @@ class AdminReviewModerationView(APIView):
             
             return Response({
                 'success': False,
-                'message': 'Invalid data',
+                'message': 'Invalid data provided',
                 'errors': serializer.errors
             }, status=status.HTTP_400_BAD_REQUEST)
             
@@ -798,7 +865,9 @@ class AdminReviewModerationView(APIView):
             
         except Exception as e:
             logger.error(f"Error moderating review {review_id}: {str(e)}")
+            print(f"Error in moderation: {str(e)}")  # Debug print
             return Response({
                 'success': False,
-                'message': 'Failed to moderate review'
+                'message': 'Failed to moderate review',
+                'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

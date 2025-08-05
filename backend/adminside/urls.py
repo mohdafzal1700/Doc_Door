@@ -11,8 +11,9 @@ from .views import (
     SubscriptionPlanListCreateView,
     SubscriptionPlanDetailView,
     AdminAppointmentDetailView,
-    AdminAppointmentListView
-    
+    AdminAppointmentListView,
+    AdminReviewListView,
+    AdminReviewModerationView
 )
 
 urlpatterns = [
@@ -32,8 +33,7 @@ urlpatterns = [
     path('admins/subscription-plans/<int:pk>/',SubscriptionPlanDetailView.as_view(), name='plan-list-create'),
     
     path('admins/appointments/', AdminAppointmentListView.as_view(), name='admin_appointment_list'),
-    
-    
     path('admins/appointments/<int:appointment_id>/', AdminAppointmentDetailView.as_view(), name='admin_appointment_detail'),
-    
+    path('admins/reviews/', AdminReviewListView.as_view(), name='admin-reviews-list'),
+    path('admins/reviews/<int:review_id>/moderate/', AdminReviewModerationView.as_view(), name='admin-review-moderate'),
 ]

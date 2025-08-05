@@ -71,3 +71,11 @@ export const getAllAdminAppointments = () =>
 // Get a single appointment by ID
 export const getAdminAppointmentById = (appointmentId) =>
   adminAxios.get(`appointments/${appointmentId}/`);
+
+
+export const getAllAdminReviews = () =>
+  adminAxios.get('reviews/');
+
+// Moderate a single review (approve or reject)
+export const moderateAdminReview = (reviewId, status) =>
+  adminAxios.patch(`reviews/${reviewId}/moderate/`, { status });

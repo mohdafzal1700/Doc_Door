@@ -45,6 +45,7 @@ import AppointmentDashboard from "./admin/applicationlisting"
 import { VideoCallProvider } from "./videocall/context"
 import GlobalVideoCallWrapper from "./videocall/wrapper"
 import PaymentPage from "./pages/payment_conformation"
+import AdminReviewPage from "./admin/reviewaM"
 
 
 function App() {
@@ -74,6 +75,7 @@ function App() {
         <Route path="/editprofile" element={<EditProfile />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/adminloginpage" element={<AdminLogin />} />
+         <Route path="/adminREviewPage" element={<AdminReviewPage />} />
         <Route path='/patientspage' element={<PatientsPage/>}/>
         <Route path='/doctorspage'  element={<DoctorsPage/>}/>
         <Route path='/doctorapplications'  element={<DoctorApplicationsPage/>}/>
