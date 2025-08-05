@@ -911,6 +911,7 @@ useEffect(() => {
 
                 {selectedAppointment.status === "confirmed" && selectedAppointment.mode === "online" && (
   <div className="flex items-center gap-2">
+    
     <CallButton
       receiverId={selectedAppointment.doctor_id}
       appointmentId={selectedAppointment.id}

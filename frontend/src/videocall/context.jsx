@@ -323,18 +323,33 @@ remoteDescriptionSetRef.current = false;
   }, [createPeerConnection, getUserMedia, cleanup]);
 
   // Action methods
-  const initiateCall = useCallback(async (receiverId) => {
-    try {
-      console.log('📞 Initiating call to:', receiverId);
-      const success = videoCallService.initiateCall(receiverId);
-      if (success) {
-        setIsCalling(true);
-      }
-    } catch (error) {
-      console.error('❌ Failed to initiate call:', error);
-      setIsCalling(false);
+  const initiateCall = useCallback(async (receiverId, appointmentId) => {
+  try {
+    console.log('📞 Initiating call to:', receiverId, 'for appointment:', appointmentId);
+    
+    if (!receiverId) {
+      console.error('❌ receiverId is required');
+      return false;
     }
-  }, []);
+    
+    if (!appointmentId) {
+      console.error('❌ appointmentId is required');
+      return false;
+    }
+    
+    // Pass both receiverId and appointmentId to the service
+    const success = videoCallService.initiateCall(receiverId, appointmentId);
+    if (success) {
+      setIsCalling(true);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('❌ Failed to initiate call:', error);
+    setIsCalling(false);
+    return false;
+  }
+}, []);
 
   const acceptCall = useCallback(async (callId, roomName) => {
     try {

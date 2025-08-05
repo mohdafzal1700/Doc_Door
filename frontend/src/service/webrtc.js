@@ -295,13 +295,20 @@ class VideoCallService {
   }
 
   // Call management methods
-  initiateCall(calleeId) {
-    console.log(`📞 Initiating call to user: ${calleeId}`);
-    return this.send({
-      type: 'call_initiate',
-      callee_id: calleeId
-    });
+  initiateCall(calleeId, appointmentId) {
+  console.log(`📞 Initiating call to user: ${calleeId} for appointment: ${appointmentId}`);
+  
+  if (!appointmentId) {
+    console.error('❌ appointmentId is required for call initiation');
+    return false;
   }
+  
+  return this.send({
+    type: 'call_initiate',
+    callee_id: calleeId,
+    appointment_id: appointmentId  // <- ADD THIS LINE
+  });
+}
 
   acceptCall(callId, roomName) {
     console.log(`✅ Accepting call: ${callId}`);

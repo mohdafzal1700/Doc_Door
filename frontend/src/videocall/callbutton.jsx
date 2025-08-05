@@ -3,22 +3,53 @@ import React, { useState, useEffect } from 'react';
 import { Phone, Clock, AlertCircle } from 'lucide-react';
 import { useVideoCall } from './context';
 
-const CallButton = ({ 
-  receiverId, 
+const CallButton = ({
+  receiverId,
   appointmentId,
   appointmentData, // { appointment_date, slot_time, mode, status }
-  doctorName = "Doctor", 
-  className = "", 
-  size = "md" 
+  doctorName = "Doctor",
+  className = "",
+  size = "md"
 }) => {
   const { initiateCall } = useVideoCall();
   const [isHovered, setIsHovered] = useState(false);
-  const [callStatus, setCallStatus] = useState({ canCall: false, reason: '', timeUntil: '' });
+  const [callStatus, setCallStatus] = useState({
+    canCall: false,
+    reason: '',
+    timeUntil: ''
+  });
+
+  // Debug logging for received props
+  useEffect(() => {
+    console.log('🔍 CallButton DEBUG - Props received:');
+    console.log('   receiverId:', receiverId);
+    console.log('   appointmentId:', appointmentId);
+    console.log('   appointmentData:', appointmentData);
+    console.log('   appointmentData type:', typeof appointmentData);
+    console.log('   doctorName:', doctorName);
+    console.log('   size:', size);
+    console.log('   className:', className);
+
+    if (appointmentData) {
+      console.log('🔍 CallButton DEBUG - appointmentData details:');
+      console.log('   appointment_date:', appointmentData.appointment_date);
+      console.log('   slot_time:', appointmentData.slot_time);
+      console.log('   mode:', appointmentData.mode);
+      console.log('   status:', appointmentData.status);
+      console.log('   All appointmentData keys:', Object.keys(appointmentData));
+    }
+  }, [receiverId, appointmentId, appointmentData, doctorName, size, className]);
 
   // Check if call is available based on appointment timing
   useEffect(() => {
     const checkCallAvailability = () => {
+      console.log('🔄 CallButton DEBUG - Checking call availability...');
+
       if (!appointmentData || !appointmentId) {
+        console.log('❌ CallButton DEBUG - Missing data:', {
+          hasAppointmentData: !!appointmentData,
+          hasAppointmentId: !!appointmentId
+        });
         setCallStatus({
           canCall: false,
           reason: 'No appointment data available',
@@ -28,7 +59,9 @@ const CallButton = ({
       }
 
       // Check if appointment is online
+      console.log('🔍 CallButton DEBUG - Checking mode:', appointmentData.mode);
       if (appointmentData.mode !== 'online') {
+        console.log('❌ CallButton DEBUG - Not online appointment');
         setCallStatus({
           canCall: false,
           reason: 'Video calls only available for online appointments',
@@ -38,7 +71,9 @@ const CallButton = ({
       }
 
       // Check appointment status
+      console.log('🔍 CallButton DEBUG - Checking status:', appointmentData.status);
       if (appointmentData.status?.toLowerCase() !== 'confirmed') {
+        console.log('❌ CallButton DEBUG - Not confirmed appointment');
         setCallStatus({
           canCall: false,
           reason: 'Appointment must be confirmed',
@@ -49,39 +84,78 @@ const CallButton = ({
 
       try {
         // Parse appointment date and time
+        console.log('🔍 CallButton DEBUG - Parsing datetime:', {
+          appointment_date: appointmentData.appointment_date,
+          slot_time: appointmentData.slot_time
+        });
+
         const appointmentDate = new Date(appointmentData.appointment_date);
         const [hours, minutes] = appointmentData.slot_time.split(':');
         const appointmentDateTime = new Date(appointmentDate);
         appointmentDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
 
+        console.log('🔍 CallButton DEBUG - Parsed datetime:', {
+          appointmentDate: appointmentDate.toISOString(),
+          appointmentDateTime: appointmentDateTime.toISOString(),
+          hours,
+          minutes
+        });
+
         const now = new Date();
-        
-        // Allow calls 15 minutes before and 30 minutes after appointment
-        const startWindow = new Date(appointmentDateTime.getTime() - 15 * 60 * 1000);
-        const endWindow = new Date(appointmentDateTime.getTime() + 30 * 60 * 1000);
+
+        // Allow calls from appointment start time to 30 minutes after (or customize duration)
+        const startWindow = appointmentDateTime; // Start exactly at appointment time
+        const endWindow = new Date(appointmentDateTime.getTime() + 30 * 60 * 1000); // End 30 minutes after
+
+        console.log('🔍 CallButton DEBUG - Time windows:', {
+          now: now.toISOString(),
+          startWindow: startWindow.toISOString(),
+          endWindow: endWindow.toISOString(),
+          appointmentDateTime: appointmentDateTime.toISOString()
+        });
 
         if (now < startWindow) {
           const minutesUntil = Math.ceil((startWindow - now) / (1000 * 60));
+          console.log('⏰ CallButton DEBUG - Too early, minutes until:', minutesUntil);
           setCallStatus({
             canCall: false,
             reason: `Call available in ${minutesUntil} minutes`,
-            timeUntil: `Available at ${startWindow.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+            timeUntil: `Available at ${startWindow.toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}`
           });
         } else if (now > endWindow) {
+          console.log('❌ CallButton DEBUG - Call window expired');
+          const appointmentTime = appointmentDateTime.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
+          });
+          const endTime = endWindow.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit'
+          });
           setCallStatus({
             canCall: false,
-            reason: 'Call window has expired',
+            reason: `Call window expired. Was available from ${appointmentTime} to ${endTime}`,
             timeUntil: ''
           });
         } else {
+          // Calculate remaining time in the call window
+          const remainingMinutes = Math.floor((endWindow - now) / (1000 * 60));
+          console.log('✅ CallButton DEBUG - Call available now! Remaining minutes:', remainingMinutes);
           setCallStatus({
             canCall: true,
-            reason: 'Call available now',
-            timeUntil: ''
+            reason: `Call available - ${remainingMinutes} minutes remaining`,
+            timeUntil: `Available until ${endWindow.toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit'
+            })}`
           });
         }
       } catch (error) {
-        console.error('Error parsing appointment time:', error);
+        console.error('❌ CallButton DEBUG - Error parsing appointment time:', error);
+        console.error('   appointmentData was:', appointmentData);
         setCallStatus({
           canCall: false,
           reason: 'Error validating appointment time',
@@ -91,20 +165,30 @@ const CallButton = ({
     };
 
     checkCallAvailability();
-    
     // Update every minute
     const interval = setInterval(checkCallAvailability, 60000);
     return () => clearInterval(interval);
   }, [appointmentData, appointmentId]);
 
   const handleCall = () => {
+    console.log('📞 CallButton DEBUG - Handle call clicked:', {
+      canCall: callStatus.canCall,
+      receiverId,
+      appointmentId,
+      reason: callStatus.reason
+    });
+
     if (callStatus.canCall && receiverId && appointmentId) {
+      console.log('✅ CallButton DEBUG - Initiating call...');
       initiateCall(receiverId, appointmentId); // Pass appointmentId to initiateCall
     } else if (!callStatus.canCall) {
       // Show why call is not available
-      console.warn('Call not available:', callStatus.reason);
+      console.warn('❌ CallButton DEBUG - Call not available:', callStatus.reason);
     } else {
-      console.warn('Missing required data for call');
+      console.warn('❌ CallButton DEBUG - Missing required data for call:', {
+        hasReceiverId: !!receiverId,
+        hasAppointmentId: !!appointmentId
+      });
     }
   };
 
@@ -143,7 +227,13 @@ const CallButton = ({
       {isHovered && (
         <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-sm rounded whitespace-nowrap z-50 max-w-xs">
           {callStatus.canCall ? (
-            <>Call {doctorName}</>
+            <div className="text-center">
+              <div>Call {doctorName}</div>
+              <div className="text-xs text-gray-300 mt-1">{callStatus.reason}</div>
+              {callStatus.timeUntil && (
+                <div className="text-xs text-gray-300">{callStatus.timeUntil}</div>
+              )}
+            </div>
           ) : (
             <div className="text-center">
               <div className="flex items-center gap-1 mb-1">

@@ -4,6 +4,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from .models import CallRecord, ActiveCall
+from datetime import datetime, timedelta
 from django.utils import timezone
 from doctor.models import Appointment
 User = get_user_model()
@@ -64,7 +65,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
         callee_id = data.get('callee_id')
         appointment_id = data.get('appointment_id')
         print(f"🎯 CALL INITIATION: {caller_id} calling {callee_id} for appointment {appointment_id}")
-
+        print(f"🔍 Appointment ID: {appointment_id}")
         if not callee_id:
             print("❌ No callee_id provided")
             await self.send(text_data=json.dumps({
@@ -84,11 +85,12 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
         try:
             # Validate appointment
             appointment_validation = await self.validate_appointment_call(caller_id, callee_id, appointment_id)
-            if not appointment_validation['valid']:
-                print(f"❌ Appointment validation failed: {appointment_validation['reason']}")
+            # Check if validation returned None or invalid response
+            if not appointment_validation or not isinstance(appointment_validation, dict):
+                print(f"❌ Appointment validation returned invalid response: {appointment_validation}")
                 await self.send(text_data=json.dumps({
                     'type': 'error',
-                    'message': appointment_validation['reason']
+                    'message': 'Error validating appointment'
                 }))
                 return
 
@@ -118,6 +120,7 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             # Send to callee
             callee_group = f'user_{callee_id}'
             print(f"📞 Sending incoming call to group: {callee_group}")
+            print(f"🔍 Appointment ID: {appointment_id}")
             await self.channel_layer.group_send(
                 callee_group,
                 {
@@ -463,58 +466,123 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
             print(f"❌ Database error - get user name: {e}")
             return f"User {user_id}"
         
-        
     @database_sync_to_async
     def validate_appointment_call(self, caller_id, callee_id, appointment_id):
-        """Simple validation for appointment call"""
+        """Simple validation for appointment call with User ID comparison"""
         try:
-        
-            from doctor.models import Appointment 
+            
             
             # Get the appointment
-            appointment = Appointment.objects.get(id=appointment_id)
+            appointment = Appointment.objects.select_related('patient__user', 'doctor__user').get(id=appointment_id)
+            
+            # Get User IDs from the appointment
+            patient_user_id = appointment.patient.user.id
+            doctor_user_id = appointment.doctor.user.id
+            
+            # DEBUG: Print all the IDs for comparison
+            print(f"🔍 DEBUGGING APPOINTMENT VALIDATION:")
+            print(f"   Appointment ID: {appointment_id}")
+            print(f"   Caller ID: {caller_id} (type: {type(caller_id)})")
+            print(f"   Callee ID: {callee_id} (type: {type(callee_id)})")
+            print(f"   Patient User ID: {patient_user_id} (type: {type(patient_user_id)})")
+            print(f"   Doctor User ID: {doctor_user_id} (type: {type(doctor_user_id)})")
+            
+            # Convert to strings for comparison
+            caller_str = str(caller_id)
+            callee_str = str(callee_id)
+            patient_user_str = str(patient_user_id)
+            doctor_user_str = str(doctor_user_id)
+            
+            print(f"   String comparisons:")
+            print(f"   Caller '{caller_str}' == Patient User '{patient_user_str}': {caller_str == patient_user_str}")
+            print(f"   Caller '{caller_str}' == Doctor User '{doctor_user_str}': {caller_str == doctor_user_str}")
+            print(f"   Callee '{callee_str}' == Patient User '{patient_user_str}': {callee_str == patient_user_str}")
+            print(f"   Callee '{callee_str}' == Doctor User '{doctor_user_str}': {callee_str == doctor_user_str}")
             
             # Basic checks
             if appointment.status.lower() != 'confirmed':
+                print(f"❌ Appointment status is '{appointment.status}', not 'confirmed'")
                 return {'valid': False, 'reason': 'Appointment must be confirmed'}
-            
+                
             if appointment.mode != 'online':
+                print(f"❌ Appointment mode is '{appointment.mode}', not 'online'")
                 return {'valid': False, 'reason': 'Only online appointments support video calls'}
             
-            # Check if users are part of this appointment
+            # Check if users are part of this appointment (using User IDs)
+            caller_is_patient = caller_str == patient_user_str
+            caller_is_doctor = caller_str == doctor_user_str
+            callee_is_patient = callee_str == patient_user_str
+            callee_is_doctor = callee_str == doctor_user_str
             
-            if not (str(appointment.patient_id) == str(caller_id) or 
-                    str(appointment.doctor_id) == str(caller_id) or
-                    str(appointment.patient_id) == str(callee_id) or 
-                    str(appointment.doctor_id) == str(callee_id)):
+            user_is_part_of_appointment = (caller_is_patient or caller_is_doctor or callee_is_patient or callee_is_doctor)
+            
+            print(f"   User participation check: {user_is_part_of_appointment}")
+            print(f"   - Caller is patient: {caller_is_patient}")
+            print(f"   - Caller is doctor: {caller_is_doctor}")
+            print(f"   - Callee is patient: {callee_is_patient}")
+            print(f"   - Callee is doctor: {callee_is_doctor}")
+            
+            if not user_is_part_of_appointment:
+                print(f"❌ Neither caller nor callee is part of appointment {appointment_id}")
                 return {'valid': False, 'reason': 'You are not part of this appointment'}
             
-            # Simple time check
-            from datetime import datetime, timedelta
-            from django.utils import timezone
-            
-            # Parse appointment time
-            appointment_date = appointment.appointment_date
-            time_parts = appointment.slot_time.split(':')
-            appointment_datetime = datetime.combine(
-                appointment_date,
-                datetime.min.time().replace(hour=int(time_parts[0]), minute=int(time_parts[1]))
-            )
-            appointment_datetime = timezone.make_aware(appointment_datetime)
-            
-            now = timezone.now()
-            
-            # Allow calls 10 minutes before to 30 minutes after
-            start_time = appointment_datetime - timedelta(minutes=10)
-            end_time = appointment_datetime + timedelta(minutes=30)
-            
-            if now < start_time:
-                return {'valid': False, 'reason': 'Call will be available 10 minutes before appointment'}
-            elif now > end_time:
-                return {'valid': False, 'reason': 'Call window has expired'}
-            
+            # If we reach here, validation passed
+            print(f"✅ Appointment validation passed!")
             return {'valid': True, 'reason': 'Call is allowed'}
             
+            # Uncomment the time check code below if you want to enable it:
+            
+            # # Time check - Allow calls for the entire appointment duration
+            # from datetime import datetime, timedelta
+            # from django.utils import timezone
+            
+            # # Parse appointment time
+            # appointment_date = appointment.appointment_date
+            
+            # # Handle slot_time whether it's a time object or string
+            # if hasattr(appointment.slot_time, 'hour'):
+            #     # It's already a time object
+            #     appointment_time = appointment.slot_time
+            # else:
+            #     # It's a string, parse it
+            #     time_parts = str(appointment.slot_time).split(':')
+            #     appointment_time = datetime.min.time().replace(
+            #         hour=int(time_parts[0]),
+            #         minute=int(time_parts[1])
+            #     )
+            
+            # appointment_datetime = datetime.combine(appointment_date, appointment_time)
+            # appointment_datetime = timezone.make_aware(appointment_datetime)
+            # now = timezone.now()
+            
+            # # Get appointment duration (check if appointment has duration field, otherwise default to 30 minutes)
+            # if hasattr(appointment, 'duration') and appointment.duration:
+            #     appointment_duration = appointment.duration  # in minutes
+            # else:
+            #     appointment_duration = 30  # default 30 minutes
+            
+            # # Allow calls for the entire booked slot duration
+            # start_time = appointment_datetime  # Start exactly at appointment time
+            # end_time = appointment_datetime + timedelta(minutes=appointment_duration)  # End after full duration
+            
+            # print(f"   Time check - Now: {now}, Start: {start_time}, End: {end_time}")
+            # print(f"   Appointment duration: {appointment_duration} minutes")
+            
+            # if now < start_time:
+            #     return {'valid': False, 'reason': 'Call will be available at appointment start time'}
+            # elif now > end_time:
+            #     return {'valid': False, 'reason': f'Call window has expired. You had {appointment_duration} minutes from {start_time.strftime("%H:%M")}'}
+            
+            # # Calculate remaining time for user info
+            # remaining_minutes = int((end_time - now).total_seconds() / 60)
+            # print(f"✅ Appointment validation passed! {remaining_minutes} minutes remaining in slot")
+            # return {'valid': True, 'reason': f'Call is allowed. {remaining_minutes} minutes remaining in your appointment slot'}
+            
+        except Appointment.DoesNotExist:
+            print(f"❌ Appointment {appointment_id} does not exist")
+            return {'valid': False, 'reason': 'Appointment not found'}
         except Exception as e:
-            print(f"Error validating appointment: {e}")
-            return {'valid': False, 'reason': 'Error validating appointment'}
+            print(f"❌ Error validating appointment: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'valid': False, 'reason': 'Error validating appointment'}  

@@ -41,7 +41,7 @@ import ChoosePlanDashboard from "./doctor/pages/ChoosePlan"
 import ChatApp from "./Chat/chat"
 import ScheduleService from "./doctor/pages/Service&shcedule"
 import DocDashboard from "./doctor/pages/dashboard"
-
+import AppointmentDashboard from "./admin/applicationlisting"
 import { VideoCallProvider } from "./videocall/context"
 import GlobalVideoCallWrapper from "./videocall/wrapper"
 import PaymentPage from "./pages/payment_conformation"
@@ -84,7 +84,7 @@ function App() {
         <Route path='/doctor/editProfile'  element={<PortalProfile/>}/>
         <Route path='/doctor/certification'  element={<PortalCertification />}/>
         <Route path='/doctor/education'  element={<ManageQualifications/>}/>
-        
+        <Route path='/admin/appointmentDashboard'  element={<AppointmentDashboard/>}/>
         <Route path='/doctor/schedule'  element={<ScheduleService/>}/>
         <Route path='/patient/doctor/:id' element={<PatientDoctor/>}/>
         <Route path="/patient/medical_record" element={<MedicalRecordForm />} />
