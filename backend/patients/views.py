@@ -4,6 +4,7 @@ import logging
 
 from django.shortcuts import render, get_object_or_404
 from django.utils import timezone
+from patients.utils import DoctorEarning
 from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -75,6 +76,8 @@ logger = logging.getLogger(__name__)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
+    """Token Verification & User"""
+    
     permission_classes = [permissions.AllowAny]
     serializer_class = CustomTokenObtainPairSerializer
             
@@ -183,6 +186,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             )
             
 class CustomTokenRefreshView(TokenRefreshView):
+    """ Setting Refresh Token"""
     permission_classes = [permissions.AllowAny]
     
     def post(self, request, *args, **kwargs):
@@ -198,9 +202,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # logger.info(f"Refresh token found: {refresh_token[:50]}...")
-                
-            # Create a mutable copy of request.data
+            
             request_data = request.data.copy()
             request_data["refresh"] = refresh_token
             request._mutable = True
@@ -262,6 +264,8 @@ class CustomTokenRefreshView(TokenRefreshView):
 
 
 class RegisterUserView(generics.CreateAPIView):
+    """ User Registration """
+    
     serializer_class = CustomUserCreateSerializer
     permission_classes = [permissions.AllowAny]
 
@@ -290,6 +294,8 @@ class RegisterUserView(generics.CreateAPIView):
 
 
 class EmailOTPVerifyView(generics.GenericAPIView):
+    """Verify Emil OTP"""
+    
     serializer_class = EmailOTPVerifySerializer
 
     def post(self, request, *args, **kwargs):
@@ -319,6 +325,8 @@ class EmailOTPVerifyView(generics.GenericAPIView):
     
     
 class ResendOTPView(generics.GenericAPIView):
+    """ If the user did not get OTP try  Resent OTP """
+    
     serializer_class = ResendOTPSerializer
 
     def post(self, request, *args, **kwargs):
@@ -342,6 +350,8 @@ class ResendOTPView(generics.GenericAPIView):
         
         
 class ForgotPasswordView(generics.GenericAPIView):
+    """Using when Forgot password"""
+    
     serializer_class = ForgotPasswordSerializer
 
     def post(self, request, *args, **kwargs):
@@ -364,6 +374,8 @@ class ForgotPasswordView(generics.GenericAPIView):
         
         
 class VerifyForgotPasswordOTPView(generics.GenericAPIView):
+    """Verify and complete ForgetPassword"""
+    
     serializer_class = VerifyForgotPasswordOTPSerializer
 
     def post(self, request, *args, **kwargs):
@@ -383,6 +395,8 @@ class VerifyForgotPasswordOTPView(generics.GenericAPIView):
 
 
 class ResetPasswordView(generics.GenericAPIView):
+    """Verify and complete password"""
+    
     serializer_class = ResetPasswordSerializer
 
     def post(self, request, *args, **kwargs):
@@ -419,6 +433,8 @@ class ResetPasswordView(generics.GenericAPIView):
         
         
 class CustomLogoutView(APIView):
+    """Custom logout  and black listing the REfresh token"""
+    
     permission_classes = [permissions.IsAuthenticated]
     
     def post(self, request, *args, **kwargs):
@@ -467,6 +483,7 @@ class CustomLogoutView(APIView):
 
 class UserProfileView(APIView):
     """Handle user profile and patient data operations"""
+    
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
@@ -921,6 +938,8 @@ class ProfilePictureView(APIView):
             
             
 class PatientDoctorView(APIView):
+    """Provide the All Approved and Active doctors in patient side"""
+    
     serializer_class = DoctorProfileSerializer
     permission_classes = [permissions.IsAuthenticated]
     
@@ -938,7 +957,7 @@ class PatientDoctorView(APIView):
             
             logger.info('Patient viewing all available doctors')
             
-            # Only show active AND approved doctors to patients
+            
             queryset = User.objects.filter(
                 role='doctor',
                 is_active=True,
@@ -948,17 +967,17 @@ class PatientDoctorView(APIView):
                 'doctor_profile__certifications'
             )
             
-            # Optional filtering by specialization
+            
             specialization = request.GET.get('specialization', '')
             if specialization:
                 queryset = queryset.filter(doctor_profile__specialization__icontains=specialization)
             
-            # Optional filtering by location/city
+            
             location = request.GET.get('location', '')
             if location:
                 queryset = queryset.filter(doctor_profile__location__icontains=location)
             
-            # Optional search by name or clinic
+        
             search = request.GET.get('search', '')
             if search:
                 queryset = queryset.filter(
@@ -967,7 +986,7 @@ class PatientDoctorView(APIView):
                     Q(doctor_profile__clinic_name__icontains=search)
                 )
             
-            # Optional ordering
+            
             ordering = request.GET.get('ordering', 'first_name')
             if ordering in ['first_name', 'last_name', 'doctor_profile__experience', '-doctor_profile__experience']:
                 queryset = queryset.order_by(ordering)
@@ -1015,11 +1034,11 @@ class MedicalRecordManagementView(APIView):
             try:
                 patient = request.user.patient_profile
                 logger.info(f"Patient profile found: {patient.id}")
-               
+            
                 
             except Patient.DoesNotExist:
                 logger.error(f"Patient profile not found for user {request.user.id}")
-              
+            
                 
                 # Check if there are any patient profiles in the system
                 total_patients = Patient.objects.count()
@@ -1503,8 +1522,6 @@ class DoctorBookingDetailView(APIView):
 
     def get(self, request, pk):
     
-        
-
         try:
             doctor = get_object_or_404(
                 User,
@@ -1525,7 +1542,8 @@ class DoctorBookingDetailView(APIView):
 
 
 class DoctorSchedulesView(APIView):
-    """Doctor schedules with time slot availability - Alternative approach"""
+    """Doctor schedules with time slot availability"""
+    
     permission_classes = [IsAuthenticated]
 
     def get(self, request, doctor_id):
@@ -1591,6 +1609,7 @@ class DoctorSchedulesView(APIView):
 
 class UpdatePatientLocationView(generics.CreateAPIView):
     """POST /patients/location/update/"""
+    
     serializer_class = PatientLocationUpdateSerializer
     permission_classes = [IsAuthenticated]
     
@@ -1775,7 +1794,10 @@ from math import radians, cos, sin, asin, sqrt, degrees
 
 
 class SearchNearbyDoctorsView(generics.ListAPIView):
-    """GET /search/nearby-doctors/ - Find nearby doctors based on patient location"""
+    """Find NearBy doctors using bounding box filtering +
+    Haversine distance calculation"""
+    
+    
     serializer_class = DoctorLocationSerializer
     permission_classes = [IsAuthenticated]
 
@@ -1949,7 +1971,7 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
 import razorpay
 from django.conf import settings
 from patients.serializers import PaymentInitiationSerializer,PaymentVerificationSerializer,PaymentSerializer  
-          
+
 class PaymentInitiationView(APIView):
     """Initiate payment for confirmed appointment"""
     permission_classes = [IsAuthenticated]
@@ -2022,12 +2044,16 @@ class PaymentInitiationView(APIView):
                 'message': 'Failed to initiate payment'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+from patients.utils import DoctorEarningsManager
+
 class PaymentVerificationView(APIView):
     """Verify and complete payment"""
     permission_classes = [IsAuthenticated]
     
     def post(self, request, appointment_id):
         """Verify Razorpay payment and update appointment status"""
+        
+        
         try:
             # Get appointment and verify ownership
             appointment = get_object_or_404(
@@ -2069,6 +2095,26 @@ class PaymentVerificationView(APIView):
                 payment.paid_at = timezone.now()
                 payment.save()
                 
+                
+                #Adding amount to the Doctor account
+                doctor_earning = DoctorEarningsManager.add_credit(
+                    doctor=appointment.doctor,
+                    appointment=appointment,
+                    amount=payment.amount,
+                    remarks=f"Payment received from {appointment.patient.user.get_full_name()} for appointment on {appointment.appointment_date}"
+                )
+                
+                if not doctor_earning:
+                    logger.warning(f"Failed to add credit to doctor for appointment {appointment_id}")
+                    
+
+                # Update appointment
+                appointment.is_paid = True
+                appointment.save()
+
+                # Send confirmation (you can add email/SMS notification here)
+                logger.info(f"Payment completed for appointment {appointment_id}")
+                
                 # Update appointment
                 appointment.is_paid = True
                 appointment.save()
@@ -2083,7 +2129,8 @@ class PaymentVerificationView(APIView):
                     'payment_id': payment.id,
                     'amount': float(payment.amount),
                     'paid_at': payment.paid_at.isoformat(),
-                    'appointment_status': appointment.status
+                    'appointment_status': appointment.status,
+                    'doctor_credit_added': doctor_earning is not None
                 }
             }, status=status.HTTP_200_OK)
             
@@ -2093,6 +2140,7 @@ class PaymentVerificationView(APIView):
                 'success': False,
                 'message': 'Payment verification failed'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
 
 class PaymentStatusView(APIView):
     """Check payment status for an appointment"""
@@ -2239,39 +2287,39 @@ class PatientReviewListView(APIView):
             if status_filter:
                 queryset = queryset.filter(status=status_filter)
             
-            # Pagination
-            page = request.query_params.get('page', 1)
-            page_size = request.query_params.get('page_size', 10)
+            # # Pagination
+            # page = request.query_params.get('page', 1)
+            # page_size = request.query_params.get('page_size', 10)
             
-            try:
-                page = int(page)
-                page_size = int(page_size)
-                page_size = min(page_size, 50)
-            except ValueError:
-                page = 1
-                page_size = 10
+            # try:
+            #     page = int(page)
+            #     page_size = int(page_size)
+            #     page_size = min(page_size, 50)
+            # except ValueError:
+            #     page = 1
+            #     page_size = 10
             
-            paginator = Paginator(queryset, page_size)
+            # paginator = Paginator(queryset, page_size)
             
-            try:
-                reviews_page = paginator.page(page)
-            except PageNotAnInteger:
-                reviews_page = paginator.page(1)
-            except EmptyPage:
-                reviews_page = paginator.page(paginator.num_pages)
+            # try:
+            #     reviews_page = paginator.page(page)
+            # except PageNotAnInteger:
+            #     reviews_page = paginator.page(1)
+            # except EmptyPage:
+            #     reviews_page = paginator.page(paginator.num_pages)
             
-            serializer = DoctorReviewSerializer(reviews_page, many=True)
+            serializer = DoctorReviewSerializer(many=True)
             
             return Response({
                 'success': True,
                 'data': serializer.data,
-                'pagination': {
-                    'current_page': reviews_page.number,
-                    'total_pages': paginator.num_pages,
-                    'total_count': paginator.count,
-                    'has_next': reviews_page.has_next(),
-                    'has_previous': reviews_page.has_previous(),
-                }
+                # 'pagination': {
+                #     'current_page': reviews_page.number,
+                #     'total_pages': paginator.num_pages,
+                #     'total_count': paginator.count,
+                #     'has_next': reviews_page.has_next(),
+                #     'has_previous': reviews_page.has_previous(),
+                # }
             }, status=status.HTTP_200_OK)
             
         except Exception as e:

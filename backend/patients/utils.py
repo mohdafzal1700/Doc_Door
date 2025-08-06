@@ -160,18 +160,19 @@ from django.db import transaction
 from django.utils import timezone
 from decimal import Decimal
 import logging
-from doctor.models import DoctorEarning
+from doctor.models import DoctorEarning,DoctorWallet
 
 logger = logging.getLogger(__name__)
 
+
 class DoctorEarningsManager:
-    """Utility class to manage doctor earnings (credits/debits)"""
+    """Utility class to manage doctor earnings (credits/debits) and wallet balance"""
     
     @staticmethod
     @transaction.atomic
     def add_credit(doctor, appointment, amount, remarks=None):
         """
-        Add credit to doctor's earnings
+        Add credit to doctor's earnings and update wallet balance
         
         Args:
             doctor: Doctor instance
@@ -194,6 +195,12 @@ class DoctorEarningsManager:
                 logger.warning(f"Credit already exists for appointment {appointment.id}")
                 return existing_credit
             
+            # Get or create wallet
+            wallet, created = DoctorWallet.objects.get_or_create(
+                doctor=doctor,
+                defaults={'balance': Decimal('0.00')}
+            )
+            
             # Create credit entry
             earning = DoctorEarning.objects.create(
                 doctor=doctor,
@@ -203,11 +210,63 @@ class DoctorEarningsManager:
                 remarks=remarks or f"Payment received for appointment on {appointment.appointment_date}"
             )
             
-            logger.info(f"Credit added: {amount} to doctor {doctor.id} for appointment {appointment.id}")
+            # Update wallet balance
+            wallet.balance += Decimal(str(amount))
+            wallet.save()
+            
+            logger.info(f"Credit added: ₹{amount} to doctor {doctor.id} for appointment {appointment.id}. New balance: ₹{wallet.balance}")
             return earning
             
         except Exception as e:
             logger.error(f"Error adding credit to doctor {doctor.id}: {str(e)}")
+            return None
+    
+    @staticmethod
+    @transaction.atomic
+    def add_debit(doctor, appointment, amount, remarks=None):
+        """
+        Add debit to doctor's earnings and update wallet balance
+        Used for refunds when appointments are cancelled
+        
+        Args:
+            doctor: Doctor instance
+            appointment: Appointment instance
+            amount: Decimal amount to debit
+            remarks: Optional remarks for the transaction
+            
+        Returns:
+            DoctorEarning instance or None if failed
+        """
+        try:
+            # Get or create wallet
+            wallet, created = DoctorWallet.objects.get_or_create(
+                doctor=doctor,
+                defaults={'balance': Decimal('0.00')}
+            )
+            
+            # Check if wallet has sufficient balance
+            if wallet.balance < Decimal(str(amount)):
+                logger.error(f"Insufficient balance in doctor {doctor.id} wallet. Required: ₹{amount}, Available: ₹{wallet.balance}")
+                return None
+            
+            # Create debit entry
+            earning = DoctorEarning.objects.create(
+                doctor=doctor,
+                appointment=appointment,
+                amount=Decimal(str(amount)),
+                type='debit',
+                remarks=remarks or f"Refund for cancelled appointment on {appointment.appointment_date}"
+            )
+            
+            # Update wallet balance
+            wallet.balance -= Decimal(str(amount))
+            wallet.save()
+            
+            logger.info(f"Debit added: ₹{amount} from doctor {doctor.id} for appointment {appointment.id}. New balance: ₹{wallet.balance}")
+            return earning
+            
+        except Exception as e:
+            logger.error(f"Error adding debit to doctor {doctor.id}: {str(e)}")
             return None
     
     @staticmethod

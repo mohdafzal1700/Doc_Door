@@ -181,6 +181,15 @@ class Doctor(models.Model):
     is_available = models.BooleanField(default=True)
     
     
+    
+    @property
+    
+    def full_name(self):
+        if self.user:
+            return self.user.get_full_name()
+        return ""
+        
+    
     def check_verification_completion(self):
         """Check if all verification steps are complete and update status"""
         logger.debug(f"Checking verification for Doctor {self.id}")
@@ -1095,7 +1104,8 @@ class DoctorEarning(models.Model):
     
     def __str__(self):
         return f"{self.doctor} - {self.type} - {self.amount}"
-
+    
+    
 
 from django.db import models
 
@@ -1159,3 +1169,11 @@ class DoctorReview(models.Model):
             if old_instance.status == 'pending' and self.status != 'pending':
                 self.reviewed_at = timezone.now()
         super().save(*args, **kwargs)
+        
+        
+class DoctorWallet(models.Model):
+    doctor = models.OneToOneField('Doctor', on_delete=models.CASCADE, related_name='wallet')
+    balance = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+
+    def __str__(self):
+        return f"{self.doctor.full_name} Wallet - ₹{self.balance}"
