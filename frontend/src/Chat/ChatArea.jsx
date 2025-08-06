@@ -1,9 +1,25 @@
 "use client"
-
 import { useState, useRef, useEffect, useCallback } from "react"
 import { Send, Paperclip, MoreVertical, Phone, Video, Edit2, Trash2, Check, X, Image, Film, Music, FileText, Archive, File, Eye, Download } from "lucide-react"
-import { getChatSocket, sendChatMessage, sendTyping, closeChatSocket, getConnectionStatus, markMessageAsRead, editChatMessage, deleteChatMessage, notifyFileUploaded, } from "../service/websocket"
-import { getConversationMessages, uploadFile, handleFile, openFile, downloadFile, getFileMessage } from "../endpoints/Chat"
+import {
+  getChatSocket,
+  sendChatMessage,
+  sendTyping,
+  closeChatSocket,
+  getConnectionStatus,
+  markMessageAsRead,
+  editChatMessage,
+  deleteChatMessage,
+  notifyFileUploaded,
+} from "../service/websocket"
+import {
+  getConversationMessages,
+  uploadFile,
+  handleFile,
+  openFile,
+  downloadFile,
+  getFileMessage
+} from "../endpoints/Chat"
 
 // File size limits
 const FILE_SIZE_LIMITS = {
@@ -12,6 +28,7 @@ const FILE_SIZE_LIMITS = {
   document: 10 * 1024 * 1024, // 10MB for documents
   default: 25 * 1024 * 1024 // 25MB for other files
 }
+
 const MAX_FILE_SIZE = 100 * 1024 * 1024 // 100MB absolute maximum
 
 const getFileCategory = (mimeType) => {
@@ -19,8 +36,15 @@ const getFileCategory = (mimeType) => {
   if (mimeType.startsWith('image/')) return 'image'
   if (mimeType.startsWith('video/')) return 'video'
   if (mimeType.startsWith('audio/')) return 'audio'
-  if (mimeType.includes('pdf') || mimeType.includes('document') || mimeType.includes('text') || mimeType.includes('spreadsheet') || mimeType.includes('presentation')) return 'document'
-  if (mimeType.includes('zip') || mimeType.includes('rar') || mimeType.includes('7z')) return 'archive'
+  if (mimeType === 'application/pdf') return 'pdf'
+  if (mimeType.includes('pdf') || 
+      mimeType.includes('document') || 
+      mimeType.includes('text') || 
+      mimeType.includes('spreadsheet') || 
+      mimeType.includes('presentation')) return 'document'
+  if (mimeType.includes('zip') || 
+      mimeType.includes('rar') || 
+      mimeType.includes('7z')) return 'archive'
   return 'other'
 }
 
@@ -34,6 +58,7 @@ const getFileIcon = (mimeType, size = 'w-5 h-5') => {
     case 'audio':
       return <Music className={size} />
     case 'document':
+    case 'pdf':
       return <FileText className={size} />
     case 'archive':
       return <Archive className={size} />
@@ -54,17 +79,30 @@ const validateFileSize = (file) => {
   const limit = FILE_SIZE_LIMITS[category] || FILE_SIZE_LIMITS.default
   
   if (file.size > MAX_FILE_SIZE) {
-    return { valid: false, error: `File size exceeds maximum limit of ${formatFileSize(MAX_FILE_SIZE)}` }
+    return {
+      valid: false,
+      error: `File size exceeds maximum limit of ${formatFileSize(MAX_FILE_SIZE)}`
+    }
   }
   
   if (file.size > limit) {
-    return { valid: false, error: `${category} files must be smaller than ${formatFileSize(limit)}` }
+    return {
+      valid: false,
+      error: `${category} files must be smaller than ${formatFileSize(limit)}`
+    }
   }
   
   return { valid: true }
 }
 
-export default function ChatArea({ conversation, currentUser, onConversationUpdate, messages: propMessages, onDeleteMessage, onEditMessage }) {
+export default function ChatArea({
+  conversation,
+  currentUser,
+  onConversationUpdate,
+  messages: propMessages,
+  onDeleteMessage,
+  onEditMessage
+}) {
   const [message, setMessage] = useState("")
   const [isTyping, setIsTyping] = useState(false)
   const [typingUsers, setTypingUsers] = useState(new Set())
@@ -76,6 +114,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
   const [isLoadingMessages, setIsLoadingMessages] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [uploadingFiles, setUploadingFiles] = useState(new Set())
+  const [imageLoadErrors, setImageLoadErrors] = useState(new Set()) // Track image load errors
 
   const fileInputRef = useRef(null)
   const messagesEndRef = useRef(null)
@@ -85,6 +124,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
   const componentMounted = useRef(true)
   const loadedConversationId = useRef(null)
   const editInputRef = useRef(null)
+
   const maxRetries = 5
 
   // Get the other participant for header display
@@ -127,9 +167,11 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
       }
 
       setIsLoadingMessages(true)
+
       try {
         console.log('📥 Loading messages for conversation:', conversation.id)
         const response = await getConversationMessages(conversation.id)
+        
         if (componentMounted.current && response.data) {
           const fetchedMessages = response.data.results || response.data || []
           console.log('✅ Messages loaded successfully:', fetchedMessages.length, 'messages')
@@ -161,6 +203,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
     if (conversation?.id && loadedConversationId.current !== conversation.id) {
       loadedConversationId.current = null
       setLocalMessages([])
+      setImageLoadErrors(new Set()) // Reset image load errors
       loadConversationMessages()
     }
   }, [conversation?.id, propMessages, onConversationUpdate])
@@ -184,8 +227,10 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
   useEffect(() => {
     const handleWebSocketMessage = (event) => {
       if (!componentMounted.current) return
+      
       const { conversationId, data } = event.detail
       if (conversationId !== conversation?.id) return
+
       handleWebSocketData(data)
     }
 
@@ -199,12 +244,16 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
     if (!componentMounted.current || connectionStatus === 'connecting') return
 
     setConnectionStatus('connecting')
+
     try {
       const socket = await getChatSocket(conversation.id, currentUser.id)
+      
       if (socket && componentMounted.current) {
         console.log('🔌 WebSocket connection initiated')
+        
         const checkStatus = () => {
           if (!componentMounted.current) return
+          
           const status = getConnectionStatus(conversation.id, currentUser.id)
           if (status.connected) {
             setConnectionStatus('connected')
@@ -213,6 +262,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
             setConnectionStatus('error')
           }
         }
+        
         setTimeout(checkStatus, 100)
       } else if (componentMounted.current) {
         setConnectionStatus('error')
@@ -242,6 +292,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
         }
       }
     }
+
     return null
   }, [activePatient])
 
@@ -285,17 +336,23 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
 
         if (response.data && response.data.id) {
           console.log('✅ File uploaded successfully:', response.data)
-
+          
+          // Get the file category and determine MIME type
+          const mimeType = file.type || 'application/octet-stream'
+          const category = getFileCategory(mimeType)
+          
           const tempMessage = {
             id: fileId,
             temp_id: fileId,
             file_url: response.data.url,
             file_name: file.name,
-            file_type: file.type,
+            file_type: mimeType,
             file_size: file.size,
+            mime_type: mimeType,
             sender: currentUser,
             created_at: new Date().toISOString(),
-            conversation_id: conversation.id
+            conversation_id: conversation.id,
+            content: `Shared a ${category}: ${file.name}`
           }
 
           if (!propMessages) {
@@ -336,7 +393,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
 
   const handleFileMessage = useCallback((fileMessage) => {
     if (!componentMounted.current) return
-
+    
     console.log('📎 File message received:', fileMessage)
 
     // Add file message to local messages if not using prop messages
@@ -365,13 +422,16 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
       clearTimeout(typingTimeoutRef.current)
       typingTimeoutRef.current = null
     }
+
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current)
       reconnectTimeoutRef.current = null
     }
+
     if (conversation?.id && currentUser?.id) {
       closeChatSocket(conversation.id, currentUser.id)
     }
+
     setConnectionStatus('disconnected')
     setRetryCount(0)
   }, [conversation?.id, currentUser?.id])
@@ -406,15 +466,18 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
           handleNewMessage(data.message)
         }
         break
+
       case 'message_sent':
         console.log('✅ Message sent confirmation received:', data.message)
         if (data.message && data.message.sender.id === currentUser.id) {
           handleMessageSentConfirmation(data.message)
         }
         break
+
       case 'typing_indicator':
         handleTypingIndicator(data)
         break
+
       case 'message_edited':
         console.log('✅ Message edit confirmation received:', data.message)
         if (onEditMessage) {
@@ -423,6 +486,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
           handleLocalMessageEdit(data.message.id, data.message.content)
         }
         break
+
       case 'message_deleted':
         console.log('✅ Message delete confirmation received:', data.message_id)
         if (onDeleteMessage) {
@@ -431,23 +495,28 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
           handleLocalMessageDelete(data.message_id)
         }
         break
+
       case 'file_message':
         if (data.message && data.message.sender.id !== currentUser.id) {
           handleFileMessage(data.message)
         }
         break
+
       case 'file_uploaded':
         console.log('📎 File upload notification received:', data.message_id)
         break
+
       case 'message_read':
         console.log('📖 Message marked as read:', data.message_id)
         handleMessageRead(data.message_id, data.read_by)
         break
+
       case 'connection_established':
       case 'connection_confirmed':
         console.log('✅ Connection confirmed by server')
         setConnectionStatus('connected')
         break
+
       case 'error':
         if (!data.message.includes('typing_indicator')) {
           console.error('❌ WebSocket error message:', data.message)
@@ -456,6 +525,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
           }
         }
         break
+
       default:
         console.log('🤷 Unknown message type:', data.type)
     }
@@ -521,9 +591,7 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
       const tempIndex = prev.findIndex(msg => {
         const isMatch = (
           (msg.temp_id && confirmedMessage.temp_id && msg.temp_id === confirmedMessage.temp_id) ||
-          (msg.content === confirmedMessage.content &&
-            msg.sender.id === currentUser.id &&
-            !msg.id)
+          (msg.content === confirmedMessage.content && msg.sender.id === currentUser.id && !msg.id)
         )
         return isMatch
       })
@@ -788,22 +856,36 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
     return String(id).trim()
   }
 
-  const handleFileClick = (fileUrl, fileName, fileType) => {
-    const category = getFileCategory(fileType)
-    if (category === 'image' || fileType === 'application/pdf') {
+  const handleFileClick = (fileUrl, fileName, fileType, mimeType) => {
+    if (!fileUrl) {
+      console.warn('No file URL provided')
+      return
+    }
+
+    const category = getFileCategory(mimeType || fileType)
+    
+    if (category === 'image' || category === 'pdf') {
       // Open in new tab for preview
       window.open(fileUrl, '_blank')
     } else {
       // Download file
       const link = document.createElement('a')
       link.href = fileUrl
-      link.download = fileName
+      link.download = fileName || 'download'
       link.target = '_blank'
       document.body.appendChild(link)
       link.click()
       document.body.removeChild(link)
     }
   }
+
+  const handleImageError = useCallback((messageId) => {
+    setImageLoadErrors(prev => new Set([...prev, messageId]))
+  }, [])
+
+  const isImageBroken = useCallback((messageId) => {
+    return imageLoadErrors.has(messageId)
+  }, [imageLoadErrors])
 
   if (!conversation) {
     return (
@@ -925,65 +1007,82 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
                     </div>
                   ) : (
                     <>
-                      <div
-                        className={`px-4 py-2 rounded-lg cursor-pointer ${
-                          isCurrentUser
-                            ? "bg-blue-500 text-white rounded-br-sm"
-                            : "bg-white text-gray-900 border border-gray-200 rounded-bl-sm"
-                        }`}
-                        onClick={() => !isCurrentUser && handleMarkAsRead(msg.id)}
-                      >
-                        <p className="break-words">{msg.content}</p>
-                        <div className="flex items-center justify-between mt-1">
-                          <p className={`text-xs ${isCurrentUser ? "text-blue-100" : "text-gray-500"}`}>
-                            {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : msg.timestamp}
-                            {msg.edited && <span className="ml-1">(edited)</span>}
-                          </p>
-                          {isCurrentUser && (
-                            <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleEditMessage(msg)
-                                }}
-                                className="text-xs text-blue-200 hover:text-white p-1 rounded"
-                                title="Edit message"
-                              >
-                                <Edit2 className="w-3 h-3" />
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleDeleteMessage(msg.id)
-                                }}
-                                className="text-xs text-red-200 hover:text-white p-1 rounded"
-                                title="Delete message"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )}
+                      {/* Regular text message or file message content */}
+                      {(!msg.file_url || msg.content) && (
+                        <div
+                          className={`px-4 py-2 rounded-lg cursor-pointer ${
+                            isCurrentUser
+                              ? "bg-blue-500 text-white rounded-br-sm"
+                              : "bg-white text-gray-900 border border-gray-200 rounded-bl-sm"
+                          }`}
+                          onClick={() => !isCurrentUser && handleMarkAsRead(msg.id)}
+                        >
+                          <p className="break-words">{msg.content}</p>
+                          <div className="flex items-center justify-between mt-1">
+                            <p className={`text-xs ${isCurrentUser ? "text-blue-100" : "text-gray-500"}`}>
+                              {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : msg.timestamp}
+                              {msg.edited && <span className="ml-1">(edited)</span>}
+                            </p>
+                            {isCurrentUser && (
+                              <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleEditMessage(msg)
+                                  }}
+                                  className="text-xs text-blue-200 hover:text-white p-1 rounded"
+                                  title="Edit message"
+                                >
+                                  <Edit2 className="w-3 h-3" />
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleDeleteMessage(msg.id)
+                                  }}
+                                  className="text-xs text-red-200 hover:text-white p-1 rounded"
+                                  title="Delete message"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
+                      )}
 
-                      {/* File Attachment Rendering - INLINE within the message */}
+                      {/* File Attachment Rendering */}
                       {msg.file_url && (
-                        <div className="mt-2">
+                        <div className={`mt-2 ${!msg.content ? 'mt-0' : ''}`}>
                           {/* Image Preview */}
-                          {getFileCategory(msg.file_type) === 'image' && (
-                            <div className="relative group">
+                          {getFileCategory(msg.mime_type || msg.file_type) === 'image' && !isImageBroken(msg.id) && (
+                            <div className="relative group mb-2">
                               <img
                                 src={msg.file_url}
-                                alt={msg.file_name}
+                                alt={msg.file_name || 'Shared image'}
                                 className="max-w-xs rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                                onClick={() => handleFileClick(msg.file_url, msg.file_name, msg.file_type)}
-                                onError={(e) => {
-                                  e.target.style.display = 'none'
-                                }}
+                                onClick={() => handleFileClick(msg.file_url, msg.file_name, msg.file_type, msg.mime_type)}
+                                onError={() => handleImageError(msg.id)}
+                                loading="lazy"
                               />
                               <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 rounded-lg transition-all duration-200 flex items-center justify-center">
                                 <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                                   <Eye className="w-8 h-8 text-white" />
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* PDF Preview Icon */}
+                          {getFileCategory(msg.mime_type || msg.file_type) === 'pdf' && (
+                            <div className="mb-2">
+                              <div
+                                className="w-32 h-20 bg-red-100 border-2 border-red-200 rounded-lg flex items-center justify-center cursor-pointer hover:bg-red-200 transition-colors"
+                                onClick={() => handleFileClick(msg.file_url, msg.file_name, msg.file_type, msg.mime_type)}
+                              >
+                                <div className="text-center">
+                                  <FileText className="w-8 h-8 text-red-600 mx-auto mb-1" />
+                                  <span className="text-xs text-red-700 font-medium">PDF</span>
                                 </div>
                               </div>
                             </div>
@@ -996,28 +1095,40 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
                                 ? 'bg-blue-100 border-blue-200 text-blue-800 hover:bg-blue-200'
                                 : 'bg-gray-100 border-gray-200 text-gray-800 hover:bg-gray-200'
                             }`}
-                            onClick={() => handleFileClick(msg.file_url, msg.file_name, msg.file_type)}
+                            onClick={() => handleFileClick(msg.file_url, msg.file_name, msg.file_type, msg.mime_type)}
                           >
                             <div className="flex-shrink-0">
-                              {getFileIcon(msg.file_type, 'w-6 h-6')}
+                              {getFileIcon(msg.mime_type || msg.file_type, 'w-6 h-6')}
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium truncate">
-                                {msg.file_name}
+                                {msg.file_name || 'Unknown file'}
                               </p>
                               <div className="flex items-center space-x-2 text-xs opacity-75">
                                 <span>{formatFileSize(msg.file_size)}</span>
                                 <span>•</span>
-                                <span className="capitalize">{getFileCategory(msg.file_type)}</span>
+                                <span className="capitalize">
+                                  {getFileCategory(msg.mime_type || msg.file_type)}
+                                </span>
                               </div>
                             </div>
                             <div className="flex-shrink-0 flex items-center space-x-1">
-                              {(getFileCategory(msg.file_type) === 'image' || msg.file_type === 'application/pdf') && (
+                              {(getFileCategory(msg.mime_type || msg.file_type) === 'image' || 
+                                getFileCategory(msg.mime_type || msg.file_type) === 'pdf') && (
                                 <Eye className="w-4 h-4" />
                               )}
                               <Download className="w-4 h-4" />
                             </div>
                           </div>
+
+                          {/* Fallback for broken images */}
+                          {getFileCategory(msg.mime_type || msg.file_type) === 'image' && isImageBroken(msg.id) && (
+                            <div className="mb-2 p-4 bg-gray-100 border border-gray-200 rounded-lg text-center">
+                              <Image className="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                              <p className="text-sm text-gray-600">Image unavailable</p>
+                              <p className="text-xs text-gray-500">{msg.file_name}</p>
+                            </div>
+                          )}
                         </div>
                       )}
                     </>
@@ -1073,7 +1184,6 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
               <Paperclip className="w-5 h-5" />
             )}
           </button>
-
           <input
             ref={fileInputRef}
             type="file"
@@ -1082,7 +1192,6 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
             className="hidden"
             accept="*/*"
           />
-
           <div className="flex-1">
             <input
               type="text"
@@ -1093,7 +1202,6 @@ export default function ChatArea({ conversation, currentUser, onConversationUpda
               disabled={isSubmitting}
             />
           </div>
-
           <button
             type="submit"
             disabled={!message.trim() || isSubmitting}

@@ -11,7 +11,7 @@ export const getOnlineUsers = () =>
 export const getConversations = () => 
   chatAxios.get("conversations/");
 
-// Updated createConversation to handle both single user ID and full data object
+
 export const createConversation = (data) => {
   // If data is a string (userId), format it properly
   if (typeof data === 'string') {
