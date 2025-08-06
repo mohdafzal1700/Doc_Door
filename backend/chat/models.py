@@ -71,33 +71,23 @@ class Message(models.Model):
                 self.read_at = timezone.now()
         super().save(*args, **kwargs)
 
+
+
 class Notification(models.Model):
     NOTIFICATION_TYPES = (
-        ('new_message', 'New Message'),  # Updated to match consumer
-        ('message', 'Message'),  # Keep for backward compatibility
-        ('typing', 'Typing'),
-        ('online', 'User Online'),
-        ('offline', 'User Offline'),
+        ('message', 'Message'),
+        ('appointment', 'Appointment'),
     )
-
+    
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notifications')
-    notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
-    title = models.CharField(max_length=200)
+    type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES,default='message')
     message = models.TextField()
-    data = models.JSONField(default=dict, blank=True)
     is_read = models.BooleanField(default=False)
-    read_at = models.DateTimeField(null=True, blank=True)  # Added for tracking when read
     created_at = models.DateTimeField(auto_now_add=True)
-
+    
     class Meta:
         ordering = ['-created_at']
-
+    
     def __str__(self):
-        return f"Notification for {self.user}: {self.title}"
-
-    def save(self, *args, **kwargs):
-        # Auto-set read_at when is_read is True
-        if self.is_read and not self.read_at:
-            self.read_at = timezone.now()
-        super().save(*args, **kwargs)
+        return f"Notification for {self.user}: {self.message[:50]}..."

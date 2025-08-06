@@ -187,115 +187,71 @@ export const connectChatSocket = async (conversationId, currentUserId = null) =>
   }
 }
 
-// Connect to notification WebSocket
 export const connectNotificationSocket = async () => {
-  if (!isUserAuthenticated()) {
-    console.error('User not authenticated - cannot create notification WebSocket')
-    return null
-  }
-
-  // Check for existing connection
-  if (notificationSocketInstance && notificationSocketInstance.readyState === WebSocket.OPEN) {
-    console.log('Reusing existing notification WebSocket connection')
-    return notificationSocketInstance
-  } else if (notificationSocketInstance) {
-    try {
-      notificationSocketInstance.close(1000, "Replacing connection")
-    } catch (e) {
-      console.error('Error closing old notification connection:', e)
-    }
-    notificationSocketInstance = null
-  }
-
-  const token = getJWTToken()
-  if (!token) {
-    console.error('No authentication token available for notifications')
-    return null
-  }
-
-  const wsUrl = `${NOTIFICATION_URL}?token=${encodeURIComponent(token)}`
-
-  try {
-    const notificationSocket = new WebSocket(wsUrl)
-    notificationSocketInstance = notificationSocket
-
-    notificationSocket.onopen = (event) => {
-      console.log('Notification WebSocket connected')
+    if (!isUserAuthenticated()) {
+        console.error('User not authenticated')
+        return null
     }
 
-    notificationSocket.onclose = (event) => {
-      console.log('Notification WebSocket disconnected:', event.code, event.reason)
-      if (notificationSocketInstance === notificationSocket) {
+    // Reuse existing connection
+    if (notificationSocketInstance && notificationSocketInstance.readyState === WebSocket.OPEN) {
+        return notificationSocketInstance
+    }
+
+    // Close old connection if exists
+    if (notificationSocketInstance) {
+        notificationSocketInstance.close()
         notificationSocketInstance = null
-      }
-
-      // Reconnection logic
-      const authErrors = [4000, 4001, 4003, 4004]
-      const shouldNotReconnect = event.code === 1000 || authErrors.includes(event.code)
-      
-      if (!shouldNotReconnect) {
-        const delay = Math.min(1000 * Math.pow(2, 1), 30000)
-        setTimeout(() => {
-          if (!notificationSocketInstance) {
-            connectNotificationSocket()
-          }
-        }, delay)
-      } else if (authErrors.includes(event.code)) {
-        console.error('Notification authentication/authorization failed')
-        window.dispatchEvent(new CustomEvent('notification_websocket_auth_error', {
-          detail: { code: event.code, reason: event.reason }
-        }))
-      }
     }
 
-    notificationSocket.onerror = (error) => {
-      console.error('Notification WebSocket error:', error)
-    }
+    const token = getJWTToken()
+    if (!token) return null
 
-    notificationSocket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        console.log('📥 Notification received:', data)
+    const wsUrl = `${NOTIFICATION_URL}?token=${encodeURIComponent(token)}`
 
-        if (data.type === 'error' && data.message && data.message.toLowerCase().includes('authentication')) {
-          window.dispatchEvent(new CustomEvent('notification_websocket_auth_error', {
-            detail: { message: data.message, serverError: true }
-          }))
+    try {
+        const notificationSocket = new WebSocket(wsUrl)
+        notificationSocketInstance = notificationSocket
+
+        notificationSocket.onopen = () => {
+            console.log('Notification WebSocket connected')
         }
 
-        window.dispatchEvent(new CustomEvent('notification_websocket_message', {
-          detail: {
-            data,
-            timestamp: new Date().toISOString(),
-            messageType: data.type
-          }
-        }))
-      } catch (parseError) {
-        console.error('Failed to parse notification message:', parseError)
-      }
-    }
-
-    // Connection timeout
-    const timeoutId = setTimeout(() => {
-      if (notificationSocket.readyState === WebSocket.CONNECTING) {
-        console.error('Notification WebSocket connection timeout')
-        notificationSocket.close()
-        if (notificationSocketInstance === notificationSocket) {
-          notificationSocketInstance = null
+        notificationSocket.onclose = (event) => {
+            console.log('Notification WebSocket disconnected')
+            notificationSocketInstance = null
+            
+            // Auto-reconnect unless manually closed or auth error
+            if (event.code !== 1000 && ![4000, 4001, 4003, 4004].includes(event.code)) {
+                setTimeout(() => connectNotificationSocket(), 3000)
+            }
         }
-      }
-    }, 15000)
 
-    const clearTimeoutHandler = () => clearTimeout(timeoutId)
-    notificationSocket.addEventListener('open', clearTimeoutHandler)
-    notificationSocket.addEventListener('close', clearTimeoutHandler)
+        notificationSocket.onerror = (error) => {
+            console.error('Notification WebSocket error:', error)
+        }
 
-    return notificationSocket
-  } catch (error) {
-    console.error('Error creating Notification WebSocket:', error)
-    notificationSocketInstance = null
-    return null
-  }
+        notificationSocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data)
+                
+                // Dispatch notification event
+                window.dispatchEvent(new CustomEvent('notification_received', {
+                    detail: { data, timestamp: new Date().toISOString() }
+                }))
+                
+            } catch (error) {
+                console.error('Failed to parse notification:', error)
+            }
+        }
+
+        return notificationSocket
+
+    } catch (error) {
+        console.error('Error creating notification WebSocket:', error)
+        notificationSocketInstance = null
+        return null
+    }
 }
 
 // Legacy functions for backward compatibility
@@ -507,47 +463,39 @@ export const deleteChatMessage = async (conversationId, messageId, currentUserId
 }
 
 // Notification functions
-export const sendNotificationMessage = async (messageData) => {
-  const notificationSocket = notificationSocketInstance && notificationSocketInstance.readyState === WebSocket.OPEN 
-    ? notificationSocketInstance 
-    : await connectNotificationSocket()
+const sendNotificationMessage = async (messageData) => {
+    let socket = notificationSocketInstance
+    
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+        socket = await connectNotificationSocket()
+    }
+    
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+        return { success: false, error: 'Connection failed' }
+    }
 
-  if (!notificationSocket || notificationSocket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish notification socket connection' }
-  }
-
-  try {
-    notificationSocket.send(JSON.stringify(messageData))
-    return { success: true, message: messageData }
-  } catch (error) {
-    console.error('Failed to send notification message:', error)
-    return { success: false, error: error.message }
-  }
+    try {
+        socket.send(JSON.stringify(messageData))
+        return { success: true }
+    } catch (error) {
+        return { success: false, error: error.message }
+    }
 }
 
 export const markNotificationAsRead = async (notificationId) => {
-  return await sendNotificationMessage({
-    type: 'mark_notification_read',
-    notification_id: notificationId,
-    timestamp: new Date().toISOString()
-  })
+    return await sendNotificationMessage({
+        type: 'mark_read',
+        notification_id: notificationId
+    })
 }
 
 export const markAllNotificationsAsRead = async () => {
-  return await sendNotificationMessage({
-    type: 'mark_all_read',
-    timestamp: new Date().toISOString()
-  })
+    return await sendNotificationMessage({
+        type: 'mark_all_read'
+    })
 }
 
-export const getNotifications = async (page = 1, limit = 20) => {
-  return await sendNotificationMessage({
-    type: 'get_notifications',
-    page,
-    limit,
-    timestamp: new Date().toISOString()
-  })
-}
+
 
 // Typing convenience functions
 export const sendTypingStart = async (conversationId, currentUserId = null) => {
@@ -576,7 +524,7 @@ export const getConnectionStatus = (conversationId = null, currentUserId = null)
 
   const status = {
     chatSockets: {},
-    notifications: notificationSocketInstance ? notificationSocketInstance.readyState : WebSocket.CLOSED,
+    notifications: notificationSocketInstance?.readyState || WebSocket.CLOSED,
     notificationsConnected: notificationSocketInstance?.readyState === WebSocket.OPEN,
     totalSockets: chatSockets.size,
     connectionStates: Object.fromEntries(connectionStates),

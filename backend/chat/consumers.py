@@ -980,30 +980,30 @@ class ChatConsumer(AsyncWebsocketConsumer):
             logger.error(f"Message {message_id} not found or user {self.user.id} not authorized")
             return None
         except Exception as e:
-          
+        
             logger.error(f"Error deleting message: {e}")
             return None
     
     async def create_message_notification(self, message):
         """Create notification for new message with debugging"""
-       
+    
         
         try:
             # Create notification logic here
             logger.info(f"   📝 Notification creation logic would go here")
-         
+        
         except Exception as e:
-           
+        
             logger.error(f"Error creating notification: {e}")
 
     async def typing_indicator(self, event):
         """Send typing indicator to WebSocket with debugging"""
-      
+    
         try:
             event_user_id = event['user_id']
             current_user_id = str(self.user.id)
             
-           
+        
             
             if event_user_id != current_user_id:
                 typing_response = {
@@ -1018,7 +1018,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 
                 pass
         except Exception as e:
-           
+        
             logger.error(f"Error sending typing indicator: {e}")
 
 # Additional debugging utilities
@@ -1048,169 +1048,68 @@ def debug_json_serialization(data, name=""):
 
 
 class UserConsumer(AsyncWebsocketConsumer):
-    """Consumer for user-specific notifications and events"""
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.user = None
-        self.user_group_name = None
-
     async def connect(self):
-        """Connect user to their personal notification channel"""
-        try:
-            self.user = self.scope['user']
-            if not self.user or self.user.is_anonymous:
-                logger.error("Anonymous user - rejecting notification connection")
-                await self.close(code=4001)
-                return
-
-            self.user_group_name = f'user_{self.user.id}'
-
-            # Join user's personal group
-            await self.channel_layer.group_add(
-                self.user_group_name,
-                self.channel_name
-            )
-
-            await self.accept()
-
-            # FIXED: Convert user ID to string in connection confirmation
-            await self.send(text_data=safe_json_dumps({
-                'type': 'connection_established',
-                'message': 'Connected to notification service',
-                'user_id': str(self.user.id)  # Convert UUID to string
-            }))
-
-            # Send any unsent notifications
-            await self.send_unsent_notifications()
-            logger.info(f"User {self.user.username} connected to notifications")
-
-        except Exception as e:
-            logger.error(f"Notification connection error: {e}")
+        self.user = self.scope['user']
+        if self.user.is_anonymous:
             await self.close()
+            return
+            
+        self.user_group_name = f'user_{self.user.id}'
+        await self.channel_layer.group_add(self.user_group_name, self.channel_name)
+        await self.accept()
+        
+        # Send unread notifications on connect
+        await self.send_unread_notifications()
 
     async def disconnect(self, close_code):
-        """Disconnect from notification channel"""
-        if self.user_group_name:
-            await self.channel_layer.group_discard(
-                self.user_group_name,
-                self.channel_name
-            )
-
-        if self.user and not self.user.is_anonymous:
-            logger.info(f"User {self.user.username} disconnected from notifications")
+        if hasattr(self, 'user_group_name'):
+            await self.channel_layer.group_discard(self.user_group_name, self.channel_name)
 
     async def receive(self, text_data):
-        """Handle incoming notification events"""
         try:
-            if not self.user or self.user.is_anonymous:
-                await self.send(text_data=safe_json_dumps({
-                    'type': 'error',
-                    'message': 'Authentication required'
-                }))
-                return
-
             data = json.loads(text_data)
             event_type = data.get('type')
-
-            if event_type == 'mark_notification_read':
-                await self.handle_mark_notification_read(data)
+            
+            if event_type == 'mark_read':
+                await self.mark_notification_read(data.get('notification_id'))
             elif event_type == 'mark_all_read':
-                await self.handle_mark_all_read()
-            elif event_type == 'get_notifications':
-                await self.handle_get_notifications(data)
-            elif event_type == 'connection_test':  # FIX: Handle connection test for notifications
-                await self.handle_connection_test(data)
-            else:
-                logger.warning(f"Unknown notification event type: {event_type}")
-
+                await self.mark_all_notifications_read()
+                
         except json.JSONDecodeError:
-            logger.error("Invalid JSON received in notification consumer")
-            await self.send(text_data=safe_json_dumps({
-                'type': 'error',
-                'message': 'Invalid JSON format'
-            }))
-        except Exception as e:
-            logger.error(f"Error processing notification event: {e}")
-
-    async def handle_connection_test(self, data):
-        """Handle connection test for notification consumer"""
-        try:
-            await self.send(text_data=safe_json_dumps({
-                'type': 'connection_confirmed',
-                'message': 'Notification connection test successful',
-                'timestamp': timezone.now().isoformat(),
-                'user_id': str(self.user.id)
-            }))
-        except Exception as e:
-            logger.error(f"Error handling notification connection test: {e}")
-
-    @database_sync_to_async
-    def get_unsent_notifications(self):
-        """Get all unread notifications for the user"""
-        try:
-            notifications = self.user.notifications.filter(is_read=False).order_by('-created_at')[:20]
-            return [
-                {
-                    'id': str(n.id),  # Convert UUID to string
-                    'type': n.notification_type,
-                    'title': n.title,
-                    'message': n.message,
-                    'data': n.data,
-                    'created_at': n.created_at.isoformat(),
-                    'is_read': n.is_read,
-                }
-                for n in notifications
-            ]
-        except Exception as e:
-            logger.error(f"Error getting unsent notifications: {e}")
-            return []
-
-    async def send_unsent_notifications(self):
-        """Send all unread notifications to the user"""
-        try:
-            notifications = await self.get_unsent_notifications()
-            unread_count = len(notifications)
-
-            if notifications:
-                await self.send(text_data=safe_json_dumps({
-                    'type': 'notifications_batch',
-                    'notifications': notifications,
-                    'unread_count': unread_count
-                }))
-        except Exception as e:
-            logger.error(f"Error sending unsent notifications: {e}")
+            pass
 
     async def notification(self, event):
-        """Send single notification to WebSocket"""
-        try:
-            # Also send updated unread count
-            unread_count = await self.get_unread_count()
-            await self.send(text_data=safe_json_dumps({
-                'type': 'notification',
-                'notification': event['notification'],
-                'unread_count': unread_count
-            }))
-        except Exception as e:
-            logger.error(f"Error sending notification: {e}")
+        """Send notification to WebSocket"""
+        await self.send(text_data=json.dumps({
+            'type': 'notification',
+            'data': event['notification']
+        }))
 
     @database_sync_to_async
-    def get_unread_count(self):
-        """Get count of unread notifications"""
-        try:
-            return self.user.notifications.filter(is_read=False).count()
-        except Exception as e:
-            logger.error(f"Error getting unread count: {e}")
-            return 0
+    def get_unread_notifications(self):
+        return list(self.user.notifications.filter(is_read=False).values(
+            'id', 'type', 'message', 'created_at'
+        ))
 
-    # Add placeholder methods for other handlers
-    async def handle_mark_notification_read(self, data):
-        """Handle marking notification as read"""
-        pass
+    @database_sync_to_async
+    def mark_notification_read(self, notification_id):
+        self.user.notifications.filter(id=notification_id).update(is_read=True)
 
-    async def handle_mark_all_read(self):
-        """Handle marking all notifications as read"""
-        pass
+    @database_sync_to_async
+    def mark_all_notifications_read(self):
+        self.user.notifications.filter(is_read=False).update(is_read=True)
 
-    async def handle_get_notifications(self, data):
-        """Handle getting notifications"""
-        pass
+    async def send_unread_notifications(self):
+        notifications = await self.get_unread_notifications()
+        if notifications:
+            await self.send(text_data=json.dumps({
+                'type': 'unread_notifications',
+                'notifications': [
+                    {
+                        'id': str(n['id']),
+                        'type': n['type'],
+                        'message': n['message'],
+                        'created_at': n['created_at'].isoformat()
+                    } for n in notifications
+                ]
+            }))

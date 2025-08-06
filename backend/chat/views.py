@@ -13,6 +13,20 @@ from .serializers import (
     NotificationSerializer, MessageSerializer, UserSerializer
 )
 import json
+    
+from rest_framework.views import APIView
+import mimetypes
+import logging
+import mimetypes
+from django.shortcuts import get_object_or_404
+from django.db import transaction
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser
+import cloudinary.uploader
+
 
 import uuid
 
@@ -308,20 +322,24 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         count = request.user.notifications.filter(is_read=False).count()
         return Response({'unread_count': count})
     
-    
 
-from rest_framework.views import APIView
-import mimetypes
-import logging
-import mimetypes
-from django.shortcuts import get_object_or_404
-from django.db import transaction
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from rest_framework.parsers import MultiPartParser, FormParser
-import cloudinary.uploader
+    @action(detail=False, methods=['get'], url_path='unread')
+    def unread(self, request):
+        """Get list of unread notifications"""
+        unread_notifications = self.request.user.notifications.filter(
+            is_read=False
+        ).order_by('-created_at')
+        serializer = self.get_serializer(unread_notifications, many=True)
+        return Response(serializer.data)
+    
+    
+    @action(detail=False, methods=['get'], url_path='count')
+    def count(self, request):
+        """Get unread count for badge - alias for unread_count"""
+        count = request.user.notifications.filter(is_read=False).count()
+        return Response({'count': count, 'unread_count': count})
+    
+    
 
 # Set up logger
 logger = logging.getLogger(__name__)
