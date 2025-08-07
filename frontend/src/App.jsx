@@ -46,8 +46,7 @@ import { VideoCallProvider } from "./videocall/context"
 import GlobalVideoCallWrapper from "./videocall/wrapper"
 import PaymentPage from "./pages/payment_conformation"
 import AdminReviewPage from "./admin/reviewaM"
-
-
+import { NotificationProvider } from "./components/home/notificationprovider"
 function App() {
 
 
@@ -57,6 +56,7 @@ function App() {
   return (
     <ToastProvider>
       <VideoCallProvider>
+        <NotificationProvider>
     <GlobalVideoCallWrapper>
       
     <Router>
@@ -112,6 +112,7 @@ function App() {
     
     </Router>
     </GlobalVideoCallWrapper>
+    </NotificationProvider>
   </VideoCallProvider>
     </ToastProvider>
   )

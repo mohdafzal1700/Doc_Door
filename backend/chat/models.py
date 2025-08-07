@@ -85,6 +85,10 @@ class Notification(models.Model):
     message = models.TextField()
     is_read = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+    related_object_id = models.CharField(max_length=255, null=True, blank=True)  # For linking to messages, appointments, etc.
+    sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name='sent_notifications', null=True, blank=True)
+    
     
     class Meta:
         ordering = ['-created_at']

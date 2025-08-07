@@ -6,7 +6,7 @@ import { useVideoCall } from './context';
 const CallButton = ({
   receiverId,
   appointmentId,
-  appointmentData, // { appointment_date, slot_time, mode, status }
+  appointmentData, 
   doctorName = "Doctor",
   className = "",
   size = "md"

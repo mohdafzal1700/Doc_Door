@@ -267,10 +267,28 @@ class MessageSerializer(serializers.ModelSerializer):
 class NotificationSerializer(serializers.ModelSerializer):
     """Serializer for Notification model"""
     
+    # Add extra fields for better frontend usage
+    sender_username = serializers.CharField(source='sender.username', read_only=True)
+    sender_id = serializers.IntegerField(source='sender.id', read_only=True)
+    type_display = serializers.CharField(source='get_type_display', read_only=True)
+    
     class Meta:
         model = Notification
         fields = [
-            'id', 'user', 'notification_type', 'title', 'message', 
-            'data', 'is_read', 'read_at', 'created_at'
+            'id', 'user', 'type', 'type_display', 'message', 
+            'is_read', 'read_at', 'created_at', 'related_object_id',
+            'sender', 'sender_username', 'sender_id'
         ]
-        read_only_fields = ['id', 'user', 'created_at', 'read_at']
+        read_only_fields = ['id', 'user', 'created_at', 'read_at', 'sender_username', 'sender_id', 'type_display']
+
+    def to_representation(self, instance):
+        """Customize the output representation"""
+        data = super().to_representation(instance)
+        
+        # Don't expose user ID in list views for privacy
+        if self.context.get('request') and hasattr(self.context['request'], 'user'):
+            # Only show user field if it's the same user or admin
+            if data.get('user') != self.context['request'].user.id and not self.context['request'].user.is_staff:
+                data.pop('user', None)
+        
+        return data

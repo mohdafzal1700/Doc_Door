@@ -3,7 +3,6 @@ import { getStoredUserData, isUserAuthenticated, getValidAccessToken } from "../
 
 // Base URLs for WebSocket connections
 const CHAT_URL = "ws://localhost:8000/ws/chat/"
-const NOTIFICATION_URL = "ws://localhost:8000/ws/notifications/"
 
 // WebSocket instances
 const chatSockets = new Map()
@@ -187,76 +186,11 @@ export const connectChatSocket = async (conversationId, currentUserId = null) =>
   }
 }
 
-export const connectNotificationSocket = async () => {
-    if (!isUserAuthenticated()) {
-        console.error('User not authenticated')
-        return null
-    }
 
-    // Reuse existing connection
-    if (notificationSocketInstance && notificationSocketInstance.readyState === WebSocket.OPEN) {
-        return notificationSocketInstance
-    }
-
-    // Close old connection if exists
-    if (notificationSocketInstance) {
-        notificationSocketInstance.close()
-        notificationSocketInstance = null
-    }
-
-    const token = getJWTToken()
-    if (!token) return null
-
-    const wsUrl = `${NOTIFICATION_URL}?token=${encodeURIComponent(token)}`
-
-    try {
-        const notificationSocket = new WebSocket(wsUrl)
-        notificationSocketInstance = notificationSocket
-
-        notificationSocket.onopen = () => {
-            console.log('Notification WebSocket connected')
-        }
-
-        notificationSocket.onclose = (event) => {
-            console.log('Notification WebSocket disconnected')
-            notificationSocketInstance = null
-            
-            // Auto-reconnect unless manually closed or auth error
-            if (event.code !== 1000 && ![4000, 4001, 4003, 4004].includes(event.code)) {
-                setTimeout(() => connectNotificationSocket(), 3000)
-            }
-        }
-
-        notificationSocket.onerror = (error) => {
-            console.error('Notification WebSocket error:', error)
-        }
-
-        notificationSocket.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data)
-                
-                // Dispatch notification event
-                window.dispatchEvent(new CustomEvent('notification_received', {
-                    detail: { data, timestamp: new Date().toISOString() }
-                }))
-                
-            } catch (error) {
-                console.error('Failed to parse notification:', error)
-            }
-        }
-
-        return notificationSocket
-
-    } catch (error) {
-        console.error('Error creating notification WebSocket:', error)
-        notificationSocketInstance = null
-        return null
-    }
-}
 
 // Legacy functions for backward compatibility
 export const getChatSocket = connectChatSocket
-export const getNotificationSocket = connectNotificationSocket
+
 
 // Helper function to ensure socket connection
 const ensureSocketConnection = async (conversationId, currentUserId = null) => {
@@ -318,64 +252,6 @@ export const sendChatMessage = async (conversationId, messageData, currentUserId
   } catch (error) {
     console.error('Failed to send message:', error)
     return { success: false, error: error.message, temp_id: tempId }
-  }
-}
-
-// Mark message as read
-export const markMessageAsRead = async (conversationId, messageId, currentUserId = null) => {
-  const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
-  
-  if (!chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish socket connection' }
-  }
-
-  if (!messageId) {
-    return { success: false, error: 'Message ID is required' }
-  }
-
-  const markReadMessage = {
-    type: 'mark_as_read',
-    message_id: messageId,
-    conversation_id: conversationId,
-    user_id: currentUserId,
-    timestamp: new Date().toISOString()
-  }
-
-  try {
-    chatSocket.send(JSON.stringify(markReadMessage))
-    return { success: true, messageId, conversationId }
-  } catch (error) {
-    console.error('Failed to send mark as read message:', error)
-    return { success: false, error: error.message }
-  }
-}
-
-
-// NEW: Notify file upload completion
-export const notifyFileUploaded = async (conversationId, messageId, currentUserId = null) => {
-  const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
-  
-  if (!chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
-    return { success: false, error: 'Failed to establish socket connection' }
-  }
-
-  if (!messageId) {
-    return { success: false, error: 'Message ID is required' }
-  }
-
-  const fileUploadMessage = {
-    type: 'file_uploaded',
-    message_id: messageId,
-    conversation_id: conversationId,
-    timestamp: new Date().toISOString()
-  }
-
-  try {
-    chatSocket.send(JSON.stringify(fileUploadMessage))
-    return { success: true, messageId, conversationId }
-  } catch (error) {
-    console.error('Failed to send file upload notification:', error)
-    return { success: false, error: error.message }
   }
 }
 
@@ -462,39 +338,6 @@ export const deleteChatMessage = async (conversationId, messageId, currentUserId
   }
 }
 
-// Notification functions
-const sendNotificationMessage = async (messageData) => {
-    let socket = notificationSocketInstance
-    
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-        socket = await connectNotificationSocket()
-    }
-    
-    if (!socket || socket.readyState !== WebSocket.OPEN) {
-        return { success: false, error: 'Connection failed' }
-    }
-
-    try {
-        socket.send(JSON.stringify(messageData))
-        return { success: true }
-    } catch (error) {
-        return { success: false, error: error.message }
-    }
-}
-
-export const markNotificationAsRead = async (notificationId) => {
-    return await sendNotificationMessage({
-        type: 'mark_read',
-        notification_id: notificationId
-    })
-}
-
-export const markAllNotificationsAsRead = async () => {
-    return await sendNotificationMessage({
-        type: 'mark_all_read'
-    })
-}
-
 
 
 // Typing convenience functions
@@ -571,6 +414,179 @@ export const closeChatSocket = (conversationId = null, currentUserId = null) => 
   }
 }
 
+
+// Close all sockets
+export const closeAllSockets = () => {
+  closeChatSocket()
+  closeNotificationSocket()
+}
+
+
+const NOTIFICATION_URL = "ws://localhost:8000/ws/notifications/"
+
+export const connectNotificationSocket = async () => {
+    if (!isUserAuthenticated()) {
+        console.error('User not authenticated')
+        return null
+    }
+
+    // Reuse existing connection
+    if (notificationSocketInstance && notificationSocketInstance.readyState === WebSocket.OPEN) {
+        return notificationSocketInstance
+    }
+
+    // Close old connection if exists
+    if (notificationSocketInstance) {
+        notificationSocketInstance.close()
+        notificationSocketInstance = null
+    }
+
+    const token = getJWTToken()
+    if (!token) return null
+
+    const wsUrl = `${NOTIFICATION_URL}?token=${encodeURIComponent(token)}`
+
+    try {
+        const notificationSocket = new WebSocket(wsUrl)
+        notificationSocketInstance = notificationSocket
+
+        notificationSocket.onopen = () => {
+            console.log('Notification WebSocket connected')
+        }
+
+        notificationSocket.onclose = (event) => {
+            console.log('Notification WebSocket disconnected')
+            notificationSocketInstance = null
+            
+            // Auto-reconnect unless manually closed or auth error
+            if (event.code !== 1000 && ![4000, 4001, 4003, 4004].includes(event.code)) {
+                setTimeout(() => connectNotificationSocket(), 3000)
+            }
+        }
+
+        notificationSocket.onerror = (error) => {
+            console.error('Notification WebSocket error:', error)
+        }
+
+        notificationSocket.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data)
+                
+                // Dispatch notification event
+                window.dispatchEvent(new CustomEvent('notification_received', {
+                    detail: { data, timestamp: new Date().toISOString() }
+                }))
+                
+            } catch (error) {
+                console.error('Failed to parse notification:', error)
+            }
+        }
+
+        return notificationSocket
+
+    } catch (error) {
+        console.error('Error creating notification WebSocket:', error)
+        notificationSocketInstance = null
+        return null
+    }
+}
+
+export const getNotificationSocket = connectNotificationSocket
+
+
+// Mark message as read
+export const markMessageAsRead = async (conversationId, messageId, currentUserId = null) => {
+  const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
+  
+  if (!chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
+    return { success: false, error: 'Failed to establish socket connection' }
+  }
+
+  if (!messageId) {
+    return { success: false, error: 'Message ID is required' }
+  }
+
+  const markReadMessage = {
+    type: 'mark_as_read',
+    message_id: messageId,
+    conversation_id: conversationId,
+    user_id: currentUserId,
+    timestamp: new Date().toISOString()
+  }
+
+  try {
+    chatSocket.send(JSON.stringify(markReadMessage))
+    return { success: true, messageId, conversationId }
+  } catch (error) {
+    console.error('Failed to send mark as read message:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+
+// NEW: Notify file upload completion
+export const notifyFileUploaded = async (conversationId, messageId, currentUserId = null) => {
+  const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
+  
+  if (!chatSocket || chatSocket.readyState !== WebSocket.OPEN) {
+    return { success: false, error: 'Failed to establish socket connection' }
+  }
+
+  if (!messageId) {
+    return { success: false, error: 'Message ID is required' }
+  }
+
+  const fileUploadMessage = {
+    type: 'file_uploaded',
+    message_id: messageId,
+    conversation_id: conversationId,
+    timestamp: new Date().toISOString()
+  }
+
+  try {
+    chatSocket.send(JSON.stringify(fileUploadMessage))
+    return { success: true, messageId, conversationId }
+  } catch (error) {
+    console.error('Failed to send file upload notification:', error)
+    return { success: false, error: error.message }
+  }
+}
+
+
+// Notification functions
+const sendNotificationMessage = async (messageData) => {
+    let socket = notificationSocketInstance
+    
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+        socket = await connectNotificationSocket()
+    }
+    
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+        return { success: false, error: 'Connection failed' }
+    }
+
+    try {
+        socket.send(JSON.stringify(messageData))
+        return { success: true }
+    } catch (error) {
+        return { success: false, error: error.message }
+    }
+}
+
+export const markNotificationAsRead = async (notificationId) => {
+    return await sendNotificationMessage({
+        type: 'mark_read',
+        notification_id: notificationId
+    })
+}
+
+export const markAllNotificationsAsRead = async () => {
+    return await sendNotificationMessage({
+        type: 'mark_all_read'
+    })
+}
+
+
 // Close notification socket
 export const closeNotificationSocket = () => {
   if (notificationSocketInstance) {
@@ -581,10 +597,4 @@ export const closeNotificationSocket = () => {
     }
     notificationSocketInstance = null
   }
-}
-
-// Close all sockets
-export const closeAllSockets = () => {
-  closeChatSocket()
-  closeNotificationSocket()
 }

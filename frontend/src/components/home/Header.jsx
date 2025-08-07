@@ -1,18 +1,12 @@
 "use client"
-
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Home, Search, Video, Info, User, Menu, X, LogOut } from "lucide-react"
 import { useNavigate, useLocation } from "react-router-dom"
 import HeaderLogo from "../ui/HeaderLogo"
 import ThemeToggle from "../ui/ThemeToggle"
-import { 
-  isAuthenticated, 
-  getStoredUserData, 
-  logoutUser, 
-  getUserType,
-  getAuthState,
-  useAuthState 
-} from "../../utils/auth"
+import NotificationSystem from "./NotificationSystem"
+import MobileNotificationSystem from "./MNotificationSystem"
+import { isAuthenticated, logoutUser, useAuthState } from "../../utils/auth"
 
 const ROUTES = {
   HOME: "/home",
@@ -27,7 +21,7 @@ const Header = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
-  
+
   // Use the custom auth hook for consistent state management
   const authState = useAuthState()
 
@@ -41,23 +35,21 @@ const Header = () => {
   const handleProfileClick = async () => {
     console.log("🔍 Profile button clicked in Header")
     console.log("Header auth state:", authState)
-    
-    // Check real-time auth status before navigation
     try {
       const isAuth = await isAuthenticated()
       if (isAuth && authState.isLoggedIn) {
         console.log("Header: User is authenticated, navigating to patient portal")
         navigate("/patientportal")
-        setIsMenuOpen(false) // Close mobile menu if open
+        setIsMenuOpen(false)
       } else {
         console.log("Header: User not authenticated, redirecting to login")
         navigate("/login")
-        setIsMenuOpen(false) // Close mobile menu if open
+        setIsMenuOpen(false)
       }
     } catch (error) {
       console.error("Header: Auth check failed:", error)
       navigate("/login")
-      setIsMenuOpen(false) // Close mobile menu if open
+      setIsMenuOpen(false)
     }
   }
 
@@ -75,11 +67,10 @@ const Header = () => {
     } finally {
       console.log("✅ Header: Navigating to login after logout")
       navigate("/login")
-      setIsMenuOpen(false) // Close mobile menu if open
+      setIsMenuOpen(false)
     }
   }
 
-  // Get current page for active state
   const getCurrentPage = () => {
     return navItems.find(item => location.pathname === item.path)
   }
@@ -90,7 +81,6 @@ const Header = () => {
     <header className="bg-white dark:bg-gray-900 shadow-sm border-b border-gray-100 dark:border-gray-800 transition-colors duration-300 sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
-          
           {/* Logo Section */}
           <div className="flex items-center cursor-pointer" onClick={() => {
             navigate("/home")
@@ -104,7 +94,6 @@ const Header = () => {
             {navItems.map((item) => {
               const IconComponent = item.icon
               const isActive = currentPage?.path === item.path
-
               return (
                 <button
                   key={item.name}
@@ -134,7 +123,6 @@ const Header = () => {
 
           {/* Desktop Right Section */}
           <div className="hidden lg:flex items-center space-x-2">
-            
             {/* User greeting (when logged in) */}
             {authState.isLoggedIn && authState.user && (
               <span className="text-sm text-gray-600 dark:text-gray-300 mr-2">
@@ -147,16 +135,16 @@ const Header = () => {
               </span>
             )}
 
+            {/* Desktop Notification System */}
+            <NotificationSystem isLoggedIn={authState.isLoggedIn} />
+
             {/* Profile Button */}
             <button
               onClick={handleProfileClick}
               className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors duration-200 group"
               title={authState.isLoggedIn ? "Go to Profile" : "Login"}
             >
-              <User
-                size={20}
-                className="text-gray-600 dark:text-gray-300 group-hover:text-purple-600 dark:group-hover:text-purple-400"
-              />
+              <User size={20} className="text-gray-600 dark:text-gray-300 group-hover:text-purple-600 dark:group-hover:text-purple-400" />
             </button>
 
             {/* Logout Button (only when logged in) */}
@@ -166,10 +154,7 @@ const Header = () => {
                 className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-200 group"
                 title="Logout"
               >
-                <LogOut
-                  size={20}
-                  className="text-gray-600 dark:text-gray-300 group-hover:text-red-600 dark:group-hover:text-red-400"
-                />
+                <LogOut size={20} className="text-gray-600 dark:text-gray-300 group-hover:text-red-600 dark:group-hover:text-red-400" />
               </button>
             )}
 
@@ -178,7 +163,11 @@ const Header = () => {
 
           {/* Mobile Menu Button */}
           <div className="lg:hidden flex items-center space-x-2">
+            {/* Mobile Notification System */}
+            <MobileNotificationSystem isLoggedIn={authState.isLoggedIn} />
+
             <ThemeToggle />
+            
             <button
               onClick={() => setIsMenuOpen(!isMenuOpen)}
               className="p-2 rounded-md text-gray-700 dark:text-gray-300 hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors duration-200"
@@ -193,12 +182,10 @@ const Header = () => {
         {isMenuOpen && (
           <div className="lg:hidden py-4 border-t border-gray-100 dark:border-gray-800">
             <div className="flex flex-col space-y-2">
-              
               {/* Mobile Navigation Items */}
               {navItems.map((item) => {
                 const IconComponent = item.icon
                 const isActive = currentPage?.path === item.path
-
                 return (
                   <button
                     key={item.name}
@@ -220,7 +207,6 @@ const Header = () => {
 
               {/* Mobile User Section */}
               <div className="border-t border-gray-100 dark:border-gray-800 pt-2 mt-2">
-                
                 {/* User greeting (mobile) */}
                 {authState.isLoggedIn && authState.user && (
                   <div className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300">

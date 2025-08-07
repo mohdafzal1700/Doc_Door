@@ -2045,6 +2045,7 @@ class PaymentInitiationView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 from patients.utils import DoctorEarningsManager
+from chat.utils import create_and_send_notification
 
 class PaymentVerificationView(APIView):
     """Verify and complete payment"""
@@ -2106,18 +2107,28 @@ class PaymentVerificationView(APIView):
                 
                 if not doctor_earning:
                     logger.warning(f"Failed to add credit to doctor for appointment {appointment_id}")
-                    
-
-                # Update appointment
-                appointment.is_paid = True
-                appointment.save()
-
-                # Send confirmation (you can add email/SMS notification here)
-                logger.info(f"Payment completed for appointment {appointment_id}")
+                
                 
                 # Update appointment
                 appointment.is_paid = True
                 appointment.save()
+                
+            patient_notification = create_and_send_notification(
+                user_id=appointment.patient.user.id,
+                message=f"Payment successful! Your appointment with Dr. {appointment.doctor.user.get_full_name()} on {appointment.appointment_date.strftime('%B %d, %Y')} at {appointment.slot_time.strftime('%I:%M %p')} is confirmed.",
+                notification_type='appointment',
+                related_object_id=str(appointment.id),
+                sender_id=None
+            )
+            
+            # Create notification for DOCTOR
+            doctor_notification = create_and_send_notification(
+                user_id=appointment.doctor.user.id,
+                message=f"New appointment confirmed! {appointment.patient.user.get_full_name()} has paid ₹{payment.amount} for appointment on {appointment.appointment_date.strftime('%B %d, %Y')} at {appointment.slot_time.strftime('%I:%M %p')}.",
+                notification_type='appointment',
+                related_object_id=str(appointment.id),
+                sender_id=appointment.patient.user.id
+            )
             
             # Send confirmation (you can add email/SMS notification here)
             logger.info(f"Payment completed for appointment {appointment_id}")
