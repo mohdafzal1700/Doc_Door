@@ -1,20 +1,17 @@
 "use client"
-
 import { useState } from "react"
 import { Home, Calendar, MessageSquare, Bell, User, LogOut, X, Menu } from "lucide-react"
 import { useNavigate } from "react-router-dom"
 import DocHeaderLogo from "./DocLogo"
-import { 
-  isAuthenticated, 
-  logoutUser, 
-  useAuthState 
-} from "../../utils/auth" // Adjust path as needed
+import { isAuthenticated, logoutUser, useAuthState } from "../../utils/auth" // Adjust path as needed
+import NotificationSystem from "./NotificationSystem"
+import MobileNotificationSystem from "./MNotificationSystem"
 
 export default function DocHeader() {
   const navigate = useNavigate()
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
-  
+
   // Use the custom auth hook for consistent state management
   const authState = useAuthState()
 
@@ -90,6 +87,9 @@ export default function DocHeader() {
             </span>
           )}
 
+          {/* Desktop Notification System */}
+          <NotificationSystem isLoggedIn={authState.isLoggedIn} />
+
           {/* User Menu */}
           <div className="relative">
             <button
@@ -123,6 +123,9 @@ export default function DocHeader() {
 
         {/* Mobile Menu Button */}
         <div className="lg:hidden flex items-center space-x-2">
+          {/* Mobile Notification System */}
+          <MobileNotificationSystem isLoggedIn={authState.isLoggedIn} />
+          
           <button
             onClick={() => setIsMenuOpen(!isMenuOpen)}
             className="p-2 rounded-md text-white hover:bg-blue-800 transition-colors duration-200"
@@ -137,7 +140,6 @@ export default function DocHeader() {
       {isMenuOpen && (
         <div className="lg:hidden absolute top-full left-0 right-0 bg-blue-900 border-t border-blue-800 py-4 px-6 z-40">
           <div className="flex flex-col space-y-2">
-            
             {/* Mobile Navigation Items */}
             {navItems.map((item) => {
               const IconComponent = item.icon
@@ -155,7 +157,6 @@ export default function DocHeader() {
 
             {/* Mobile User Section */}
             <div className="border-t border-blue-800 pt-2 mt-2">
-              
               {/* User greeting (mobile) */}
               {authState.isLoggedIn && authState.user && (
                 <div className="px-4 py-2 text-sm text-blue-100">

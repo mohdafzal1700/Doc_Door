@@ -12,7 +12,7 @@ const ROUTES = {
   HOME: "/home",
   FIND_DOCTOR: '/patient/findDoctor',
   CONSULTATION: "/consultation",
-  ABOUT: "/about",
+  ABOUT: "/about",  
   LOGIN: "/login",
   PATIENT_PORTAL: "/patientportal"
 }
