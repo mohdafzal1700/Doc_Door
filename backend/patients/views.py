@@ -10,7 +10,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q
 
-
+from .utils import handle_appointment_cancellation, PatientWalletManager
 from math import radians, cos, sin, asin, sqrt
 from datetime import datetime
 
@@ -1500,21 +1500,35 @@ class AppointmentDetailView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            appointment.status = 'cancelled'
-            appointment.save()
-            logger.info(f"Appointment {appointment_id} cancelled")
+            # Get refund amount (assuming you have consultation_fee field)
+            refund_amount = appointment.consultation_fee
             
-            return Response({
-                'success': True,
-                'message': 'Appointment cancelled successfully'
-            }, status=status.HTTP_200_OK)
+            # Handle appointment cancellation with wallet transfer
+            success, message = handle_appointment_cancellation(appointment, refund_amount)
+            
+            if success:
+                # Update appointment status
+                appointment.status = 'cancelled'
+                appointment.save()
+                logger.info(f"Appointment {appointment_id} cancelled and wallet credited")
+                
+                return Response({
+                    'success': True,
+                    'message': f'Appointment cancelled successfully. {message}'
+                }, status=status.HTTP_200_OK)
+            else:
+                logger.error(f"Failed to process wallet transfer for appointment {appointment_id}: {message}")
+                return Response({
+                    'success': False,
+                    'message': f'Appointment cancellation failed: {message}'
+                }, status=status.HTTP_400_BAD_REQUEST)
+                
         except Exception as e:
             logger.error(f"Error cancelling appointment {appointment_id}: {str(e)}")
             return Response({
                 'success': False,
                 'message': 'Failed to cancel appointment'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class DoctorBookingDetailView(APIView):
     """Doctor details for booking page"""

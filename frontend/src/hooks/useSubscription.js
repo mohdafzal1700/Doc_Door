@@ -193,7 +193,7 @@ export const createSubscriptionErrorModal = (error) => {
             confirmText: 'View Plans',
             cancelText: 'Cancel',
             onConfirm: () => {
-                window.location.href = '/subscription/plans';
+                window.location.href = '/doctor/choosePlan';
             }
         };
     } else if (error?.response?.status === 403) {
@@ -207,7 +207,7 @@ export const createSubscriptionErrorModal = (error) => {
                 confirmText: 'Upgrade Plan',
                 cancelText: 'Cancel',
                 onConfirm: () => {
-                    window.location.href = '/subscription/plans';
+                    window.location.href = '/doctor/choosePlan';
                 }
             };
         } else {
@@ -218,7 +218,7 @@ export const createSubscriptionErrorModal = (error) => {
                 confirmText: 'View Plans',
                 cancelText: 'Cancel',
                 onConfirm: () => {
-                    window.location.href = '/subscription/plans';
+                    window.location.href = '/doctor/choosePlan';
                 }
             };
         }

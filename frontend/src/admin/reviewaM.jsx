@@ -18,9 +18,11 @@ export default function AdminReviewPage() {
     try {
       setLoading(true)
       const response = await getAllAdminReviews()
+      console.log(response.data.data)
       if (response.data.success) {
         setReviews(response.data.data)
         setSummary(response.data.summary)
+        
       }
     } catch (error) {
       console.error('Error fetching reviews:', error)
@@ -164,7 +166,7 @@ export default function AdminReviewPage() {
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <h3 className="font-medium">
-                        Dr. {review.doctor?.user?.first_name} {review.doctor?.user?.last_name}
+                        Dr. {review.doctor_name} {review.doctor?.user?.last_name}
                       </h3>
                       <p className="text-sm text-gray-600">{review.doctor?.specialty}</p>
                     </div>
@@ -183,7 +185,7 @@ export default function AdminReviewPage() {
                       {renderStars(review.rating)}
                     </div>
                     <p className="text-sm text-gray-700 mb-2">
-                      <span className="font-medium">Patient:</span> {review.patient?.user?.first_name} {review.patient?.user?.last_name}
+                      <span className="font-medium">Patient:</span> {review.patient_name} {review.patient?.user?.last_name}
                     </p>
                     {review.description && (
                       <p className="text-sm italic">"{review.description}"</p>

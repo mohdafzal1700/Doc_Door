@@ -1177,3 +1177,29 @@ class DoctorWallet(models.Model):
 
     def __str__(self):
         return f"{self.doctor.full_name} Wallet - ₹{self.balance}"
+    
+class PatientWallet(models.Model):
+    patient=models.OneToOneField('Patient',on_delete=models.CASCADE, related_name='wallet')
+    balance=models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+
+
+class PatientTransaction(models.Model):
+    """Model to track patient wallet transactions"""
+    TRANSACTION_TYPES = (
+        ('credit', 'Credit'),
+        ('debit', 'Debit'),
+    )
+    
+    patient = models.ForeignKey('Patient', on_delete=models.CASCADE, related_name='transactions')
+    appointment = models.ForeignKey('Appointment', on_delete=models.CASCADE, null=True, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    type = models.CharField(max_length=10, choices=TRANSACTION_TYPES)
+    remarks = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.patient} - {self.type} - ₹{self.amount}"
