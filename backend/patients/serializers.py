@@ -686,6 +686,8 @@ class AppointmentSerializer(serializers.ModelSerializer):
     
     end_time = serializers.SerializerMethodField()
     doctor = serializers.CharField(write_only=True)
+    
+    medical_record_details = serializers.SerializerMethodField()
 
     class Meta:
         model = Appointment
@@ -693,7 +695,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
             'id', 'patient', 'doctor', 'service', 'schedule',
             'appointment_date', 'slot_time', 'mode', 'address',
             'status', 'total_fee', 'is_paid', 'notes',
-            'created_at', 'updated_at', 'medical_record','service_id', 'duration',
+            'created_at', 'updated_at', 'medical_record','service_id', 'duration','medical_record_details',
             # Computed fields
             'patient_name', 'doctor_name', 'service_name','doctor_id',
             'formatted_date_time', 'status_display',
@@ -707,6 +709,24 @@ class AppointmentSerializer(serializers.ModelSerializer):
         start = datetime.combine(obj.appointment_date, obj.slot_time)
         end = start + obj.duration
         return end.strftime('%I:%M %p') 
+    
+    
+    def get_medical_record_details(self, obj):
+        if obj.medical_record:
+            # Assuming you have a MedicalRecord model
+            try:
+                medical_record = obj.medical_record  # This should be the related object
+                return {
+                    'id': medical_record.id,
+                    'diagnosis': medical_record.chronic_diseases,
+                    'symptoms': medical_record.medications,
+                    'treatment': medical_record.allergies,
+                    
+                    
+                }
+            except:
+                return None
+        return None
 
     def get_patient_name(self, obj):
         user = obj.patient.user

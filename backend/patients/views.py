@@ -1501,7 +1501,7 @@ class AppointmentDetailView(APIView):
 
         try:
             # Get refund amount (assuming you have consultation_fee field)
-            refund_amount = appointment.consultation_fee
+            refund_amount = appointment.total_fee
             
             # Handle appointment cancellation with wallet transfer
             success, message = handle_appointment_cancellation(appointment, refund_amount)

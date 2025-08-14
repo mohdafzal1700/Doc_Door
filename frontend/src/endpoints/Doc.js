@@ -699,27 +699,27 @@ export const getPendingAppointmentRequests = async () => {
     }
 };
 
-// Get today's appointments for doctor
-export const getDoctorTodayAppointments = async () => {
-    try {
-        const response = await axios.get('appointments/today/');
-        return response;
-    } catch (error) {
-        console.error("Error fetching today's appointments:", error);
-        throw error;
-    }
-};
+// // Get today's appointments for doctor
+// export const getDoctorTodayAppointments = async () => {
+//     try {
+//         const response = await axios.get('appointments/today/');
+//         return response;
+//     } catch (error) {
+//         console.error("Error fetching today's appointments:", error);
+//         throw error;
+//     }
+// };
 
-// Get upcoming appointments for doctor
-export const getDoctorUpcomingAppointments = async () => {
-    try {
-        const response = await axios.get('appointments/upcoming/');
-        return response;
-    } catch (error) {
-        console.error("Error fetching upcoming appointments:", error);
-        throw error;
-    }
-};
+// // Get upcoming appointments for doctor
+// export const getDoctorUpcomingAppointments = async () => {
+//     try {
+//         const response = await axios.get('appointments/upcoming/');
+//         return response;
+//     } catch (error) {
+//         console.error("Error fetching upcoming appointments:", error);
+//         throw error;
+//     }
+// };
 
 // Get specific appointment details
 export const getDoctorAppointmentDetail = async (appointmentId) => {

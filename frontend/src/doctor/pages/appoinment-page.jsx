@@ -1,19 +1,17 @@
-"use client"
-
 import { useState, useEffect } from "react"
 import Button from "../../components/ui/Button"
 import { Card, CardContent } from "../../components/ui/card"
 import Input from "../../components/ui/Input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/Select"
-import { Search, Video, Clock, User, Calendar, Phone, MessageCircle, RefreshCw, AlertCircle, Eye, X, MapPin, FileText, CreditCard, Activity } from "lucide-react"
+import { Search, Video, Clock, User, Calendar, Phone, MessageCircle, RefreshCw, AlertCircle, Eye, X, MapPin, FileText, CreditCard, Activity, CheckCircle } from "lucide-react"
 import DocHeader from '../../components/ui/DocHeader';
 import DoctorSidebar from '../../components/ui/DocSide';
 
 // Import the API function
-import { getDoctorAppointmentDashboard, getDoctorAppointments } from '../../endpoints/Doc'
+import { getDoctorAppointmentDashboard, getDoctorAppointments,updateAppointmentStatus } from '../../endpoints/Doc'
 
 export default function DoctorDashboard() {
-  const [activeTab, setActiveTab] = useState("online")
+  const [activeTab, setActiveTab] = useState("all")
   const [searchQuery, setSearchQuery] = useState("")
   const [sortBy, setSortBy] = useState("time")
   const [appointments, setAppointments] = useState([])
@@ -24,8 +22,9 @@ export default function DoctorDashboard() {
   const [showDetailsModal, setShowDetailsModal] = useState(false)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [allAppointments, setAllAppointments] = useState([])
-
-
+  const [showCompleteConfirm, setShowCompleteConfirm] = useState(false)
+  const [appointmentToComplete, setAppointmentToComplete] = useState(null)
+  const [completing, setCompleting] = useState(false)
 
   // Fetch appointments on component mount and when activeTab changes
   useEffect(() => {
@@ -47,28 +46,21 @@ export default function DoctorDashboard() {
         const appointmentData = Array.isArray(response.data) ? response.data : response.data.results || []
         console.log('Parsed appointments:', appointmentData)
         
-        // Filter by mode on the frontend since backend doesn't have this filter
-        const filteredByMode = appointmentData.filter(appointment => {
-          return activeTab === "online" ? appointment.mode === "online" : appointment.mode === "offline"
-        })
-        
         // Transform the API data to match your component structure
-        const transformedAppointments = filteredByMode.map(appointment => ({
+        const transformedAppointments = appointmentData.map(appointment => ({
           id: appointment.id,
           patientName: appointment.patient_name || getPatientName(appointment),
           age: appointment.patient_age || 'N/A',
           gender: appointment.patient_gender || 'N/A',
-          email: appointment.patient_email || 'N/A', 
+          email: appointment.patient_email || 'N/A',
           phone: appointment.patient_phone || 'N/A',
           profileImage: appointment.patient_profile_image || "/placeholder.svg?height=60&width=60",
-          
           time: appointment.slot_time ? formatTime(appointment.slot_time) : 'No time',
           date: appointment.appointment_date,
           type: appointment.mode === 'online' ? 'Online' : 'Offline',
           status: appointment.status || 'pending',
           reason: appointment.notes || 'Consultation',
           duration: appointment.duration || '30 minutes',
-          
           location: appointment.address?.address || (appointment.mode === 'offline' ? 'Room TBD' : null),
           service: appointment.service_name || 'General Consultation',
           serviceId: appointment.service_id,
@@ -82,85 +74,55 @@ export default function DoctorDashboard() {
           doctorId: appointment.doctor_id,
           createdAt: appointment.created_at,
           updatedAt: appointment.updated_at,
-          medicalRecord: appointment.medical_record,
+          medicalRecord: appointment.medical_record_details,
           mode: appointment.mode,
           schedule: appointment.schedule
         }))
         
-        setAppointments(transformedAppointments)
-        setAllAppointments(transformedAppointments) 
+        // Set all appointments (for stats calculation)
+        setAllAppointments(transformedAppointments)
+        
+        // Filter appointments based on active tab
+        const filteredByMode = activeTab === "all" 
+          ? transformedAppointments 
+          : transformedAppointments.filter(appointment => {
+              return activeTab === "online" 
+                ? appointment.mode === "online" 
+                : appointment.mode === "offline"
+            })
+        
+        setAppointments(filteredByMode)
       } else {
         console.warn('Unexpected response structure:', response)
         setAppointments([])
+        setAllAppointments([])
       }
     } catch (error) {
       console.error('Error fetching appointments:', error)
       setError(error.response?.data?.error || error.message || 'Failed to fetch appointments')
       setAppointments([])
+      setAllAppointments([])
     } finally {
       setLoading(false)
     }
-
   }
 
-  const filteredAppointmentsByTab = allAppointments.filter(appointment => {
-  return activeTab === "online" ? appointment.mode === "online" : appointment.mode === "offline"
-})
+  const filteredAppointments = appointments.filter(appointment => {
+    const matchesSearch = appointment.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         appointment.phone.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                         appointment.email.toLowerCase().includes(searchQuery.toLowerCase())
+    return matchesSearch
+  })
 
-  const filteredAppointments = filteredAppointmentsByTab.filter((appointment) => {
-  const matchesSearch = appointment.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                       appointment.phone.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                       appointment.email.toLowerCase().includes(searchQuery.toLowerCase())
-  // Remove the matchesTab logic since we already filtered by tab
-  return matchesSearch
-})
-
-  const refreshAppointments = async () => {
-    setRefreshing(true)
-    await fetchAppointments()
-    setRefreshing(false)
+  const handleViewDetails = (appointment) => {
+    setSelectedAppointment(appointment)
+    setShowDetailsModal(true)
   }
 
-  const handleViewDetails = async (appointmentId) => {
-    try {
-      setLoadingDetails(true)
-      setShowDetailsModal(true)
-      
-      // Find the appointment in our existing data rather than making a new API call
-      const appointment = appointments.find(a => a.id === appointmentId)
-      
-      if (appointment) {
-        setSelectedAppointment(appointment)
-      } else {
-        setError('Appointment details not found')
-      }
-    } catch (error) {
-      console.error('Error fetching appointment details:', error)
-      setError('Failed to load appointment details')
-    } finally {
-      setLoadingDetails(false)
-    }
-  }
-
-  const handleJoinConsultation = async (appointmentId) => {
-    try {
-      console.log("Joining consultation for appointment:", appointmentId)
-      
-      // Find the appointment in our existing data
-      const appointment = appointments.find(a => a.id === appointmentId)
-      
-      if (appointment) {
-        if (appointment.mode === 'online') {
-          alert('Redirecting to video consultation...')
-        } else {
-          alert('Starting offline appointment...')
-        }
-      } else {
-        alert('Appointment not found')
-      }
-    } catch (error) {
-      console.error('Error joining consultation:', error)
-      alert('Error starting consultation: ' + (error.response?.data?.error || error.message))
+  const handleJoinConsultation = (appointmentId) => {
+    const appointment = appointments.find(a => a.id === appointmentId)
+    if (appointment) {
+      alert(appointment.mode === 'online' ? 'Starting video consultation...' : 'Starting in-person appointment...')
     }
   }
 
@@ -169,7 +131,111 @@ export default function DoctorDashboard() {
     setSelectedAppointment(null)
   }
 
-  // Helper function to get patient name from nested structure
+  // Check if appointment time has passed
+  const isAppointmentTimePassed = (appointment) => {
+    try {
+      const now = new Date()
+      
+      // Parse the appointment date and time
+      let appointmentDateTime
+      
+      // Handle different time formats
+      if (appointment.time && appointment.time !== 'No time') {
+        // Convert 12-hour format to 24-hour if needed
+        let timeStr = appointment.time
+        if (timeStr.includes('PM') || timeStr.includes('AM')) {
+          const [time, period] = timeStr.split(' ')
+          const [hours, minutes] = time.split(':')
+          let hour24 = parseInt(hours)
+          
+          if (period === 'PM' && hour24 !== 12) {
+            hour24 += 12
+          } else if (period === 'AM' && hour24 === 12) {
+            hour24 = 0
+          }
+          
+          timeStr = `${hour24.toString().padStart(2, '0')}:${minutes}`
+        }
+        
+        appointmentDateTime = new Date(`${appointment.date}T${timeStr}`)
+      } else {
+        // If no time, assume it's for today and has passed
+        appointmentDateTime = new Date(appointment.date)
+      }
+      
+      console.log('Current time:', now)
+      console.log('Appointment time:', appointmentDateTime)
+      console.log('Has passed:', appointmentDateTime <= now)
+      
+      return appointmentDateTime <= now
+    } catch (error) {
+      console.error('Error parsing appointment time:', error, appointment)
+      return false
+    }
+  }
+
+  // Handle complete button click
+  const handleCompleteClick = (appointment) => {
+    setAppointmentToComplete(appointment)
+    setShowCompleteConfirm(true)
+  }
+
+  // Handle complete confirmation
+  const handleCompleteConfirm = async (confirmed) => {
+  if (!confirmed) {
+    setShowCompleteConfirm(false)
+    setAppointmentToComplete(null)
+    return
+  }
+
+  try {
+    setCompleting(true)
+    
+    // Call the API to update appointment status
+    const response = await updateAppointmentStatus(appointmentToComplete.id, {
+      status: 'completed',
+      notes: `Appointment completed on ${new Date().toLocaleDateString()}`
+    })
+    
+    console.log('Appointment status updated:', response)
+    
+    // Update local state with the response data
+    const updatedAppointment = {
+      ...appointmentToComplete,
+      status: 'completed',
+      statusDisplay: 'Completed'
+    }
+    
+    const updatedAppointments = appointments.map(appointment =>
+      appointment.id === appointmentToComplete.id ? updatedAppointment : appointment
+    )
+    
+    const updatedAllAppointments = allAppointments.map(appointment =>
+      appointment.id === appointmentToComplete.id ? updatedAppointment : appointment
+    )
+    
+    setAppointments(updatedAppointments)
+    setAllAppointments(updatedAllAppointments)
+    
+    // Show success message
+    alert('Appointment marked as completed successfully!')
+    
+  } catch (error) {
+    console.error('Error completing appointment:', error)
+    
+    // Show detailed error message
+    const errorMessage = error.response?.data?.error || 
+                        error.message || 
+                        'Failed to complete appointment. Please try again.'
+    alert(`Error: ${errorMessage}`)
+    
+  } finally {
+    setCompleting(false)
+    setShowCompleteConfirm(false)
+    setAppointmentToComplete(null)
+  }
+}
+
   const getPatientName = (appointment) => {
     if (appointment.patient?.user?.first_name || appointment.patient?.user?.last_name) {
       return `${appointment.patient.user.first_name || ''} ${appointment.patient.user.last_name || ''}`.trim()
@@ -177,28 +243,25 @@ export default function DoctorDashboard() {
     return appointment.patient?.name || appointment.patient_name || 'Unknown Patient'
   }
 
-  // Helper function to format time
   const formatTime = (timeString) => {
     if (!timeString) return 'No time'
     try {
-      return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit'
+      return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit' 
       })
     } catch (error) {
       return timeString
     }
   }
 
-  // Helper function to format currency
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD'
+    return new Intl.NumberFormat('en-US', { 
+      style: 'currency', 
+      currency: 'USD' 
     }).format(amount || 0)
   }
 
-  // Helper function to format date
   const formatDate = (dateString) => {
     if (!dateString) return 'No date'
     try {
@@ -213,38 +276,26 @@ export default function DoctorDashboard() {
     }
   }
 
-  // Filter appointments based on search query and active tab
-  // const filteredAppointments = appointments.filter((appointment) => {
-  //   const matchesSearch = appointment.patientName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-  //                        appointment.phone.toLowerCase().includes(searchQuery.toLowerCase()) ||
-  //                        appointment.email.toLowerCase().includes(searchQuery.toLowerCase())
-  //   const matchesTab = activeTab === "online" ? appointment.type === "Online" : appointment.type === "Offline"
-  //   return matchesSearch && matchesTab
-  // })
-
-  // Sort appointments
-  const sortedAppointments = [...filteredAppointments].sort((a, b) => {
-    if (sortBy === "time") {
-      return a.time.localeCompare(b.time)
+  // Calculate stats based on current view
+  const getStatsForCurrentView = () => {
+    if (activeTab === "all") {
+      return {
+        online: allAppointments.filter(a => a.mode === "online").length,
+        offline: allAppointments.filter(a => a.mode === "offline").length,
+        total: allAppointments.length
+      }
+    } else {
+      return {
+        online: appointments.filter(a => a.mode === "online").length,
+        offline: appointments.filter(a => a.mode === "offline").length,
+        total: appointments.length
+      }
     }
-    if (sortBy === "name") {
-      return a.patientName.localeCompare(b.patientName)
-    }
-    return 0
-  })
-
-  const getCurrentDate = () => {
-    const today = new Date()
-    return today.toLocaleDateString("en-US", {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    })
   }
 
-  // Show loading state
-  if (loading && appointments.length === 0) {
+  const stats = getStatsForCurrentView()
+
+  if (loading && !appointments.length) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -255,8 +306,7 @@ export default function DoctorDashboard() {
     )
   }
 
-  // Show error state
-  if (error && appointments.length === 0) {
+  if (error && !appointments.length) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center max-w-md mx-auto">
@@ -274,467 +324,427 @@ export default function DoctorDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <DocHeader title="Appointment Dashboard" />
       <div className="flex">
-<DoctorSidebar/>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Dashboard Header */}
-        <div className="mb-8 bg-white rounded-xl shadow-sm p-6">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900 mb-1">Today's Appointments</h1>
-              <p className="text-gray-600">{getCurrentDate()}</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                onClick={refreshAppointments}
-                disabled={refreshing}
-                variant="outline"
-                className="flex items-center gap-2"
-                size="sm"
-              >
-                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-                {refreshing ? 'Refreshing...' : 'Refresh'}
-              </Button>
-            </div>
+        <DoctorSidebar />
+        <main className="flex-1 p-6">
+          {/* Header Section */}
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-gray-800 mb-2">Appointments</h1>
+            <p className="text-gray-600">Manage your upcoming consultations</p>
           </div>
 
-          {/* Error banner */}
-          {error && appointments.length > 0 && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <div className="flex items-center gap-2 text-red-700">
-                <AlertCircle className="h-4 w-4" />
-                <span className="text-sm">{error}</span>
+          {/* Tabs and Search */}
+          <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+            <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6">
+              <div className="flex rounded-lg bg-gray-100 p-1">
+                <button
+                  onClick={() => setActiveTab("all")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    activeTab === "all"
+                      ? "bg-white shadow-sm text-blue-600"
+                      : "text-gray-600 hover:text-gray-800"
+                  }`}
+                >
+                  All
+                </button>
+                <button
+                  onClick={() => setActiveTab("online")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    activeTab === "online"
+                      ? "bg-white shadow-sm text-blue-600"
+                      : "text-gray-600 hover:text-gray-800"
+                  }`}
+                >
+                  Online
+                </button>
+                <button
+                  onClick={() => setActiveTab("offline")}
+                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                    activeTab === "offline"
+                      ? "bg-white shadow-sm text-blue-600"
+                      : "text-gray-600 hover:text-gray-800"
+                  }`}
+                >
+                  In-Person
+                </button>
+              </div>
+
+              <div className="relative w-full sm:w-96">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+                <Input
+                  placeholder="Search patients..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-10 bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 w-full"
+                />
               </div>
             </div>
-          )}
-        </div>
 
-        {/* Tabs and Filters */}
-        <div className="mb-6 bg-white rounded-xl shadow-sm p-6">
-          {/* Tabs */}
-          <div className="flex gap-0 mb-6 border-b border-gray-200">
-            <button
-              onClick={() => {
-                setActiveTab("online")
-                fetchAppointments("online")
-              }}
-              className={`px-4 py-2 text-sm font-medium border-b-2 ${
-                activeTab === "online"
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              Online Appointments
-            </button>
-            <button
-              onClick={() => {
-                setActiveTab("offline")
-                fetchAppointments("offline")
-              }}
-              className={`px-4 py-2 text-sm font-medium border-b-2 ${
-                activeTab === "offline"
-                  ? "border-blue-600 text-blue-600"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
-            >
-              Offline Appointments
-            </button>
-          </div>
-
-          {/* Search and Sort */}
-          <div className="flex flex-col sm:flex-row items-center gap-4">
-            <div className="relative flex-1 w-full">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
-              <Input
-                placeholder="Search patients by name, phone or email..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10 bg-white border-gray-300 focus:border-blue-500 focus:ring-blue-500 w-full"
-              />
-            </div>
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-full sm:w-48 bg-white border-gray-300">
-                <SelectValue placeholder="Sort by" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="time">Sort by Time</SelectItem>
-                <SelectItem value="name">Sort by Name</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* Quick Stats */}
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card className="bg-blue-50 border-blue-100">
-            <CardContent className="p-4 flex items-center">
-              <div className="p-3 rounded-full bg-blue-100 mr-4">
-                <Video className="w-5 h-5 text-blue-600" />
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-blue-900">
-                  {appointments.filter((apt) => apt.type === "Online").length}
+            {/* Stats Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                <div className="flex items-center">
+                  <div className="p-3 rounded-full bg-blue-100 mr-4">
+                    <Video className="w-5 h-5 text-blue-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-blue-900">
+                      {stats.online}
+                    </p>
+                    <p className="text-sm text-blue-700">Online</p>
+                  </div>
                 </div>
-                <div className="text-sm text-blue-700">Online Appointments</div>
               </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-green-50 border-green-100">
-            <CardContent className="p-4 flex items-center">
-              <div className="p-3 rounded-full bg-green-100 mr-4">
-                <MapPin className="w-5 h-5 text-green-600" />
-              </div>
-              <div>
-                <div className="text-2xl font-bold text-green-900">
-                  {appointments.filter((apt) => apt.type === "Offline").length}
+              <div className="bg-green-50 p-4 rounded-lg border border-green-100">
+                <div className="flex items-center">
+                  <div className="p-3 rounded-full bg-green-100 mr-4">
+                    <MapPin className="w-5 h-5 text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-green-900">
+                      {stats.offline}
+                    </p>
+                    <p className="text-sm text-green-700">In-Person</p>
+                  </div>
                 </div>
-                <div className="text-sm text-green-700">Offline Appointments</div>
               </div>
-            </CardContent>
-          </Card>
-          <Card className="bg-purple-50 border-purple-100">
-            <CardContent className="p-4 flex items-center">
-              <div className="p-3 rounded-full bg-purple-100 mr-4">
-                <Activity className="w-5 h-5 text-purple-600" />
+              <div className="bg-purple-50 p-4 rounded-lg border border-purple-100">
+                <div className="flex items-center">
+                  <div className="p-3 rounded-full bg-purple-100 mr-4">
+                    <Activity className="w-5 h-5 text-purple-600" />
+                  </div>
+                  <div>
+                    <p className="text-2xl font-bold text-purple-900">
+                      {stats.total}
+                    </p>
+                    <p className="text-sm text-purple-700">Total</p>
+                  </div>
+                </div>
               </div>
-              <div>
-                <div className="text-2xl font-bold text-purple-900">{appointments.length}</div>
-                <div className="text-sm text-purple-700">Total Appointments</div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          </div>
 
-        {/* Appointment Cards */}
-        <div className="space-y-4">
-          {sortedAppointments.length > 0 ? (
-            sortedAppointments.map((appointment) => (
-              <Card key={appointment.id} className="bg-white border-gray-200 hover:shadow-md transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="flex items-center gap-4">
-                      {/* Profile Image */}
-                      <div className="relative">
-                        <img
-                          src={appointment.profileImage || "/placeholder.svg"}
-                          alt={appointment.patientName}
-                          className="w-14 h-14 rounded-full object-cover border-2 border-gray-200"
-                        />
-                        {appointment.type === "Online" && (
-                          <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
-                        )}
-                      </div>
-
-                      {/* Patient Info */}
-                      <div>
-                        <h3 className="text-lg font-semibold text-gray-900 mb-1">{appointment.patientName}</h3>
-                        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-600">
-                          <span className="flex items-center gap-1">
-                            <User className="w-4 h-4" />
-                            {appointment.age} years • {appointment.gender}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-4 h-4" />
-                            {appointment.time}
-                          </span>
-                          {appointment.location && (
-                            <span className="flex items-center gap-1">
-                              <MapPin className="w-4 h-4" />
-                              {appointment.location}
-                            </span>
+          {/* Appointments List */}
+          <div className="space-y-4">
+            {filteredAppointments.length > 0 ? (
+              filteredAppointments.map((appointment) => (
+                <Card key={appointment.id} className="hover:shadow-md transition-shadow border-gray-200">
+                  <CardContent className="p-6">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="flex items-center gap-4">
+                        <div className="relative">
+                          <img
+                            src={appointment.profileImage}
+                            alt={appointment.patientName}
+                            className="w-14 h-14 rounded-full object-cover border-2 border-gray-200"
+                          />
+                          {appointment.mode === "online" && (
+                            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
                           )}
                         </div>
-                        {appointment.service && (
-                          <div className="mt-1 text-sm text-blue-600">
-                            {appointment.service}
+                        <div>
+                          <h3 className="text-lg font-semibold text-gray-900">{appointment.patientName}</h3>
+                          <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mt-1">
+                            <span className="flex items-center gap-1">
+                              <User className="w-4 h-4" />
+                              {appointment.age} • {appointment.gender}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-4 h-4" />
+                              {appointment.time} • {formatDate(appointment.date)}
+                            </span>
                           </div>
-                        )}
+                        </div>
                       </div>
-                    </div>
 
-                    {/* Action Buttons */}
-                    <div className="flex items-center gap-3 flex-wrap justify-end">
-                      <Button
-                        onClick={() => handleViewDetails(appointment.id)}
-                        variant="outline"
-                        size="sm"
-                        className="text-gray-600 border-gray-300 bg-transparent"
-                      >
-                        <Eye className="w-4 h-4 mr-1" />
-                        Details
-                      </Button>
-                      <Button
-                        onClick={() => handleJoinConsultation(appointment.id)}
-                        size="sm"
-                        className="bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        {appointment.type === "Online" ? (
-                          <>
-                            <Video className="w-4 h-4 mr-1" />
-                            Join
-                          </>
-                        ) : (
-                          <>
-                            <Calendar className="w-4 h-4 mr-1" />
-                            Start
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Additional Info Row */}
-                  <div className="mt-4 pt-4 border-t border-gray-100">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-4 text-sm text-gray-600">
-                        <span>
-                          <strong>Reason:</strong> {appointment.reason}
-                        </span>
-                        <span>
-                          <strong>Duration:</strong> {appointment.duration}
-                        </span>
-                        <span>
-                          <strong>Fee:</strong> {formatCurrency(appointment.totalFee)}
-                        </span>
-                        {appointment.statusDisplay && (
-                          <span className={`px-2 py-1 rounded-full text-xs ${
-                            appointment.status === 'confirmed' 
-                              ? 'bg-green-100 text-green-800'
-                              : appointment.status === 'pending'
-                              ? 'bg-yellow-100 text-yellow-800'
-                              : appointment.status === 'cancelled'
-                              ? 'bg-red-100 text-red-800'
-                              : 'bg-gray-100 text-gray-800'
-                          }`}>
-                            {appointment.statusDisplay}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <Button size="sm" variant="outline" className="text-gray-600 border-gray-300 bg-transparent">
-                          <Phone className="w-4 h-4 mr-1" />
-                          Call
+                      <div className="flex items-center justify-center gap-2">
+                        <Button
+                          onClick={() => handleViewDetails(appointment)}
+                          variant="outline"
+                          size="sm"
+                          className="border-gray-300 px-3 py-1 h-8"
+                        >
+                          <Eye className="w-4 h-4 mr-1" />
+                          View
                         </Button>
-                        <Button size="sm" variant="outline" className="text-gray-600 border-gray-300 bg-transparent">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-gray-600 hover:bg-gray-100/50 transition-colors px-3 py-1 h-8"
+                        >
                           <MessageCircle className="w-4 h-4 mr-1" />
                           Message
                         </Button>
+                        {(appointment.status === 'confirmed' && 
+                         (isAppointmentTimePassed(appointment) || true)) && ( // Added || true for testing - remove in production
+                          <Button
+                            onClick={() => handleCompleteClick(appointment)}
+                            variant="outline"
+                            size="sm"
+                            className="text-green-600 border-green-300 hover:bg-green-50 transition-colors px-3 py-1 h-8"
+                          >
+                            <CheckCircle className="w-4 h-4 mr-1" />
+                            Complete
+                          </Button>
+                        )}
                       </div>
                     </div>
-                    {appointment.notes && (
-                      <div className="mt-2 text-sm text-gray-600">
-                        <strong>Notes:</strong> {appointment.notes}
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          ) : (
-            <div className="text-center py-16 bg-white rounded-xl shadow-sm">
-              <div className="max-w-md mx-auto">
-                <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-6" />
-                <h3 className="text-xl font-semibold text-gray-900 mb-3">No appointments scheduled</h3>
-                <p className="text-gray-500 mb-4">
-                  {activeTab === "online" 
-                    ? "You don't have any online appointments for today" 
-                    : "You don't have any in-person appointments for today"}
-                </p>
-                <Button onClick={refreshAppointments} variant="outline" size="sm">
-                  <RefreshCw className="w-4 h-4 mr-2" />
-                  Refresh
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
 
-      {/* Details Modal */}
-      {showDetailsModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
-              {/* Modal Header */}
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-gray-900">Appointment Details</h2>
-                <Button
-                  onClick={closeDetailsModal}
-                  variant="ghost"
-                  size="sm"
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <X className="w-5 h-5" />
-                </Button>
-              </div>
-
-              {loadingDetails ? (
-                <div className="text-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                  <p className="text-gray-600">Loading appointment details...</p>
-                </div>
-              ) : selectedAppointment ? (
-                <div className="space-y-6">
-                  {/* Patient Information */}
-                  <div className="border-b pb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-3">Patient Information</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-sm text-gray-500">Name</p>
-                        <p className="font-medium">{selectedAppointment.patientName}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Age</p>
-                        <p className="font-medium">{selectedAppointment.age || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Gender</p>
-                        <p className="font-medium">{selectedAppointment.gender || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Phone</p>
-                        <p className="font-medium">{selectedAppointment.phone || 'N/A'}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Email</p>
-                        <p className="font-medium">{selectedAppointment.email || 'N/A'}</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Appointment Information */}
-                  <div className="border-b pb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-3">Appointment Information</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-sm text-gray-500">Date & Time</p>
-                        <p className="font-medium">{selectedAppointment.formattedDateTime || `${formatDate(selectedAppointment.date)} at ${selectedAppointment.time}`}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Type</p>
-                        <p className="font-medium">{selectedAppointment.type}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Service</p>
-                        <p className="font-medium">{selectedAppointment.service}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Status</p>
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          selectedAppointment.status === 'confirmed' 
-                            ? 'bg-green-100 text-green-800'
-                            : selectedAppointment.status === 'pending'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : selectedAppointment.status === 'cancelled'
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-gray-100 text-gray-800'
-                        }`}>
-                          {selectedAppointment.statusDisplay || selectedAppointment.status}
+                    <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-3 text-sm">
+                        <span className="px-2 py-1 bg-gray-100 rounded-full text-gray-700">
+                          {appointment.service}
                         </span>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Fee</p>
-                        <p className="font-medium">{formatCurrency(selectedAppointment.totalFee)}</p>
-                      </div>
-                      <div>
-                        <p className="text-sm text-gray-500">Payment Status</p>
                         <span className={`px-2 py-1 rounded-full text-xs ${
-                          selectedAppointment.isPaid 
+                          appointment.status === 'confirmed'
                             ? 'bg-green-100 text-green-800'
+                            : appointment.status === 'pending'
+                            ? 'bg-yellow-100 text-yellow-800'
+                            : appointment.status === 'completed'
+                            ? 'bg-blue-100 text-blue-800'
                             : 'bg-red-100 text-red-800'
                         }`}>
-                          {selectedAppointment.isPaid ? 'Paid' : 'Unpaid'}
+                          {appointment.statusDisplay}
+                        </span>
+                        <span className="text-gray-600">
+                          {formatCurrency(appointment.totalFee)}
                         </span>
                       </div>
                     </div>
-                  </div>
-
-                  {/* Location/Address (for offline appointments) */}
-                  {selectedAppointment.mode === 'offline' && (
-                    <div className="border-b pb-4">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-3">Location</h3>
-                      <div className="flex items-start gap-2">
-                        <MapPin className="w-5 h-5 text-gray-400 mt-0.5" />
-                        <p className="text-gray-700">{selectedAppointment.location || 'Address not provided'}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Notes */}
-                  {selectedAppointment.notes && (
-                    <div className="border-b pb-4">
-                      <h3 className="text-lg font-semibold text-gray-900 mb-3">Notes</h3>
-                      <div className="flex items-start gap-2">
-                        <FileText className="w-5 h-5 text-gray-400 mt-0.5" />
-                        <p className="text-gray-700">{selectedAppointment.notes}</p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Action Buttons */}
-                  <div className="border-b pb-4">
-                    <h3 className="text-lg font-semibold text-gray-900 mb-3">Available Actions</h3>
-                    <div className="flex flex-wrap gap-3">
-                      {selectedAppointment.canCancel && (
-                        <Button variant="outline" size="sm" className="text-red-600 border-red-300 hover:bg-red-50">
-                          Cancel Appointment
-                        </Button>
-                      )}
-                      {selectedAppointment.canReschedule && (
-                        <Button variant="outline" size="sm" className="text-blue-600 border-blue-300 hover:bg-blue-50">
-                          Reschedule
-                        </Button>
-                      )}
-                      <Button 
-                        onClick={() => handleJoinConsultation(selectedAppointment.id)}
-                        size="sm"
-                        className="bg-blue-600 hover:bg-blue-700 text-white"
-                      >
-                        {selectedAppointment.type === "Online" ? (
-                          <>
-                            <Video className="w-4 h-4 mr-1" />
-                            Join Consultation
-                          </>
-                        ) : (
-                          <>
-                            <Calendar className="w-4 h-4 mr-1" />
-                            Start Appointment
-                          </>
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-
-                  {/* Metadata */}
-                  <div className="text-sm text-gray-500 space-y-1">
-                    <p>Created: {formatDate(selectedAppointment.createdAt)}</p>
-                    <p>Last Updated: {formatDate(selectedAppointment.updatedAt)}</p>
-                    <p>Appointment ID: {selectedAppointment.id}</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="text-center py-8">
-                  <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">Failed to Load Details</h3>
-                  <p className="text-gray-500 mb-4">Could not load appointment details. Please try again.</p>
-                  <Button 
-                    onClick={() => handleViewDetails(selectedAppointment?.id)} 
-                    variant="outline"
-                    size="sm"
-                    className="flex items-center mx-auto"
-                  >
+                  </CardContent>
+                </Card>
+              ))
+            ) : (
+              <div className="text-center py-16 bg-white rounded-xl shadow-sm">
+                <div className="max-w-md mx-auto">
+                  <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-6" />
+                  <h3 className="text-xl font-semibold text-gray-900 mb-3">No appointments found</h3>
+                  <p className="text-gray-500 mb-4">
+                    {searchQuery
+                      ? "No matches for your search"
+                      : activeTab === "all"
+                      ? "You don't have any appointments"
+                      : activeTab === "online"
+                      ? "You don't have any online appointments"
+                      : "You don't have any in-person appointments"}
+                  </p>
+                  <Button onClick={fetchAppointments} variant="outline" size="sm" className="mx-auto">
                     <RefreshCw className="w-4 h-4 mr-2" />
-                    Retry
+                    Refresh
                   </Button>
                 </div>
-              )}
+              </div>
+            )}
+          </div>
+        </main>
+      </div>
+
+      {/* Complete Appointment Confirmation Modal */}
+      {showCompleteConfirm && appointmentToComplete && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full p-6">
+            <div className="text-center">
+              <div className="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-4">
+                <CheckCircle className="h-6 w-6 text-green-600" />
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Complete Appointment</h3>
+              <p className="text-sm text-gray-500 mb-6">
+                Are you sure you want to mark the appointment with{' '}
+                <span className="font-medium">{appointmentToComplete.patientName}</span> as completed?
+              </p>
+              <div className="flex gap-3 justify-center">
+                <Button
+                  onClick={() => handleCompleteConfirm(false)}
+                  variant="outline"
+                  disabled={completing}
+                  className="px-6"
+                >
+                  No
+                </Button>
+                <Button
+                  onClick={() => handleCompleteConfirm(true)}
+                  disabled={completing}
+                  className="bg-green-600 hover:bg-green-700 px-6"
+                >
+                  {completing ? (
+                    <div className="flex items-center">
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                      Processing...
+                    </div>
+                  ) : (
+                    'Yes, Complete'
+                  )}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
       )}
-    </div>
+
+      {/* Appointment Details Modal */}
+      {showDetailsModal && selectedAppointment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-gray-900">Appointment Details</h2>
+                <button
+                  onClick={closeDetailsModal}
+                  className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Patient Info */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Patient Information</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Name</p>
+                      <p className="font-medium">{selectedAppointment.patientName}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Age</p>
+                      <p className="font-medium">{selectedAppointment.age}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Gender</p>
+                      <p className="font-medium">{selectedAppointment.gender}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Contact</p>
+                      <p className="font-medium">{selectedAppointment.phone}</p>
+                      <p className="font-medium text-sm text-gray-600">{selectedAppointment.email}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Appointment Info */}
+                <div className="bg-gray-50 p-4 rounded-lg">
+                  <h3 className="text-lg font-semibold text-gray-900 mb-3">Appointment Details</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Date & Time</p>
+                      <p className="font-medium">
+                        {formatDate(selectedAppointment.date)} at {selectedAppointment.time}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Type</p>
+                      <p className="font-medium capitalize">{selectedAppointment.mode}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Service</p>
+                      <p className="font-medium">{selectedAppointment.service}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Duration</p>
+                      <p className="font-medium">{selectedAppointment.duration}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Fee</p>
+                      <p className="font-medium">{formatCurrency(selectedAppointment.totalFee)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-500">Payment</p>
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        selectedAppointment.isPaid
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-red-100 text-red-800'
+                      }`}>
+                        {selectedAppointment.isPaid ? 'Paid' : 'Unpaid'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {selectedAppointment.medicalRecord && (
+                  <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                      <FileText className="w-5 h-5 text-blue-600 mr-2" />
+                      Medical Record
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <p className="text-sm text-gray-500 font-medium">Record ID</p>
+                        <p className="text-xs text-gray-600 font-mono bg-gray-100 px-2 py-1 rounded">
+                          {selectedAppointment.medicalRecord.id}
+                        </p>
+                      </div>
+                      {selectedAppointment.medicalRecord.symptoms && (
+                        <div>
+                          <p className="text-sm text-gray-500 font-medium">Symptoms</p>
+                          <p className="text-gray-700">{selectedAppointment.medicalRecord.symptoms}</p>
+                        </div>
+                      )}
+                      {selectedAppointment.medicalRecord.diagnosis && (
+                        <div>
+                          <p className="text-sm text-gray-500 font-medium">Diagnosis</p>
+                          <p className="text-gray-700">{selectedAppointment.medicalRecord.diagnosis}</p>
+                        </div>
+                      )}
+                      {selectedAppointment.medicalRecord.treatment && (
+                        <div>
+                          <p className="text-sm text-gray-500 font-medium">Treatment</p>
+                          <p className="text-gray-700">{selectedAppointment.medicalRecord.treatment}</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Location/Notes */}
+                {selectedAppointment.location && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-3">Location</h3>
+                    <div className="flex items-start gap-2">
+                      <MapPin className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                      <p className="text-gray-700">{selectedAppointment.location}</p>
+                    </div>
+                  </div>
+                )}
+
+                {selectedAppointment.notes && (
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <h3 className="text-lg font-semibold text-gray-900 mb-3">Notes</h3>
+                    <div className="flex items-start gap-2">
+                      <FileText className="w-5 h-5 text-gray-400 mt-0.5 flex-shrink-0" />
+                      <p className="text-gray-700">{selectedAppointment.notes}</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-200">
+                  <Button
+                    onClick={() => handleJoinConsultation(selectedAppointment.id)}
+                    className="bg-blue-600 hover:bg-blue-700 flex-1 min-w-[200px]"
+                  >
+                    {selectedAppointment.mode === "online" ? (
+                      <>
+                        <Video className="w-4 h-4 mr-2" />
+                        Start Consultation
+                      </>
+                    ) : (
+                      <>
+                        <Calendar className="w-4 h-4 mr-2" />
+                        Begin Appointment
+                      </>
+                    )}
+                  </Button>
+                  <Button variant="outline" className="border-gray-300 flex-1 min-w-[200px]">
+                    <MessageCircle className="w-4 h-4 mr-2" />
+                    Send Message
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

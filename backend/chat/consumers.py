@@ -1007,6 +1007,9 @@ class UserConsumer(AsyncWebsocketConsumer):
         print(f"🔗 UserConsumer connect attempt")
         
         try:
+            # logger.info("🔌 WebSocket connect() called")
+            # logger.info(f"Headers: {self.scope.get('headers', [])}")
+            # logger.info(f"Query string: {self.scope.get('query_string', b'').decode()}")
             # Get user from ASGI scope (authenticated by middleware)
             self.user = self.scope['user']
             
@@ -1033,7 +1036,7 @@ class UserConsumer(AsyncWebsocketConsumer):
             await self.close(code=4000)
 
     async def disconnect(self, close_code):
-    
+        logger.info(f"🔌 WebSocket disconnected with code: {close_code}")
         if hasattr(self, "user") and self.user and not getattr(self.user, "is_anonymous", True):
             username = getattr(self.user, "username", "Unknown")
         else:
@@ -1048,6 +1051,7 @@ class UserConsumer(AsyncWebsocketConsumer):
     async def receive(self, text_data):
         """Handle incoming notification messages"""
         logger.info(f"\n UserConsumer received message from {self.user.username}: {text_data}")
+        # logger.info(f"📩 Message received: {text_data }")
         try:
             data = json.loads(text_data)
             event_type = data.get('type')
@@ -1199,7 +1203,7 @@ class UserConsumer(AsyncWebsocketConsumer):
             }
             
             await self.send(text_data=json.dumps(response))
-            logger.error(f" Sent {len(notifications)} unread notifications")
+            logger.info(f" Sent {len(notifications)} unread notifications")
             
         except Exception as e:
             logger.error(f" Error sending unread notifications: {e}")

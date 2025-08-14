@@ -2,18 +2,18 @@
 import { useState, useEffect, useRef } from "react"
 import { Bell, X, MessageCircle, UserPlus, Settings, Check, CheckCheck } from "lucide-react"
 
-export default function NotificationSystem({ 
-  currentUser,
-  conversations = [],
-  onNotificationClick
-}) {
+export default function NotificationSystem({ currentUser, conversations = [], onNotificationClick }) {
   const [notifications, setNotifications] = useState([])
   const [permission, setPermission] = useState("default")
   const [unreadCount, setUnreadCount] = useState(0)
   const [showNotifications, setShowNotifications] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
+  
   const notificationSocket = useRef(null)
   const audioRef = useRef(null)
+  const processedNotificationIds = useRef(new Set()) // Track processed notifications
+  const isReconnecting = useRef(false)
 
   // Request notification permission on mount
   useEffect(() => {
@@ -26,10 +26,19 @@ export default function NotificationSystem({
       }
     }
 
-    // Initialize WebSocket connection if available
+    // Initialize WebSocket connection
     initializeWebSocket()
 
+    // Listen for custom notification events
+    const handleNotificationEvent = (event) => {
+      const { data } = event.detail
+      handleWebSocketMessage({ data: JSON.stringify(data) })
+    }
+
+    window.addEventListener('notification_received', handleNotificationEvent)
+
     return () => {
+      window.removeEventListener('notification_received', handleNotificationEvent)
       if (notificationSocket.current) {
         notificationSocket.current.close()
       }
@@ -41,18 +50,48 @@ export default function NotificationSystem({
     checkForNewMessages()
   }, [conversations])
 
-  const initializeWebSocket = () => {
+  const initializeWebSocket = async () => {
     try {
-      // Try to get notification socket if the service is available
+      setLoading(true)
+      
+      // Connect to notification WebSocket
       if (window.getNotificationSocket) {
-        notificationSocket.current = window.getNotificationSocket()
+        const socket = await window.getNotificationSocket()
         
-        if (notificationSocket.current) {
-          notificationSocket.current.onmessage = handleWebSocketMessage
+        if (socket) {
+          notificationSocket.current = socket
+          
+          // Override the onmessage handler to use our function
+          const originalOnMessage = socket.onmessage
+          socket.onmessage = (event) => {
+            handleWebSocketMessage(event)
+            if (originalOnMessage) originalOnMessage(event)
+          }
+
+          // Handle reconnection
+          const originalOnOpen = socket.onopen
+          socket.onopen = (event) => {
+            console.log('✅ Notification WebSocket connected')
+            isReconnecting.current = false
+            if (originalOnOpen) originalOnOpen(event)
+          }
+
+          const originalOnClose = socket.onclose
+          socket.onclose = (event) => {
+            console.log('❌ Notification WebSocket disconnected')
+            if (!isReconnecting.current && event.code !== 1000) {
+              isReconnecting.current = true
+              setTimeout(() => initializeWebSocket(), 3000)
+            }
+            if (originalOnClose) originalOnClose(event)
+          }
         }
       }
     } catch (error) {
-      console.log('WebSocket service not available, using polling method')
+      console.error('❌ Error initializing WebSocket:', error)
+    } finally {
+      setLoading(false)
+      setIsInitialized(true)
     }
   }
 
@@ -62,11 +101,16 @@ export default function NotificationSystem({
       console.log('🔔 WebSocket notification received:', data)
 
       switch (data.type) {
+        case 'unread_notifications':
+          // Handle batch of unread notifications (on reconnect/initial load)
+          handleUnreadNotifications(data.notifications)
+          break
+        case 'notification':
+          // Handle single new notification
+          handleNewNotification(data.data)
+          break
         case 'new_message':
           handleNewMessageNotification(data)
-          break
-        case 'new_notification':
-          handleNewNotification(data.notification)
           break
         case 'notification_read':
           handleNotificationRead(data.notification_id)
@@ -74,10 +118,87 @@ export default function NotificationSystem({
         case 'user_status_changed':
           handleUserStatusNotification(data)
           break
+        default:
+          console.log('Unknown notification type:', data.type)
       }
     } catch (error) {
       console.error('❌ Error parsing notification WebSocket message:', error)
     }
+  }
+
+  const handleUnreadNotifications = (unreadNotifications) => {
+    if (!Array.isArray(unreadNotifications)) return
+
+    console.log(`📥 Received ${unreadNotifications.length} unread notifications`)
+
+    // Filter out notifications we've already processed
+    const newNotifications = unreadNotifications.filter(notif => {
+      const notifId = notif.id || `${notif.type}_${notif.created_at}`
+      return !processedNotificationIds.current.has(notifId)
+    })
+
+    if (newNotifications.length === 0) {
+      console.log('📋 No new unread notifications to process')
+      return
+    }
+
+    // Mark these notifications as processed
+    newNotifications.forEach(notif => {
+      const notifId = notif.id || `${notif.type}_${notif.created_at}`
+      processedNotificationIds.current.add(notifId)
+    })
+
+    // Add to state without showing browser notifications (these are old)
+    setNotifications(prev => {
+      const existingIds = new Set(prev.map(n => n.id))
+      const uniqueNew = newNotifications.filter(notif => !existingIds.has(notif.id))
+      return [...uniqueNew, ...prev]
+    })
+
+    // Update unread count
+    const unreadNewNotifications = newNotifications.filter(notif => !notif.is_read)
+    setUnreadCount(prev => prev + unreadNewNotifications.length)
+
+    console.log(`✅ Added ${newNotifications.length} unread notifications to UI`)
+  }
+
+  const handleNewNotification = (notification) => {
+    if (!notification) return
+
+    const notifId = notification.id || `${notification.type}_${Date.now()}`
+    
+    // Check if we've already processed this notification
+    if (processedNotificationIds.current.has(notifId)) {
+      console.log('🔄 Duplicate notification ignored:', notifId)
+      return
+    }
+
+    // Mark as processed
+    processedNotificationIds.current.add(notifId)
+
+    // Ensure notification has required fields
+    const processedNotification = {
+      id: notifId,
+      type: notification.type || 'message',
+      title: notification.title || 'New Notification',
+      message: notification.message || notification.body || '',
+      created_at: notification.created_at || new Date().toISOString(),
+      is_read: notification.is_read || false,
+      conversation_id: notification.conversation_id,
+      sender: notification.sender
+    }
+
+    console.log('🆕 Processing new notification:', processedNotification)
+
+    setNotifications(prev => [processedNotification, ...prev])
+    
+    if (!processedNotification.is_read) {
+      setUnreadCount(prev => prev + 1)
+    }
+
+    // Show browser notification and play sound for truly new notifications
+    showBrowserNotification(processedNotification.title, processedNotification.message)
+    playNotificationSound()
   }
 
   const checkForNewMessages = () => {
@@ -86,7 +207,8 @@ export default function NotificationSystem({
       return total + (conv.unread_count || 0)
     }, 0)
     
-    setUnreadCount(totalUnread)
+    // Only update if this is from conversations, not notifications
+    // setUnreadCount(totalUnread)
   }
 
   const handleNewMessageNotification = (data) => {
@@ -99,7 +221,7 @@ export default function NotificationSystem({
       is_read: false,
       conversation_id: data.conversation_id
     }
-    
+
     handleNewNotification(notification)
   }
 
@@ -113,20 +235,9 @@ export default function NotificationSystem({
         created_at: new Date().toISOString(),
         is_read: false
       }
-      
+
       handleNewNotification(notification)
     }
-  }
-
-  const handleNewNotification = (notification) => {
-    setNotifications(prev => [notification, ...prev])
-    setUnreadCount(prev => prev + 1)
-    
-    // Show browser notification
-    showBrowserNotification(notification.title, notification.message)
-    
-    // Play notification sound
-    playNotificationSound()
   }
 
   const handleNotificationRead = (notificationId) => {
@@ -175,16 +286,16 @@ export default function NotificationSystem({
       const audioContext = new (window.AudioContext || window.webkitAudioContext)()
       const oscillator = audioContext.createOscillator()
       const gainNode = audioContext.createGain()
-      
+
       oscillator.connect(gainNode)
       gainNode.connect(audioContext.destination)
-      
+
       oscillator.frequency.setValueAtTime(800, audioContext.currentTime)
       oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1)
-      
+
       gainNode.gain.setValueAtTime(0.1, audioContext.currentTime)
       gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2)
-      
+
       oscillator.start(audioContext.currentTime)
       oscillator.stop(audioContext.currentTime + 0.2)
     } catch (error) {
@@ -194,8 +305,14 @@ export default function NotificationSystem({
 
   const handleMarkAsRead = async (notificationId) => {
     try {
+      // Mark locally first
       handleNotificationRead(notificationId)
-      
+
+      // Send to server via WebSocket
+      if (window.markNotificationAsRead) {
+        await window.markNotificationAsRead(notificationId)
+      }
+
       // If this is a message notification, handle it
       const notification = notifications.find(n => n.id === notificationId)
       if (notification && notification.conversation_id && onNotificationClick) {
@@ -208,10 +325,13 @@ export default function NotificationSystem({
 
   const handleMarkAllAsRead = async () => {
     try {
-      setNotifications(prev => 
-        prev.map(notif => ({ ...notif, is_read: true }))
-      )
+      setNotifications(prev => prev.map(notif => ({ ...notif, is_read: true })))
       setUnreadCount(0)
+
+      // Send to server via WebSocket
+      if (window.markAllNotificationsAsRead) {
+        await window.markAllNotificationsAsRead()
+      }
     } catch (error) {
       console.error('❌ Error marking all notifications as read:', error)
     }
@@ -223,18 +343,19 @@ export default function NotificationSystem({
     // Remove from UI after a short delay
     setTimeout(() => {
       setNotifications(prev => prev.filter(notif => notif.id !== notificationId))
+      processedNotificationIds.current.delete(notificationId)
     }, 300)
   }
 
   const handleNotificationItemClick = (notification) => {
     // Mark as read
     handleMarkAsRead(notification.id)
-    
+
     // If it's a message notification, navigate to that conversation
     if (notification.conversation_id && onNotificationClick) {
       onNotificationClick(notification.conversation_id)
     }
-    
+
     // Close notifications panel
     setShowNotifications(false)
   }
@@ -245,6 +366,8 @@ export default function NotificationSystem({
         return <MessageCircle className="w-5 h-5 text-blue-500" />
       case 'user_joined':
         return <UserPlus className="w-5 h-5 text-green-500" />
+      case 'appointment':
+        return <Bell className="w-5 h-5 text-purple-500" />
       case 'system':
         return <Settings className="w-5 h-5 text-gray-500" />
       default:
@@ -274,13 +397,20 @@ export default function NotificationSystem({
     const sampleNotification = {
       id: `sample_${Date.now()}`,
       type: 'message',
-      title: 'New Message',
-      message: 'You have received a new message from a patient',
+      title: 'Demo Notification',
+      message: 'This is a sample notification for testing',
       created_at: new Date().toISOString(),
       is_read: false
     }
-    
+
     handleNewNotification(sampleNotification)
+  }
+
+  // Clear processed IDs when component unmounts or user logs out
+  const clearNotificationCache = () => {
+    processedNotificationIds.current.clear()
+    setNotifications([])
+    setUnreadCount(0)
   }
 
   return (
@@ -336,7 +466,7 @@ export default function NotificationSystem({
 
           {/* Notification List */}
           <div className="max-h-80 overflow-y-auto">
-            {loading ? (
+            {loading && !isInitialized ? (
               <div className="p-8 text-center">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
                 <p className="text-gray-500 mt-2">Loading notifications...</p>

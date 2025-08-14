@@ -4,8 +4,8 @@ import { Home, Calendar, MessageSquare, Bell, User, LogOut, X, Menu } from "luci
 import { useNavigate } from "react-router-dom"
 import DocHeaderLogo from "./DocLogo"
 import { isAuthenticated, logoutUser, useAuthState } from "../../utils/auth" // Adjust path as needed
-import NotificationSystem from "./NotificationSystem"
-import MobileNotificationSystem from "./MNotificationSystem"
+import NotificationSystem from "../home/NotificationSystem"
+import MobileNotificationSystem from "../home/MNotificationSystem"
 
 export default function DocHeader() {
   const navigate = useNavigate()
