@@ -185,29 +185,41 @@ useEffect(() => {
   }
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      <ChatSidebar
-        conversations={conversations}
-        selectedConversation={selectedConversation}
-        currentUser={currentUser}
-        onSelectConversation={handleSelectConversation}
-        onConversationUpdate={handleConversationUpdate}
-        onConversationDelete={handleConversationDelete}
-        onNewConversation={handleNewConversation}
-      />
-
-      <div className="flex-1 flex flex-col">
-        {selectedConversation ? (
-          <ChatArea
-            conversation={selectedConversation}
-            currentUser={currentUser}
-            onConversationUpdate={handleConversationUpdate}
-          />
-        ) : (
-          <EmptyChatState
+   <div className="flex h-screen bg-gray-50 overflow-hidden">
+      {/* Sidebar with custom scrollbar */}
+      <div className="w-80 flex-shrink-0 border-r border-gray-200 bg-white h-full flex flex-col">
+        <div className="overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400 flex-1">
+          <ChatSidebar
             conversations={conversations}
+            selectedConversation={selectedConversation}
             currentUser={currentUser}
+            onSelectConversation={handleSelectConversation}
+            onConversationUpdate={handleConversationUpdate}
+            onConversationDelete={handleConversationDelete}
+            onNewConversation={handleNewConversation}
           />
+        </div>
+      </div>
+
+      {/* Chat area with optimized scrolling */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden bg-white">
+        {selectedConversation ? (
+          <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
+            <div className="h-full flex flex-col">
+              <ChatArea
+                conversation={selectedConversation}
+                currentUser={currentUser}
+                onConversationUpdate={handleConversationUpdate}
+              />
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100 hover:scrollbar-thumb-gray-400">
+            <EmptyChatState
+              conversations={conversations}
+              currentUser={currentUser}
+            />
+          </div>
         )}
       </div>
     </div>

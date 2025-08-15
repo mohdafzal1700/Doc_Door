@@ -5,10 +5,8 @@ import Input from "../../components/ui/Input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui/Select"
 import { Search, Video, Clock, User, Calendar, Phone, MessageCircle, RefreshCw, AlertCircle, Eye, X, MapPin, FileText, CreditCard, Activity, CheckCircle } from "lucide-react"
 import DocHeader from '../../components/ui/DocHeader';
-import DoctorSidebar from '../../components/ui/DocSide';
-
 // Import the API function
-import { getDoctorAppointmentDashboard, getDoctorAppointments,updateAppointmentStatus } from '../../endpoints/Doc'
+import { getDoctorAppointmentDashboard, getDoctorAppointments, updateAppointmentStatus } from '../../endpoints/Doc'
 
 export default function DoctorDashboard() {
   const [activeTab, setActiveTab] = useState("all")
@@ -25,6 +23,10 @@ export default function DoctorDashboard() {
   const [showCompleteConfirm, setShowCompleteConfirm] = useState(false)
   const [appointmentToComplete, setAppointmentToComplete] = useState(null)
   const [completing, setCompleting] = useState(false)
+  
+  // Add missing pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 10
 
   // Fetch appointments on component mount and when activeTab changes
   useEffect(() => {
@@ -114,6 +116,12 @@ export default function DoctorDashboard() {
     return matchesSearch
   })
 
+  // Add pagination calculations
+  const indexOfLastItem = currentPage * itemsPerPage
+  const indexOfFirstItem = indexOfLastItem - itemsPerPage
+  const currentItems = filteredAppointments.slice(indexOfFirstItem, indexOfLastItem)
+  const totalPages = Math.ceil(filteredAppointments.length / itemsPerPage)
+
   const handleViewDetails = (appointment) => {
     setSelectedAppointment(appointment)
     setShowDetailsModal(true)
@@ -122,7 +130,9 @@ export default function DoctorDashboard() {
   const handleJoinConsultation = (appointmentId) => {
     const appointment = appointments.find(a => a.id === appointmentId)
     if (appointment) {
-      alert(appointment.mode === 'online' ? 'Starting video consultation...' : 'Starting in-person appointment...')
+      alert(appointment.mode === 'online' 
+        ? 'Starting video consultation...' 
+        : 'Starting in-person appointment...')
     }
   }
 
@@ -135,10 +145,9 @@ export default function DoctorDashboard() {
   const isAppointmentTimePassed = (appointment) => {
     try {
       const now = new Date()
-      
       // Parse the appointment date and time
       let appointmentDateTime
-      
+
       // Handle different time formats
       if (appointment.time && appointment.time !== 'No time') {
         // Convert 12-hour format to 24-hour if needed
@@ -147,22 +156,19 @@ export default function DoctorDashboard() {
           const [time, period] = timeStr.split(' ')
           const [hours, minutes] = time.split(':')
           let hour24 = parseInt(hours)
-          
           if (period === 'PM' && hour24 !== 12) {
             hour24 += 12
           } else if (period === 'AM' && hour24 === 12) {
             hour24 = 0
           }
-          
           timeStr = `${hour24.toString().padStart(2, '0')}:${minutes}`
         }
-        
         appointmentDateTime = new Date(`${appointment.date}T${timeStr}`)
       } else {
         // If no time, assume it's for today and has passed
         appointmentDateTime = new Date(appointment.date)
       }
-      
+
       console.log('Current time:', now)
       console.log('Appointment time:', appointmentDateTime)
       console.log('Has passed:', appointmentDateTime <= now)
@@ -182,59 +188,55 @@ export default function DoctorDashboard() {
 
   // Handle complete confirmation
   const handleCompleteConfirm = async (confirmed) => {
-  if (!confirmed) {
-    setShowCompleteConfirm(false)
-    setAppointmentToComplete(null)
-    return
-  }
-
-  try {
-    setCompleting(true)
-    
-    // Call the API to update appointment status
-    const response = await updateAppointmentStatus(appointmentToComplete.id, {
-      status: 'completed',
-      notes: `Appointment completed on ${new Date().toLocaleDateString()}`
-    })
-    
-    console.log('Appointment status updated:', response)
-    
-    // Update local state with the response data
-    const updatedAppointment = {
-      ...appointmentToComplete,
-      status: 'completed',
-      statusDisplay: 'Completed'
+    if (!confirmed) {
+      setShowCompleteConfirm(false)
+      setAppointmentToComplete(null)
+      return
     }
-    
-    const updatedAppointments = appointments.map(appointment =>
-      appointment.id === appointmentToComplete.id ? updatedAppointment : appointment
-    )
-    
-    const updatedAllAppointments = allAppointments.map(appointment =>
-      appointment.id === appointmentToComplete.id ? updatedAppointment : appointment
-    )
-    
-    setAppointments(updatedAppointments)
-    setAllAppointments(updatedAllAppointments)
-    
-    // Show success message
-    alert('Appointment marked as completed successfully!')
-    
-  } catch (error) {
-    console.error('Error completing appointment:', error)
-    
-    // Show detailed error message
-    const errorMessage = error.response?.data?.error || 
-                        error.message || 
-                        'Failed to complete appointment. Please try again.'
-    alert(`Error: ${errorMessage}`)
-    
-  } finally {
-    setCompleting(false)
-    setShowCompleteConfirm(false)
-    setAppointmentToComplete(null)
+
+    try {
+      setCompleting(true)
+      
+      // Call the API to update appointment status
+      const response = await updateAppointmentStatus(appointmentToComplete.id, {
+        status: 'completed',
+        notes: `Appointment completed on ${new Date().toLocaleDateString()}`
+      })
+      
+      console.log('Appointment status updated:', response)
+      
+      // Update local state with the response data
+      const updatedAppointment = {
+        ...appointmentToComplete,
+        status: 'completed',
+        statusDisplay: 'Completed'
+      }
+      
+      const updatedAppointments = appointments.map(appointment => 
+        appointment.id === appointmentToComplete.id ? updatedAppointment : appointment
+      )
+      
+      const updatedAllAppointments = allAppointments.map(appointment => 
+        appointment.id === appointmentToComplete.id ? updatedAppointment : appointment
+      )
+      
+      setAppointments(updatedAppointments)
+      setAllAppointments(updatedAllAppointments)
+      
+      // Show success message
+      alert('Appointment marked as completed successfully!')
+      
+    } catch (error) {
+      console.error('Error completing appointment:', error)
+      // Show detailed error message
+      const errorMessage = error.response?.data?.error || error.message || 'Failed to complete appointment. Please try again.'
+      alert(`Error: ${errorMessage}`)
+    } finally {
+      setCompleting(false)
+      setShowCompleteConfirm(false)
+      setAppointmentToComplete(null)
+    }
   }
-}
 
   const getPatientName = (appointment) => {
     if (appointment.patient?.user?.first_name || appointment.patient?.user?.last_name) {
@@ -246,9 +248,9 @@ export default function DoctorDashboard() {
   const formatTime = (timeString) => {
     if (!timeString) return 'No time'
     try {
-      return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', { 
-        hour: '2-digit', 
-        minute: '2-digit' 
+      return new Date(`2000-01-01T${timeString}`).toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit'
       })
     } catch (error) {
       return timeString
@@ -256,9 +258,9 @@ export default function DoctorDashboard() {
   }
 
   const formatCurrency = (amount) => {
-    return new Intl.NumberFormat('en-US', { 
-      style: 'currency', 
-      currency: 'USD' 
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD'
     }).format(amount || 0)
   }
 
@@ -325,52 +327,76 @@ export default function DoctorDashboard() {
   return (
     <div className="min-h-screen bg-gray-50">
       <DocHeader title="Appointment Dashboard" />
-      <div className="flex">
-        <DoctorSidebar />
-        <main className="flex-1 p-6">
-          {/* Header Section */}
-          <div className="mb-8">
-            <h1 className="text-2xl font-bold text-gray-800 mb-2">Appointments</h1>
-            <p className="text-gray-600">Manage your upcoming consultations</p>
+      
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header Section */}
+        <div className="mb-8">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-800">Appointments</h1>
+              <p className="text-gray-600">Manage your upcoming consultations</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={fetchAppointments}
+                variant="outline"
+                size="sm"
+                className="border-gray-300"
+              >
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Refresh
+              </Button>
+            </div>
           </div>
+        </div>
 
-          {/* Tabs and Search */}
-          <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
-            <div className="flex flex-col sm:flex-row justify-between gap-4 mb-6">
-              <div className="flex rounded-lg bg-gray-100 p-1">
-                <button
-                  onClick={() => setActiveTab("all")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    activeTab === "all"
-                      ? "bg-white shadow-sm text-blue-600"
-                      : "text-gray-600 hover:text-gray-800"
-                  }`}
-                >
-                  All
-                </button>
-                <button
-                  onClick={() => setActiveTab("online")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    activeTab === "online"
-                      ? "bg-white shadow-sm text-blue-600"
-                      : "text-gray-600 hover:text-gray-800"
-                  }`}
-                >
-                  Online
-                </button>
-                <button
-                  onClick={() => setActiveTab("offline")}
-                  className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                    activeTab === "offline"
-                      ? "bg-white shadow-sm text-blue-600"
-                      : "text-gray-600 hover:text-gray-800"
-                  }`}
-                >
-                  In-Person
-                </button>
-              </div>
+        {/* Tabs and Filters */}
+        <div className="bg-white rounded-xl shadow-sm p-6 mb-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex space-x-1 rounded-lg bg-gray-100 p-1">
+              <button
+                onClick={() => {
+                  setActiveTab("all")
+                  setCurrentPage(1)
+                }}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === "all"
+                    ? "bg-white shadow-sm text-blue-600"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                All
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab("online")
+                  setCurrentPage(1)
+                }}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === "online"
+                    ? "bg-white shadow-sm text-blue-600"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                Online
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab("offline")
+                  setCurrentPage(1)
+                }}
+                className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+                  activeTab === "offline"
+                    ? "bg-white shadow-sm text-blue-600"
+                    : "text-gray-600 hover:text-gray-800"
+                }`}
+              >
+                In-Person
+              </button>
+            </div>
 
-              <div className="relative w-full sm:w-96">
+            <div className="flex items-center gap-2">
+              <div className="relative w-full md:w-64">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
                 <Input
                   placeholder="Search patients..."
@@ -380,144 +406,166 @@ export default function DoctorDashboard() {
                 />
               </div>
             </div>
+          </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-              <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
-                <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-blue-100 mr-4">
-                    <Video className="w-5 h-5 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-blue-900">
-                      {stats.online}
-                    </p>
-                    <p className="text-sm text-blue-700">Online</p>
-                  </div>
+          {/* Stats Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-blue-100 mr-4">
+                  <Video className="w-5 h-5 text-blue-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-blue-900">
+                    {allAppointments.filter(a => a.mode === "online").length}
+                  </p>
+                  <p className="text-sm text-blue-700">Online Appointments</p>
                 </div>
               </div>
-              <div className="bg-green-50 p-4 rounded-lg border border-green-100">
-                <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-green-100 mr-4">
-                    <MapPin className="w-5 h-5 text-green-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-green-900">
-                      {stats.offline}
-                    </p>
-                    <p className="text-sm text-green-700">In-Person</p>
-                  </div>
+            </div>
+
+            <div className="bg-green-50 p-4 rounded-lg border border-green-100">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-green-100 mr-4">
+                  <MapPin className="w-5 h-5 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-green-900">
+                    {allAppointments.filter(a => a.mode === "offline").length}
+                  </p>
+                  <p className="text-sm text-green-700">In-Person Appointments</p>
                 </div>
               </div>
-              <div className="bg-purple-50 p-4 rounded-lg border border-purple-100">
-                <div className="flex items-center">
-                  <div className="p-3 rounded-full bg-purple-100 mr-4">
-                    <Activity className="w-5 h-5 text-purple-600" />
-                  </div>
-                  <div>
-                    <p className="text-2xl font-bold text-purple-900">
-                      {stats.total}
-                    </p>
-                    <p className="text-sm text-purple-700">Total</p>
-                  </div>
+            </div>
+
+            <div className="bg-purple-50 p-4 rounded-lg border border-purple-100">
+              <div className="flex items-center">
+                <div className="p-3 rounded-full bg-purple-100 mr-4">
+                  <Activity className="w-5 h-5 text-purple-600" />
+                </div>
+                <div>
+                  <p className="text-2xl font-bold text-purple-900">
+                    {allAppointments.length}
+                  </p>
+                  <p className="text-sm text-purple-700">Total Appointments</p>
                 </div>
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Appointments List */}
-          <div className="space-y-4">
-            {filteredAppointments.length > 0 ? (
-              filteredAppointments.map((appointment) => (
-                <Card key={appointment.id} className="hover:shadow-md transition-shadow border-gray-200">
-                  <CardContent className="p-6">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="flex items-center gap-4">
-                        <div className="relative">
-                          <img
-                            src={appointment.profileImage}
-                            alt={appointment.patientName}
-                            className="w-14 h-14 rounded-full object-cover border-2 border-gray-200"
-                          />
-                          {appointment.mode === "online" && (
-                            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
-                          )}
-                        </div>
-                        <div>
-                          <h3 className="text-lg font-semibold text-gray-900">{appointment.patientName}</h3>
-                          <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mt-1">
-                            <span className="flex items-center gap-1">
-                              <User className="w-4 h-4" />
-                              {appointment.age} • {appointment.gender}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-4 h-4" />
-                              {appointment.time} • {formatDate(appointment.date)}
-                            </span>
+        {/* Appointments List */}
+        {loading && !appointments.length ? (
+          <div className="bg-white rounded-xl shadow-sm p-12 flex items-center justify-center">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading appointments...</p>
+            </div>
+          </div>
+        ) : error && !appointments.length ? (
+          <div className="bg-white rounded-xl shadow-sm p-8 text-center">
+            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">Error Loading Appointments</h2>
+            <p className="text-gray-600 mb-4">{error}</p>
+            <Button onClick={fetchAppointments} className="bg-blue-600 hover:bg-blue-700">
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Try Again
+            </Button>
+          </div>
+        ) : (
+          <>
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-6">
+              {currentItems.length > 0 ? (
+                <div className="divide-y divide-gray-200">
+                  {currentItems.map((appointment) => (
+                    <div key={appointment.id} className="p-6 hover:bg-gray-50 transition-colors">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <div className="flex items-center gap-4">
+                          <div className="relative">
+                            <img
+                              src={appointment.profileImage}
+                              alt={appointment.patientName}
+                              className="w-14 h-14 rounded-full object-cover border-2 border-gray-200"
+                            />
+                            {appointment.mode === "online" && (
+                              <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
+                            )}
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold text-gray-900">{appointment.patientName}</h3>
+                            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600 mt-1">
+                              <span className="flex items-center gap-1">
+                                <User className="w-4 h-4" />
+                                {appointment.age} • {appointment.gender}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-4 h-4" />
+                                {appointment.time} • {formatDate(appointment.date)}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                      </div>
 
-                      <div className="flex items-center justify-center gap-2">
-                        <Button
-                          onClick={() => handleViewDetails(appointment)}
-                          variant="outline"
-                          size="sm"
-                          className="border-gray-300 px-3 py-1 h-8"
-                        >
-                          <Eye className="w-4 h-4 mr-1" />
-                          View
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-gray-600 hover:bg-gray-100/50 transition-colors px-3 py-1 h-8"
-                        >
-                          <MessageCircle className="w-4 h-4 mr-1" />
-                          Message
-                        </Button>
-                        {(appointment.status === 'confirmed' && 
-                         (isAppointmentTimePassed(appointment) || true)) && ( // Added || true for testing - remove in production
+                        <div className="flex items-center gap-2">
                           <Button
-                            onClick={() => handleCompleteClick(appointment)}
+                            onClick={() => handleViewDetails(appointment)}
                             variant="outline"
                             size="sm"
-                            className="text-green-600 border-green-300 hover:bg-green-50 transition-colors px-3 py-1 h-8"
+                            className="border-gray-300 px-3 py-1 h-8"
                           >
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Complete
+                            <Eye className="w-4 h-4 mr-1" />
+                            View
                           </Button>
-                        )}
-                      </div>
-                    </div>
 
-                    <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                      <div className="flex flex-wrap items-center gap-3 text-sm">
-                        <span className="px-2 py-1 bg-gray-100 rounded-full text-gray-700">
-                          {appointment.service}
-                        </span>
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          appointment.status === 'confirmed'
-                            ? 'bg-green-100 text-green-800'
-                            : appointment.status === 'pending'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : appointment.status === 'completed'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {appointment.statusDisplay}
-                        </span>
-                        <span className="text-gray-600">
-                          {formatCurrency(appointment.totalFee)}
-                        </span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-gray-600 hover:bg-gray-100/50 transition-colors px-3 py-1 h-8"
+                          >
+                            <MessageCircle className="w-4 h-4 mr-1" />
+                            Message
+                          </Button>
+
+                          {(appointment.status === 'confirmed' && (isAppointmentTimePassed(appointment) || true)) && (
+                            <Button
+                              onClick={() => handleCompleteClick(appointment)}
+                              variant="outline"
+                              size="sm"
+                              className="text-green-600 border-green-300 hover:bg-green-50 transition-colors px-3 py-1 h-8"
+                            >
+                              <CheckCircle className="w-4 h-4 mr-1" />
+                              Complete
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 pt-4 border-t border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                        <div className="flex flex-wrap items-center gap-3 text-sm">
+                          <span className="px-2 py-1 bg-gray-100 rounded-full text-gray-700">
+                            {appointment.service}
+                          </span>
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            appointment.status === 'confirmed'
+                              ? 'bg-green-100 text-green-800'
+                              : appointment.status === 'pending'
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : appointment.status === 'completed'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-red-100 text-red-800'
+                          }`}>
+                            {appointment.statusDisplay}
+                          </span>
+                          <span className="text-gray-600">
+                            {formatCurrency(appointment.totalFee)}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              ))
-            ) : (
-              <div className="text-center py-16 bg-white rounded-xl shadow-sm">
-                <div className="max-w-md mx-auto">
+                  ))}
+                </div>
+              ) : (
+                <div className="p-8 text-center">
                   <Calendar className="w-16 h-16 text-gray-400 mx-auto mb-6" />
                   <h3 className="text-xl font-semibold text-gray-900 mb-3">No appointments found</h3>
                   <p className="text-gray-500 mb-4">
@@ -534,10 +582,81 @@ export default function DoctorDashboard() {
                     Refresh
                   </Button>
                 </div>
+              )}
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between bg-white rounded-xl shadow-sm p-4">
+                <div className="text-sm text-gray-600">
+                  Showing <span className="font-medium">{indexOfFirstItem + 1}</span> to{' '}
+                  <span className="font-medium">
+                    {Math.min(indexOfLastItem, filteredAppointments.length)}
+                  </span>{' '}
+                  of <span className="font-medium">{filteredAppointments.length}</span> results
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    onClick={() => {
+                      setCurrentPage(Math.max(1, currentPage - 1))
+                      window.scrollTo({ top: 0, behavior: 'smooth' })
+                    }}
+                    disabled={currentPage === 1}
+                    variant="outline"
+                    size="sm"
+                    className="border-gray-300"
+                  >
+                    Previous
+                  </Button>
+
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum
+                      if (totalPages <= 5) {
+                        pageNum = i + 1
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i
+                      } else {
+                        pageNum = currentPage - 2 + i
+                      }
+
+                      return (
+                        <Button
+                          key={pageNum}
+                          onClick={() => {
+                            setCurrentPage(pageNum)
+                            window.scrollTo({ top: 0, behavior: 'smooth' })
+                          }}
+                          variant={currentPage === pageNum ? 'solid' : 'outline'}
+                          size="sm"
+                          className={`${currentPage === pageNum ? 'bg-blue-600 text-white' : 'border-gray-300'}`}
+                        >
+                          {pageNum}
+                        </Button>
+                      )
+                    })}
+                  </div>
+
+                  <Button
+                    onClick={() => {
+                      setCurrentPage(Math.min(totalPages, currentPage + 1))
+                      window.scrollTo({ top: 0, behavior: 'smooth' })
+                    }}
+                    disabled={currentPage === totalPages}
+                    variant="outline"
+                    size="sm"
+                    className="border-gray-300"
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
             )}
-          </div>
-        </main>
+          </>
+        )}
       </div>
 
       {/* Complete Appointment Confirmation Modal */}
@@ -735,6 +854,7 @@ export default function DoctorDashboard() {
                       </>
                     )}
                   </Button>
+
                   <Button variant="outline" className="border-gray-300 flex-1 min-w-[200px]">
                     <MessageCircle className="w-4 h-4 mr-2" />
                     Send Message

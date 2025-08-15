@@ -806,13 +806,13 @@ Payment ID: ${invoiceData.payment_details.razorpay_payment_id || 'N/A'}
                   </Button>
                 )}
 
-                <Button
+                {/* <Button
                   variant="outline"
                   className="w-full justify-start bg-transparent"
                 >
                   <CreditCard className="w-4 h-4 mr-2" />
                   Update Payment
-                </Button>
+                </Button> */}
 
                 <Button
                   variant="outline"

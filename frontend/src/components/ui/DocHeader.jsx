@@ -17,9 +17,9 @@ export default function DocHeader() {
 
   const navItems = [
     { name: "Home", icon: Home, path: "/doctor/home" },
-    { name: "Appointments", icon: Calendar, path: '/doctor/currentSubscription' },
-    { name: "Messages", icon: MessageSquare, path: "/video-call/" },
-    { name: "Notifications", icon: Bell, path: "/chat" },
+    { name: "Appointments", icon: Calendar, path: '/doctor/appointmentsPage' },
+    { name: "Messages", icon: MessageSquare, path: "/chat" },
+    { name: "Request", icon: Bell, path: '/doctor/appointmentsRequest' },
   ]
 
   const handleNavigation = (path) => {

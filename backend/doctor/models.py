@@ -1053,37 +1053,36 @@ class DoctorSubscription(models.Model):
         remaining = self.end_date - timezone.now()
         return max(0, remaining.days)
     
-    
 class SubscriptionUpgrade(models.Model):
-    """Track subscription upgrade attempts"""
-    
-    STATUS_PENDING = 'pending'
-    STATUS_COMPLETED = 'completed'
-    STATUS_FAILED = 'failed'
-    STATUS_CANCELLED = 'cancelled'
-    
-    STATUS_CHOICES = [
-        (STATUS_PENDING, 'Pending'),
-        (STATUS_COMPLETED, 'Completed'),
-        (STATUS_FAILED, 'Failed'),
-        (STATUS_CANCELLED, 'Cancelled'),
-    ]
-    
-    subscription = models.ForeignKey(DoctorSubscription, on_delete=models.CASCADE, related_name='upgrades')
-    old_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='old_upgrades')
-    new_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='new_upgrades')
-    upgrade_price = models.DecimalField(max_digits=8, decimal_places=2)
-    remaining_days = models.PositiveIntegerField()
-    
-    razorpay_order_id = models.CharField(max_length=100)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
-    
-    created_at = models.DateTimeField(auto_now_add=True)
-    completed_at = models.DateTimeField(null=True, blank=True)
-    
-    def __str__(self):
-        return f"Upgrade {self.old_plan.get_name_display()} -> {self.new_plan.get_name_display()}"
-    
+        """Track subscription upgrade attempts"""
+        
+        STATUS_PENDING = 'pending'
+        STATUS_COMPLETED = 'completed'
+        STATUS_FAILED = 'failed'
+        STATUS_CANCELLED = 'cancelled'
+        
+        STATUS_CHOICES = [
+            (STATUS_PENDING, 'Pending'),
+            (STATUS_COMPLETED, 'Completed'),
+            (STATUS_FAILED, 'Failed'),
+            (STATUS_CANCELLED, 'Cancelled'),
+        ]
+        
+        subscription = models.ForeignKey(DoctorSubscription, on_delete=models.CASCADE, related_name='upgrades')
+        old_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='old_upgrades')
+        new_plan = models.ForeignKey(SubscriptionPlan, on_delete=models.CASCADE, related_name='new_upgrades')
+        upgrade_price = models.DecimalField(max_digits=8, decimal_places=2)
+        remaining_days = models.PositiveIntegerField()
+        
+        razorpay_order_id = models.CharField(max_length=100)
+        status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+        
+        created_at = models.DateTimeField(auto_now_add=True)
+        completed_at = models.DateTimeField(null=True, blank=True)
+        
+        def __str__(self):
+            return f"Upgrade {self.old_plan.get_name_display()} -> {self.new_plan.get_name_display()}"
+        
 
 class DoctorEarning(models.Model):
     EARNING_TYPE_CHOICES = [

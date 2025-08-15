@@ -24,10 +24,8 @@ export default function ChatSidebar({
   // Helper function to get avatar image or initials
   const getAvatarDisplay = (user, size = "w-10 h-10") => {
     const avatarUrl = user?.avatar || user?.profile_picture_url
-    const initials = user?.name?.charAt(0) || 
-                    user?.full_name?.charAt(0) || 
-                    user?.username?.charAt(0) || 'U'
-    
+    const initials = user?.name?.charAt(0) || user?.full_name?.charAt(0) || user?.username?.charAt(0) || 'U'
+
     if (avatarUrl) {
       return (
         <img 
@@ -42,7 +40,7 @@ export default function ChatSidebar({
         />
       )
     }
-    
+
     return (
       <div className={`${size} bg-gray-300 rounded-full flex items-center justify-center text-sm font-medium text-gray-700`}>
         {initials}
@@ -74,7 +72,7 @@ export default function ChatSidebar({
     try {
       const data = JSON.parse(event.data)
       console.log('🔔 Notification received:', data)
-      
+
       switch (data.type) {
         case 'user_status_changed':
           if (data.status === 'online') {
@@ -126,18 +124,18 @@ export default function ChatSidebar({
     try {
       const response = await createConversation(userId)
       const newConversation = response.data
-      
+
       // Use the callback to add new conversation
       onNewConversation(newConversation)
       
       // Select the new conversation
       onSelectConversation(newConversation)
-      
+
       // Clear search
       setSearchTerm("")
       setSearchResults([])
       setShowUserSearch(false)
-      
+
       console.log('✅ New conversation created:', newConversation)
     } catch (error) {
       console.error('❌ Error creating conversation:', error)
@@ -151,14 +149,14 @@ export default function ChatSidebar({
 
   const getLastMessageTime = (conversation) => {
     if (!conversation.last_message?.created_at) return ""
-    
+
     const date = new Date(conversation.last_message.created_at)
     const now = new Date()
     const diffMs = now - date
     const diffMins = Math.floor(diffMs / 60000)
     const diffHours = Math.floor(diffMs / 3600000)
     const diffDays = Math.floor(diffMs / 86400000)
-    
+
     if (diffMins < 1) return "now"
     if (diffMins < 60) return `${diffMins}m`
     if (diffHours < 24) return `${diffHours}h`
@@ -177,9 +175,9 @@ export default function ChatSidebar({
   }
 
   return (
-    <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-full">
-      {/* User Header */}
-      <div className="p-4 border-b border-gray-200 bg-blue-50">
+    <div className="w-80 bg-white border-r border-gray-200 flex flex-col h-screen max-h-screen">
+      {/* User Header - Fixed at top */}
+      <div className="flex-shrink-0 p-4 border-b border-gray-200 bg-blue-50">
         <div className="flex items-center space-x-3">
           <div className="relative">
             {/* Fixed: Use getAvatarDisplay helper for current user */}
@@ -188,15 +186,12 @@ export default function ChatSidebar({
           </div>
           <div className="flex-1">
             <h3 className="text-sm font-semibold text-gray-900">
-              {currentUser?.name || 
-              currentUser?.full_name || 
-              currentUser?.username || 
-              'Current User'}
+              {currentUser?.name || currentUser?.full_name || currentUser?.username || 'Current User'}
             </h3>
             <p className="text-xs text-gray-600">
               {currentUser?.role === 'doctor' ? 'Healthcare Provider' : 
-              currentUser?.role === 'patient' ? 'Patient' : 
-              currentUser?.role || 'User'}
+               currentUser?.role === 'patient' ? 'Patient' : 
+               currentUser?.role || 'User'}
             </p>
             <p className="text-xs text-green-600">Online</p>
           </div>
@@ -209,6 +204,7 @@ export default function ChatSidebar({
             </button>
           </div>
         </div>
+
         {/* Notification indicator */}
         {notifications.length > 0 && (
           <div className="mt-2 text-xs text-blue-600">
@@ -217,8 +213,8 @@ export default function ChatSidebar({
         )}
       </div>
 
-      {/* Search Bar */}
-      <div className="p-4 border-b border-gray-200">
+      {/* Search Bar - Fixed */}
+      <div className="flex-shrink-0 p-4 border-b border-gray-200">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
           <input
@@ -236,109 +232,114 @@ export default function ChatSidebar({
         </div>
       </div>
 
-      {/* User Search Results */}
-      {showUserSearch && (
-        <div className="border-b border-gray-200 max-h-48 overflow-y-auto">
-          <div className="px-4 py-2 bg-gray-50">
-            <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center">
-              <Users className="w-3 h-3 mr-1" />
-              Users ({searchResults.length})
-            </h4>
-          </div>
-          {searchResults.map((user) => (
-            <div
-              key={user.id}
-              onClick={() => handleCreateConversation(user.id)}
-              className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 transition-colors"
-            >
-              <div className="flex items-center space-x-3">
-                <div className="relative">
-                  {/* Fixed: Use getAvatarDisplay helper for search results */}
-                  {getAvatarDisplay(user, "w-8 h-8")}
-                  {isUserOnline(user.id) && (
-                    <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white"></div>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h3 className="text-sm font-medium text-gray-900">
-                    {user.full_name || user.username}
-                  </h3>
-                  <p className="text-xs text-gray-500">{user.email}</p>
-                </div>
-                <Plus className="w-4 h-4 text-gray-400" />
-              </div>
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-hidden flex flex-col min-h-0">
+        {/* User Search Results - Scrollable if needed */}
+        {showUserSearch && (
+          <div className="flex-shrink-0 border-b border-gray-200 max-h-48 overflow-y-auto">
+            <div className="px-4 py-2 bg-gray-50 sticky top-0">
+              <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide flex items-center">
+                <Users className="w-3 h-3 mr-1" />
+                Users ({searchResults.length})
+              </h4>
             </div>
-          ))}
-        </div>
-      )}
-
-      {/* Conversations Header */}
-      <div className="px-4 py-2 border-b border-gray-100">
-        <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-          Conversations ({filteredConversations.length})
-        </h4>
-      </div>
-
-      {/* Conversation List */}
-      <div className="flex-1 overflow-y-auto">
-        {filteredConversations.length === 0 ? (
-          <div className="p-4 text-center text-gray-500 text-sm">
-            {searchTerm ? "No conversations found" : "No conversations yet"}
-          </div>
-        ) : (
-          filteredConversations.map((conversation) => {
-            const otherParticipant = conversation.participants?.find(p => p.id !== currentUser?.id) || {}
-            const isSelected = selectedConversation?.id === conversation.id
-            const lastMessage = conversation.last_message
-
-            return (
-              <div
-                key={conversation.id}
-                onClick={() => onSelectConversation(conversation)}
-                className={`p-4 cursor-pointer hover:bg-gray-50 border-b border-gray-100 transition-colors ${
-                  isSelected ? "bg-blue-50 border-r-2 border-r-blue-500" : ""
-                }`}
-              >
-                <div className="flex items-center space-x-3">
-                  <div className="relative">
-                    {/* Fixed: Use getAvatarDisplay helper for conversation participants */}
-                    {getAvatarDisplay(otherParticipant, "w-10 h-10")}
-                    {isUserOnline(otherParticipant.id) && (
-                      <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-sm font-medium text-gray-900 truncate">
-                        {otherParticipant.full_name || otherParticipant.username || 'Unknown User'}
-                      </h3>
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs text-gray-500">
-                          {getLastMessageTime(conversation)}
-                        </span>
-                        {conversation.unread_count > 0 && (
-                          <div className="w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-medium">
-                            {conversation.unread_count > 9 ? "9+" : conversation.unread_count}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <p className="text-sm text-gray-600 truncate mt-1">
-                      {lastMessage ? (
-                        <>
-                          {lastMessage.sender?.id === currentUser?.id && "You: "}
-                          {truncateMessage(lastMessage.content)}
-                        </>
-                      ) : (
-                        "No messages yet"
+            <div className="overflow-y-auto">
+              {searchResults.map((user) => (
+                <div
+                  key={user.id}
+                  onClick={() => handleCreateConversation(user.id)}
+                  className="p-3 cursor-pointer hover:bg-gray-50 border-b border-gray-100 transition-colors"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="relative">
+                      {/* Fixed: Use getAvatarDisplay helper for search results */}
+                      {getAvatarDisplay(user, "w-8 h-8")}
+                      {isUserOnline(user.id) && (
+                        <div className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-white"></div>
                       )}
-                    </p>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-sm font-medium text-gray-900">
+                        {user.full_name || user.username}
+                      </h3>
+                      <p className="text-xs text-gray-500">{user.email}</p>
+                    </div>
+                    <Plus className="w-4 h-4 text-gray-400" />
                   </div>
                 </div>
-              </div>
-            )
-          })
+              ))}
+            </div>
+          </div>
         )}
+
+        {/* Conversations Header - Fixed */}
+        <div className="flex-shrink-0 px-4 py-2 border-b border-gray-100 bg-white">
+          <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Conversations ({filteredConversations.length})
+          </h4>
+        </div>
+
+        {/* Conversation List - Main Scrollable Area */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          {filteredConversations.length === 0 ? (
+            <div className="p-4 text-center text-gray-500 text-sm">
+              {searchTerm ? "No conversations found" : "No conversations yet"}
+            </div>
+          ) : (
+            filteredConversations.map((conversation) => {
+              const otherParticipant = conversation.participants?.find(p => p.id !== currentUser?.id) || {}
+              const isSelected = selectedConversation?.id === conversation.id
+              const lastMessage = conversation.last_message
+
+              return (
+                <div
+                  key={conversation.id}
+                  onClick={() => onSelectConversation(conversation)}
+                  className={`p-4 cursor-pointer hover:bg-gray-50 border-b border-gray-100 transition-colors ${
+                    isSelected ? "bg-blue-50 border-r-2 border-r-blue-500" : ""
+                  }`}
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="relative flex-shrink-0">
+                      {/* Fixed: Use getAvatarDisplay helper for conversation participants */}
+                      {getAvatarDisplay(otherParticipant, "w-10 h-10")}
+                      {isUserOnline(otherParticipant.id) && (
+                        <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-sm font-medium text-gray-900 truncate">
+                          {otherParticipant.full_name || otherParticipant.username || 'Unknown User'}
+                        </h3>
+                        <div className="flex items-center space-x-2 flex-shrink-0">
+                          <span className="text-xs text-gray-500">
+                            {getLastMessageTime(conversation)}
+                          </span>
+                          {conversation.unread_count > 0 && (
+                            <div className="w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-medium">
+                              {conversation.unread_count > 9 ? "9+" : conversation.unread_count}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <p className="text-sm text-gray-600 truncate mt-1">
+                        {lastMessage ? (
+                          <>
+                            {lastMessage.sender?.id === currentUser?.id && "You: "}
+                            {truncateMessage(lastMessage.content)}
+                          </>
+                        ) : (
+                          "No messages yet"
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
       </div>
     </div>
   )
