@@ -8,6 +8,7 @@ from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
 from django.utils import timezone
 from datetime import datetime, timedelta
 from decimal import Decimal
+from django.contrib.postgres.fields import ArrayField
 from django.core.exceptions import ValidationError
 from math import radians, cos, sin, asin, sqrt
 import razorpay
@@ -564,15 +565,25 @@ class DoctorProof(models.Model):
 
 
 class Service(models.Model):
+    PLAN_CHOICES = [
+    ('basic', 'Basic Plan'),
+    ('standard', 'Standard Plan'),
+    # ('pro', 'Pro Plan'),
+    ('premium', 'Premium Plan'),
+    # ('enterprise', 'Enterprise Plan'),
+]
     doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE)
-    service_name = models.CharField(max_length=50)
+    service_name = models.CharField(max_length=50, choices=PLAN_CHOICES)
     service_mode = models.CharField(max_length=20, choices=[('online', 'Online'), ('offline', 'Offline')])
     service_fee = models.FloatField()
     description = models.CharField(max_length=1500)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
+    slot_duration = models.DurationField(
+        default=timedelta(hours=1),
+        help_text="Maximum allowed duration for slots in this service"
+    )
     def __str__(self):
         return self.service_name
 
@@ -947,9 +958,9 @@ class SubscriptionPlan(models.Model):
     PLAN_CHOICES = [
     ('basic', 'Basic Plan'),
     ('standard', 'Standard Plan'),
-    ('pro', 'Pro Plan'),
+    # ('pro', 'Pro Plan'),
     ('premium', 'Premium Plan'),
-    ('enterprise', 'Enterprise Plan'),
+    # ('enterprise', 'Enterprise Plan'),
 ]
     
     name = models.CharField(max_length=50, choices=PLAN_CHOICES, unique=True)
@@ -961,6 +972,11 @@ class SubscriptionPlan(models.Model):
     max_schedules_per_day = models.IntegerField(default=2)
     max_schedules_per_month = models.IntegerField(default=20)
     
+    allowed_service_types = ArrayField(
+        models.CharField(max_length=50, choices=PLAN_CHOICES),
+        blank=True,
+        default=list
+    )
     # Feature permissions
     can_create_online_service = models.BooleanField(default=True)
     can_create_offline_service = models.BooleanField(default=False)

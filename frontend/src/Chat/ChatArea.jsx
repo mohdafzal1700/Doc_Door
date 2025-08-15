@@ -1020,9 +1020,13 @@ export default function ChatArea({
                           <p className="break-words">{msg.content}</p>
                           <div className="flex items-center justify-between mt-1">
                             <p className={`text-xs ${isCurrentUser ? "text-blue-100" : "text-gray-500"}`}>
-                              {msg.created_at ? new Date(msg.created_at).toLocaleTimeString() : msg.timestamp}
-                              {msg.edited && <span className="ml-1">(edited)</span>}
-                            </p>
+                                {msg.created_at ? new Date(msg.created_at).toLocaleTimeString('en-US', { 
+                                  hour: '2-digit', 
+                                  minute: '2-digit',
+                                  hour12: true 
+                                }) : msg.timestamp}
+                                {msg.edited && <span className="ml-1">(edited)</span>}
+                              </p>
                             {isCurrentUser && (
                               <div className="flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button

@@ -1061,34 +1061,24 @@ class DoctorApprovalActionSerializer(serializers.Serializer):
         return instance
     
 class ServiceSerializer(serializers.ModelSerializer):
-    """Serializer for Service model"""
+    """Serializer for Service model with plan-based validation"""
+    
     total_fee = serializers.SerializerMethodField()
     
     class Meta:
         model = Service
         fields = [
-            'id', 'service_name', 'service_mode', 'service_fee', 
-            'description', 'is_active', 'created_at', 'updated_at','total_fee'
+            'id', 'service_name', 'service_mode', 'service_fee', 'description', 
+            'is_active', 'created_at', 'updated_at', 'total_fee', 'slot_duration'
         ]
-        read_only_fields = ['id', 'created_at', 'updated_at','total_fee']
+        read_only_fields = ['id', 'created_at', 'updated_at', 'total_fee']
 
     def validate_service_name(self, value):
-        """Validate service name"""
-        if not value or len(value.strip()) < 2:
-            raise serializers.ValidationError("Service name must be at least 2 characters long.")
-        return value.strip()
-
-    def validate_service_fee(self, value):
-        """Validate service fee"""
-        if value < 0:
-            raise serializers.ValidationError("Service fee cannot be negative.")
+        """Validate service name based on choices"""
+        valid_choices = ['basic', 'standard', 'premium']
+        if value not in valid_choices:
+            raise serializers.ValidationError(f"Service name must be one of {valid_choices}")
         return value
-
-    def validate_description(self, value):
-        """Validate description"""
-        if not value or len(value.strip()) < 10:
-            raise serializers.ValidationError("Description must be at least 10 characters long.")
-        return value.strip()
 
     def validate_service_mode(self, value):
         """Validate service mode"""
@@ -1096,66 +1086,222 @@ class ServiceSerializer(serializers.ModelSerializer):
         if value not in valid_modes:
             raise serializers.ValidationError(f"Service mode must be one of {valid_modes}")
         return value
-    
+
+    def validate_service_fee(self, value):
+        """Validate service fee with general constraints"""
+        if value < 0:
+            raise serializers.ValidationError("Service fee cannot be negative.")
+        if value > 1000:
+            raise serializers.ValidationError("Service fee cannot exceed ₹1000.")
+        return value
+
+    def validate_description(self, value):
+        """Validate description"""
+        if not value or len(value.strip()) < 10:
+            raise serializers.ValidationError("Description must be at least 10 characters long.")
+        if len(value.strip()) > 1500:
+            raise serializers.ValidationError("Description cannot exceed 1500 characters.")
+        return value.strip()
+
+    def validate_slot_duration(self, value):
+        """Validate slot duration with general constraints"""
+        if value <= timedelta(0):
+            raise serializers.ValidationError("Slot duration must be greater than 0.")
+        if value > timedelta(hours=2):
+            raise serializers.ValidationError("Slot duration cannot exceed 2 hours.")
+        return value
+
+    def _validate_basic_service(self, data):
+        """Validate Basic service specific constraints"""
+        logger.debug("Applying Basic service-specific validations")
+        errors = {}
+        
+        # Fee validation: ₹50 to ₹200
+        service_fee = data.get('service_fee')
+        if service_fee is not None:
+            if service_fee < 50:
+                logger.warning(f"Basic service fee too low: ₹{service_fee}")
+                errors['service_fee'] = 'Basic service fee must be at least ₹50'
+            elif service_fee > 200:
+                logger.warning(f"Basic service fee too high: ₹{service_fee}")
+                errors['service_fee'] = 'Basic service fee cannot exceed ₹200'
+        
+        # Duration validation: 15 or 30 minutes only
+        slot_duration = data.get('slot_duration')
+        if slot_duration is not None:
+            allowed_durations = [timedelta(minutes=15), timedelta(minutes=30)]
+            if slot_duration not in allowed_durations:
+                logger.warning(f"Basic service invalid duration: {slot_duration}")
+                errors['slot_duration'] = 'Basic service can only have 15 or 30 minute slots'
+        
+        # Mode restriction: only online for basic
+        service_mode = data.get('service_mode')
+        if service_mode == 'offline':
+            logger.warning("Basic service cannot be offline")
+            errors['service_mode'] = 'Basic service can only be online'
+        
+        return errors
+
+    def _validate_standard_service(self, data):
+        """Validate Standard service specific constraints"""
+        logger.debug("Applying Standard service-specific validations")
+        errors = {}
+        
+        # Fee validation: ₹150 to ₹400
+        service_fee = data.get('service_fee')
+        if service_fee is not None:
+            if service_fee < 150:
+                logger.warning(f"Standard service fee too low: ₹{service_fee}")
+                errors['service_fee'] = 'Standard service fee must be at least ₹150'
+            elif service_fee > 400:
+                logger.warning(f"Standard service fee too high: ₹{service_fee}")
+                errors['service_fee'] = 'Standard service fee cannot exceed ₹400'
+        
+        # Duration validation: 15, 30, or 45 minutes
+        slot_duration = data.get('slot_duration')
+        if slot_duration is not None:
+            allowed_durations = [
+                timedelta(minutes=15), 
+                timedelta(minutes=30), 
+                timedelta(minutes=45)
+            ]
+            if slot_duration not in allowed_durations:
+                logger.warning(f"Standard service invalid duration: {slot_duration}")
+                errors['slot_duration'] = 'Standard service can have 15, 30, or 45 minute slots'
+        
+        # Both online and offline allowed for standard
+        
+        return errors
+
+    def _validate_premium_service(self, data):
+        """Validate Premium service specific constraints"""
+        logger.debug("Applying Premium service-specific validations")
+        errors = {}
+        
+        # Fee validation: ₹300 to ₹1000
+        service_fee = data.get('service_fee')
+        if service_fee is not None:
+            if service_fee < 300:
+                logger.warning(f"Premium service fee too low: ₹{service_fee}")
+                errors['service_fee'] = 'Premium service fee must be at least ₹300'
+            elif service_fee > 1000:
+                logger.warning(f"Premium service fee too high: ₹{service_fee}")
+                errors['service_fee'] = 'Premium service fee cannot exceed ₹1000'
+        
+        # Duration validation: 15, 30, 45, 60, or 90 minutes
+        slot_duration = data.get('slot_duration')
+        if slot_duration is not None:
+            allowed_durations = [
+                timedelta(minutes=15), 
+                timedelta(minutes=30), 
+                timedelta(minutes=45),
+                timedelta(minutes=60),
+                timedelta(minutes=90)
+            ]
+            if slot_duration not in allowed_durations:
+                logger.warning(f"Premium service invalid duration: {slot_duration}")
+                errors['slot_duration'] = 'Premium service can have 15, 30, 45, 60, or 90 minute slots'
+        
+        # Both online and offline allowed for premium
+        
+        return errors
+
+    def _check_doctor_plan_access(self, service_name, service_mode):
+        """Check if doctor's subscription plan allows this service type"""
+        request = self.context.get('request')
+        if not request or not hasattr(request.user, 'doctor_profile'):
+            return False, "Doctor profile not found"
+        
+        doctor = request.user.doctor_profile
+        
+        # Check if doctor has active subscription
+        if not doctor.has_subscription():
+            return False, "No active subscription found"
+        
+        current_plan = doctor.get_current_plan()
+        if not current_plan:
+            return False, "No active subscription found"
+        
+        # Check if doctor's plan allows this service type
+        allowed_service_types = getattr(current_plan, 'allowed_service_types', [])
+        
+        if service_name not in allowed_service_types:
+            return False, f"Your {current_plan.get_name_display()} plan doesn't allow {service_name} services"
+        
+        # Check service mode permissions
+        if service_mode == 'online' and not getattr(current_plan, 'can_create_online_service', True):
+            return False, f"Your {current_plan.get_name_display()} plan doesn't allow online services"
+        
+        if service_mode == 'offline' and not getattr(current_plan, 'can_create_offline_service', False):
+            return False, f"Your {current_plan.get_name_display()} plan doesn't allow offline services"
+        
+        return True, "Access granted"
+
     def get_total_fee(self, obj):
         """Calculate total fee (service fee + doctor consultation fee)"""
-        doctor_fee = obj.doctor.consultation_fee or 0
+        doctor_fee = getattr(obj.doctor, 'consultation_fee', 0) or 0
         service_fee = obj.service_fee or 0
         return float(doctor_fee) + float(service_fee)
 
     def validate(self, data):
-        """Add subscription validation to service creation"""
-        logger.debug("Starting service validation")
-        logger.debug(f"Input data: {data}")
+        """Cross-field validation with service-specific business logic"""
+        logger.debug(f"Service validation started with data: {data}")
         
-        # Get the doctor from the request context (set during view processing)
+        service_name = data.get('service_name')
+        service_mode = data.get('service_mode', 'online')
+        
+        # Check doctor's plan access first
+        has_access, access_message = self._check_doctor_plan_access(service_name, service_mode)
+        if not has_access:
+            logger.warning(f"Plan access denied: {access_message}")
+            raise serializers.ValidationError({
+                'plan_access': access_message,
+                'redirect_to': 'subscription_upgrade' if 'plan doesn\'t allow' in access_message else 'subscription_plans'
+            })
+        
+        # Service-specific validation
+        service_errors = {}
+        
+        if service_name == 'basic':
+            service_errors = self._validate_basic_service(data)
+        elif service_name == 'standard':
+            service_errors = self._validate_standard_service(data)
+        elif service_name == 'premium':
+            service_errors = self._validate_premium_service(data)
+        
+        if service_errors:
+            logger.warning(f"Service-specific validation failed for {service_name} service: {service_errors}")
+            raise serializers.ValidationError(service_errors)
+        
+        # Check subscription limits
         request = self.context.get('request')
-        logger.debug(f"Request object: {request}")
-        logger.debug(f"Request user: {getattr(request, 'user', None) if request else None}")
-        
         if request and hasattr(request.user, 'doctor_profile'):
             doctor = request.user.doctor_profile
-            logger.debug(f"Doctor profile found: {doctor}")
-            logger.debug(f"Doctor ID: {getattr(doctor, 'id', None)}")
             
-            service_mode = data.get('service_mode', 'online')
-            logger.debug(f"Service mode: {service_mode}")
-            
-            # Check if doctor can create this type of service
+            # Use the existing method to check if doctor can create service
             can_create = doctor.can_create_service(service_mode)
-            logger.debug(f"Can create service ({service_mode}): {can_create}")
             
             if not can_create:
-                current_plan = doctor.get_current_plan()
-                logger.debug(f"Current plan: {current_plan}")
-                
-                if not current_plan:
+                if not doctor.has_subscription():
                     logger.warning(f"No active subscription for doctor {doctor.id}")
                     raise serializers.ValidationError({
                         'subscription': 'Active subscription required to create services.',
                         'redirect_to': 'subscription_plans'
                     })
                 else:
+                    # Get usage stats for detailed error message
                     usage_stats = doctor.get_usage_stats()
-                    logger.warning(f"Service limit reached for doctor {doctor.id}")
-                    logger.debug(f"Usage stats: {usage_stats}")
-                    logger.debug(f"Plan details: {current_plan}")
+                    current_plan = doctor.get_current_plan()
                     
+                    logger.warning(f"Service limit reached for doctor {doctor.id}")
                     raise serializers.ValidationError({
-                        'service_limit': f'Cannot create {service_mode} service. Plan limit reached.',
+                        'service_limit': f'Cannot create {service_mode} service. Maximum {current_plan.max_services} services allowed in {current_plan.get_name_display()} plan.',
                         'current_usage': usage_stats,
                         'redirect_to': 'subscription_upgrade'
                     })
-        else:
-            logger.warning("No doctor profile found in request context")
-            logger.debug(f"Request exists: {request is not None}")
-            if request:
-                logger.debug(f"User authenticated: {getattr(request.user, 'is_authenticated', False)}")
-                logger.debug(f"User has doctor_profile attr: {hasattr(request.user, 'doctor_profile')}")
         
-        logger.debug("Validation completed successfully")
+        logger.debug("Service validation completed successfully")
         return data
-
 
 class SchedulesSerializer(serializers.ModelSerializer):
     """Serializer for Schedules model with doctor and service details"""
