@@ -327,7 +327,7 @@ class Doctor(models.Model):
         plan = self.subscription.plan
         
         # Check daily limit
-        daily_schedules = self.schedules_set.filter(
+        daily_schedules = self.schedules.filter(
             date=date, 
             is_active=True
         ).count()
@@ -336,7 +336,7 @@ class Doctor(models.Model):
             return False
         
         # Check monthly limit
-        monthly_schedules = self.schedules_set.filter(
+        monthly_schedules = self.schedules.filter(
             date__year=date.year,
             date__month=date.month,
             is_active=True
@@ -395,9 +395,9 @@ class Doctor(models.Model):
                         date__month=today.month,
                         is_active=True
                     ).count()
-                elif hasattr(self, 'schedules_set'):
-                    daily_schedules_count = self.schedules_set.filter(date=today, is_active=True).count()
-                    monthly_schedules_count = self.schedules_set.filter(
+                elif hasattr(self, 'schedules'):
+                    daily_schedules_count = self.schedules.filter(date=today, is_active=True).count()
+                    monthly_schedules_count = self.schedules.filter(
                         date__year=today.year,
                         date__month=today.month,
                         is_active=True
@@ -566,11 +566,9 @@ class DoctorProof(models.Model):
 
 class Service(models.Model):
     PLAN_CHOICES = [
-    ('basic', 'Basic Plan'),
-    ('standard', 'Standard Plan'),
-    # ('pro', 'Pro Plan'),
-    ('premium', 'Premium Plan'),
-    # ('enterprise', 'Enterprise Plan'),
+    ('basic', 'Basic Service'),
+        ('standard', 'Standard Service'), 
+        ('premium', 'Premium Service'),
 ]
     doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE)
     service_name = models.CharField(max_length=50, choices=PLAN_CHOICES)
@@ -588,8 +586,8 @@ class Service(models.Model):
         return self.service_name
 
 class Schedules(models.Model):
-    doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE)
-    service = models.ForeignKey(Service, on_delete=models.CASCADE)
+    doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE,related_name='schedules')
+    service = models.ForeignKey(Service, on_delete=models.CASCADE,related_name='schedules')
     mode = models.CharField(max_length=20, choices=[('online', 'Online'), ('offline', 'Offline')])
     date = models.DateField(auto_now=False, auto_now_add=False)
     start_time = models.TimeField()
@@ -971,12 +969,16 @@ class SubscriptionPlan(models.Model):
     max_services = models.IntegerField(default=3)
     max_schedules_per_day = models.IntegerField(default=2)
     max_schedules_per_month = models.IntegerField(default=20)
-    
     allowed_service_types = ArrayField(
-        models.CharField(max_length=50, choices=PLAN_CHOICES),
-        blank=True,
-        default=list
-    )
+    models.CharField(max_length=50, choices=[
+        ('basic', 'Basic Service'),
+        ('standard', 'Standard Service'), 
+        ('premium', 'Premium Service'),
+    ]),
+    blank=True,
+    default=list
+)
+    
     # Feature permissions
     can_create_online_service = models.BooleanField(default=True)
     can_create_offline_service = models.BooleanField(default=False)

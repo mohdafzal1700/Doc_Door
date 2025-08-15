@@ -1101,7 +1101,7 @@ class ServiceView(APIView):
                     }, status=status.HTTP_403_FORBIDDEN)
             
             # Check if service has associated schedules
-            if service.schedules_set.exists():
+            if service.schedules.exists():
                 return Response({
                     'success': False,
                     'message': 'Cannot delete service with existing schedules. Please delete schedules first.'

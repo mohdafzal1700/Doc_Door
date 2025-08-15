@@ -22,7 +22,7 @@ export default function SubscriptionPlanForm() {
   const planChoices = [
     { value: 'basic', label: 'Basic Plan' },
     { value: 'standard', label: 'Standard Plan' },
-    { value: 'pro', label: 'Pro Plan' },
+    
     { value: 'premium', label: 'Premium Plan' },
     { value: 'enterprise', label: 'Enterprise Plan' }
     ];
