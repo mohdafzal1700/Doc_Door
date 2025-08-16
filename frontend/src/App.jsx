@@ -47,6 +47,7 @@ import GlobalVideoCallWrapper from "./videocall/wrapper"
 import PaymentPage from "./pages/payment_conformation"
 import AdminReviewPage from "./admin/reviewaM"
 import { NotificationProvider } from "./components/home/notificationprovider"
+import WalletPage from "./pages/Wallet"
 function App() {
 
 
@@ -104,6 +105,7 @@ function App() {
         <Route path='/doctor/dashboard' element={<DocDashboard/>}/>
         <Route path='/confirm-payment' element={<PaymentPage/>}/>
         <Route path='/doctor-feedback' element={<DoctorFeedbackForm/>}/>
+        <Route path='/patient/wallet' element={<WalletPage/>}/>
         
         
         

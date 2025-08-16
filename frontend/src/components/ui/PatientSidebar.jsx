@@ -71,7 +71,7 @@ const PatientSidebar = ({
             id: "completed",
             name: "Completed Appointments",
             icon: CheckCircle,
-            route: "/patient/appointments/completed"
+            route: "/patient/wallet"
         },
         {
             id: "payments",

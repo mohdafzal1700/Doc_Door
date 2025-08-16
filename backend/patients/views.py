@@ -24,7 +24,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import AuthenticationFailed
 
-
+from doctor.models import PatientWallet,PatientTransaction
+from patients.serializers import PatientWalletserializer,PatientTransactionserilizer
 
 import traceback
 
@@ -2395,3 +2396,43 @@ class PatientReviewDeleteView(APIView):
                 'success': False,
                 'message': 'Failed to delete review'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+
+class Wallet(APIView):
+    permission_classes=[IsAuthenticated]
+    
+    def get(self,request):
+        try:
+            wallet=request.user.Patient.wallet
+            result=PatientWalletserializer(wallet)
+            return Response(
+                {
+                    'data':result.data
+                }
+            )
+        except Exception as e:
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch wallet',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)	
+        
+
+class Transaction(APIView):
+    permission_classes=[IsAuthenticated]
+    
+    def get(self,request):
+        try:
+            transaction=request.user.Patient.transactions.all()
+            serializer=PatientTransactionserilizer(transaction, many=True)
+            
+            return Response({
+                'success':True,
+                'data':serializer.data
+            })
+        except Exception as e:
+            return Response({
+                        'success': False,
+                        'message': 'Failed to fetch transactions',
+                        'error': str(e)
+                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)        

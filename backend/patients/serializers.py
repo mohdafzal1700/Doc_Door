@@ -1839,3 +1839,18 @@ class AdminReviewModerationSerializer(serializers.ModelSerializer):
         if value not in ['approved', 'rejected']:
             raise serializers.ValidationError("Status must be 'approved' or 'rejected'")
         return value
+from doctor.models import PatientWallet
+class PatientWalletserializer(serializers.ModelSerializer):
+    
+    class Meta:
+        model=PatientWallet
+        
+        fields=['patient','balance']
+        
+from doctor.models import PatientTransaction
+
+class PatientTransactionserilizer(serializers.ModelSerializer):
+    
+    class Meta:
+        model=PatientTransaction
+        fields=['patient','amount','type','remark']
