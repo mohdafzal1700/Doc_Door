@@ -21,6 +21,16 @@ from django.db.models import Q
 from doctor.models import SubscriptionPlan
 from .serializers import SubscriptionPlanSerializer
 
+from doctor.models import DoctorReview
+from patients.serializers import DoctorReviewSerializer, AdminReviewModerationSerializer
+from django.db.models import Avg
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from django.utils import timezone
+
+
 
 # Project-specific serializers and models
 from adminside.serializers import AdminLoginSerializer
@@ -682,25 +692,6 @@ class AdminAppointmentDetailView(APIView):
                 'success': False,
                 'message': 'Failed to retrieve appointment'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-            
-            
-            
-            
-            
-            
-            
-from doctor.models import DoctorReview
-from patients.serializers import DoctorReviewSerializer, AdminReviewModerationSerializer
-from django.db.models import Avg
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from django.utils import timezone
-import logging
-
-logger = logging.getLogger(__name__)
 
 class AdminReviewListView(APIView):
     """Admin view to list all reviews - fixed version"""
@@ -874,364 +865,738 @@ class AdminReviewModerationView(APIView):
             
             
 
+
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.db.models import Count, Sum, Q
+from django.db.models.functions import TruncMonth, TruncWeek, TruncDay
+from django.utils import timezone
+from datetime import datetime, timedelta
+from django.http import HttpResponse
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+import io
+
+from doctor.models import User, Doctor, Patient, DoctorSubscription, SubscriptionPlan
+from .serializers import AdminDashboardSerializer, AdminDashboardSerializer,AdminRevenueSerializer, AdminUsersSerializer,PendingVerificationsSerializer
+    
+    
+    
+
+
 class AdminDashboardView(APIView):
-    """Admin Dashboard with system-wide stats and reports"""
+    """
+    Simple admin dashboard with key metrics
+    """
     permission_classes = [IsAuthenticated]
-    
+
     def get(self, request):
-        # Check if user is admin/staff
-        if not request.user.is_staff and not request.user.is_superuser:
-            return Response({
-                'success': False,
-                'message': 'Only administrators can view this dashboard'
-            }, status=status.HTTP_403_FORBIDDEN)
+        if not request.user.role == 'admin':
+            return Response({'error': 'Admin access required'}, 
+                        status=status.HTTP_403_FORBIDDEN)
         
-        try:
-            # Get date filters (optional)
-            date_from = request.query_params.get('date_from')
-            date_to = request.query_params.get('date_to')
-            
-            # Calculate comprehensive stats
-            stats = self.calculate_system_stats(date_from, date_to)
-            
-            # Get recent activities
-            recent_users = self.get_recent_users()
-            recent_appointments = self.get_recent_appointments()
-            pending_reviews = self.get_pending_reviews()
-            
-            # Get trends and analytics
-            user_growth_trend = self.get_user_growth_trend()
-            revenue_trend = self.get_platform_revenue_trend()
-            appointment_trends = self.get_appointment_trends()
-            
-            # Top performers
-            top_doctors = self.get_top_doctors()
-            
-            return Response({
-                'success': True,
-                'data': {
-                    'stats': stats,
-                    'recent_users': recent_users,
-                    'recent_appointments': recent_appointments,
-                    'pending_reviews': pending_reviews,
-                    'trends': {
-                        'user_growth': user_growth_trend,
-                        'revenue': revenue_trend,
-                        'appointments': appointment_trends,
-                    },
-                    'top_doctors': top_doctors,
-                }
-            }, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            logger.error(f"Error in admin dashboard: {str(e)}")
-            return Response({
-                'success': False,
-                'message': 'Failed to load dashboard data'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    def calculate_system_stats(self, date_from=None, date_to=None):
-        """Calculate system-wide statistics"""
-        from .models import Doctor, Patient, Appointment, DoctorReview  # Adjust import path
+        # Get date filters
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
         
-        now = timezone.now()
-        today = now.date()
-        this_month_start = today.replace(day=1)
-        last_month_start = (this_month_start - timedelta(days=1)).replace(day=1)
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        else:
+            start_date = timezone.now().date() - timedelta(days=30)
+            
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+        else:
+            end_date = timezone.now().date()
+
+        # Revenue from subscriptions only
+        total_revenue = DoctorSubscription.objects.filter(
+            payment_status='completed'
+        ).aggregate(total=Sum('amount_paid'))['total'] or 0
         
-        # Date filtering setup
-        date_filter = Q()
-        if date_from:
-            try:
-                date_from = datetime.strptime(date_from, '%Y-%m-%d').date()
-                date_filter &= Q(date__gte=date_from)
-            except ValueError:
-                pass
-        if date_to:
-            try:
-                date_to = datetime.strptime(date_to, '%Y-%m-%d').date()
-                date_filter &= Q(date__lte=date_to)
-            except ValueError:
-                pass
+        period_revenue = DoctorSubscription.objects.filter(
+            payment_status='completed',
+            paid_at__date__gte=start_date,
+            paid_at__date__lte=end_date
+        ).aggregate(total=Sum('amount_paid'))['total'] or 0
         
-        # User Statistics
-        total_users = User.objects.count()
+        active_subscriptions = DoctorSubscription.objects.filter(
+            status='active'
+        ).count()
+
+        # User counts with date filtering
         total_doctors = Doctor.objects.count()
         total_patients = Patient.objects.count()
         
-        # New users this month
-        new_users_this_month = User.objects.filter(date_joined__gte=this_month_start).count()
-        new_doctors_this_month = Doctor.objects.filter(user__date_joined__gte=this_month_start).count()
-        new_patients_this_month = Patient.objects.filter(user__date_joined__gte=this_month_start).count()
-        
-        # Active users (users who have appointments in last 30 days)
-        active_users = User.objects.filter(
-            Q(doctor__appointments__date__gte=today - timedelta(days=30)) |
-            Q(patient__appointments__date__gte=today - timedelta(days=30))
-        ).distinct().count()
-        
-        # Appointment Statistics
-        all_appointments = Appointment.objects.all()
-        if date_filter:
-            filtered_appointments = all_appointments.filter(date_filter)
-        else:
-            filtered_appointments = all_appointments
-        
-        total_appointments = filtered_appointments.count()
-        completed_appointments = filtered_appointments.filter(status='completed').count()
-        pending_appointments = filtered_appointments.filter(status='pending').count()
-        cancelled_appointments = filtered_appointments.filter(status='cancelled').count()
-        
-        # Today's appointments
-        today_appointments = all_appointments.filter(date=today).count()
-        
-        # This month's appointments
-        this_month_appointments = all_appointments.filter(date__gte=this_month_start).count()
-        last_month_appointments = all_appointments.filter(
-            date__gte=last_month_start,
-            date__lt=this_month_start
+        # Filtered counts
+        period_doctors = Doctor.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date
         ).count()
         
-        # Appointment growth
-        appointment_growth = 0
-        if last_month_appointments > 0:
-            appointment_growth = ((this_month_appointments - last_month_appointments) / last_month_appointments) * 100
+        period_patients = Patient.objects.filter(
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date
+        ).count()
+
+        # Verification stats
+        verified_doctors = Doctor.objects.filter(verification_status='approved').count()
+        pending_doctors = Doctor.objects.filter(verification_status='pending_approval').count()
         
-        # Revenue Statistics
-        total_platform_revenue = filtered_appointments.filter(
-            status='completed'
-        ).aggregate(total=Sum('fee'))['total'] or 0
+        # Monthly revenue trend
+        monthly_revenue = DoctorSubscription.objects.filter(
+            payment_status='completed',
+            paid_at__isnull=False
+        ).annotate(
+            month=TruncMonth('paid_at')
+        ).values('month').annotate(
+            revenue=Sum('amount_paid'),
+            count=Count('id')
+        ).order_by('month')[:6]  # Last 6 months
         
-        this_month_revenue = all_appointments.filter(
-            status='completed',
-            date__gte=this_month_start
-        ).aggregate(total=Sum('fee'))['total'] or 0
-        
-        last_month_revenue = all_appointments.filter(
-            status='completed',
-            date__gte=last_month_start,
-            date__lt=this_month_start
-        ).aggregate(total=Sum('fee'))['total'] or 0
-        
-        # Revenue growth
-        revenue_growth = 0
-        if last_month_revenue > 0:
-            revenue_growth = ((this_month_revenue - last_month_revenue) / last_month_revenue) * 100
-        
-        # Review Statistics
-        total_reviews = DoctorReview.objects.count()
-        pending_reviews_count = DoctorReview.objects.filter(status='pending').count()
-        approved_reviews = DoctorReview.objects.filter(status='approved').count()
-        
-        # Average platform rating
-        avg_platform_rating = DoctorReview.objects.filter(
-            status='approved'
-        ).aggregate(avg=Avg('rating'))['avg'] or 0
-        
-        # System health metrics
-        completion_rate = (completed_appointments / total_appointments * 100) if total_appointments > 0 else 0
-        cancellation_rate = (cancelled_appointments / total_appointments * 100) if total_appointments > 0 else 0
-        
-        return {
-            # User stats
-            'total_users': total_users,
-            'total_doctors': total_doctors,
-            'total_patients': total_patients,
-            'active_users': active_users,
-            'new_users_this_month': new_users_this_month,
-            'new_doctors_this_month': new_doctors_this_month,
-            'new_patients_this_month': new_patients_this_month,
-            
-            # Appointment stats
-            'total_appointments': total_appointments,
-            'completed_appointments': completed_appointments,
-            'pending_appointments': pending_appointments,
-            'cancelled_appointments': cancelled_appointments,
-            'today_appointments': today_appointments,
-            'this_month_appointments': this_month_appointments,
-            'appointment_growth_percentage': round(appointment_growth, 2),
-            
-            # Revenue stats
-            'total_platform_revenue': float(total_platform_revenue),
-            'this_month_revenue': float(this_month_revenue),
-            'last_month_revenue': float(last_month_revenue),
-            'revenue_growth_percentage': round(revenue_growth, 2),
-            
-            # Review stats
-            'total_reviews': total_reviews,
-            'pending_reviews': pending_reviews_count,
-            'approved_reviews': approved_reviews,
-            'average_platform_rating': round(float(avg_platform_rating), 2) if avg_platform_rating else 0,
-            
-            # Health metrics
-            'completion_rate': round(completion_rate, 2),
-            'cancellation_rate': round(cancellation_rate, 2),
+        # Subscription plan breakdown
+        plan_breakdown = SubscriptionPlan.objects.annotate(
+            subscription_count=Count('doctorsubscription', 
+                                   filter=Q(doctorsubscription__status='active')),
+            total_revenue=Sum('doctorsubscription__amount_paid',
+                            filter=Q(doctorsubscription__payment_status='completed'))
+        ).order_by('-total_revenue')
+
+        data = {
+            'revenue': {
+                'total_revenue': float(total_revenue),
+                'period_revenue': float(period_revenue),
+                'active_subscriptions': active_subscriptions,
+                'monthly_trends': [
+                    {
+                        'month': item['month'].strftime('%Y-%m'),
+                        'revenue': float(item['revenue']),
+                        'subscriptions': item['count']
+                    } for item in monthly_revenue
+                ],
+                'plan_breakdown': [
+                    {
+                        'plan_name': plan.get_name_display(),
+                        'price': float(plan.price),
+                        'active_subscriptions': plan.subscription_count,
+                        'total_revenue': float(plan.total_revenue or 0)
+                    } for plan in plan_breakdown
+                ]
+            },
+            'users': {
+                'total_doctors': total_doctors,
+                'total_patients': total_patients,
+                'period_doctors': period_doctors,
+                'period_patients': period_patients,
+                'verified_doctors': verified_doctors,
+                'pending_doctors': pending_doctors
+            },
+            'date_range': {
+                'start_date': start_date.strftime('%Y-%m-%d'),
+                'end_date': end_date.strftime('%Y-%m-%d')
+            }
         }
+        
+        serializer = AdminDashboardSerializer(data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AdminRevenueView(APIView):
+    """
+    Detailed subscription revenue analytics
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.role == 'admin':
+            return Response({'error': 'Admin access required'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+
+        # Daily revenue for last 30 days
+        daily_revenue = DoctorSubscription.objects.filter(
+            payment_status='completed',
+            paid_at__date__gte=timezone.now().date() - timedelta(days=30)
+        ).annotate(
+            day=TruncDay('paid_at')
+        ).values('day').annotate(
+            revenue=Sum('amount_paid'),
+            count=Count('id')
+        ).order_by('day')
+
+        # Payment status breakdown
+        payment_stats = DoctorSubscription.objects.values('payment_status').annotate(
+            count=Count('id'),
+            total_amount=Sum('amount_paid')
+        ).order_by('-count')
+
+        # Subscription status
+        subscription_stats = DoctorSubscription.objects.values('status').annotate(
+            count=Count('id')
+        ).order_by('-count')
+
+        data = {
+            'daily_revenue': [
+                {
+                    'date': item['day'].strftime('%Y-%m-%d'),
+                    'revenue': float(item['revenue']),
+                    'subscriptions': item['count']
+                } for item in daily_revenue
+            ],
+            'payment_breakdown': [
+                {
+                    'status': item['payment_status'],
+                    'count': item['count'],
+                    'amount': float(item['total_amount'] or 0)
+                } for item in payment_stats
+            ],
+            'subscription_breakdown': [
+                {
+                    'status': item['status'],
+                    'count': item['count']
+                } for item in subscription_stats
+            ]
+        }
+
+        serializer = AdminRevenueSerializer(data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class AdminUsersView(APIView):
+    """
+    User analytics with filtering
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.role == 'admin':
+            return Response({'error': 'Admin access required'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+
+        # Get filters
+        user_type = request.GET.get('user_type', 'all')  # 'doctor', 'patient', 'all'
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
+        
+        # Base queries
+        doctor_query = Doctor.objects.all()
+        patient_query = Patient.objects.all()
+        
+        # Apply date filters
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+            doctor_query = doctor_query.filter(created_at__date__gte=start_date)
+            patient_query = patient_query.filter(created_at__date__gte=start_date)
+            
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+            doctor_query = doctor_query.filter(created_at__date__lte=end_date)
+            patient_query = patient_query.filter(created_at__date__lte=end_date)
+
+        # Doctor stats
+        doctor_stats = {
+            'total': doctor_query.count(),
+            'verified': doctor_query.filter(verification_status='approved').count(),
+            'pending': doctor_query.filter(verification_status='pending_approval').count(),
+            'rejected': doctor_query.filter(verification_status='rejected').count(),
+            'with_subscription': doctor_query.filter(subscription__status='active').count()
+        }
+
+        # Patient stats
+        patient_stats = {
+            'total': patient_query.count(),
+        }
+
+        # Monthly growth
+        doctor_growth = Doctor.objects.annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            count=Count('id')
+        ).order_by('month')[:12]
+
+        patient_growth = Patient.objects.annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            count=Count('id')
+        ).order_by('month')[:12]
+
+        # Top specializations
+        specializations = Doctor.objects.exclude(
+            specialization__isnull=True
+        ).values('specialization').annotate(
+            count=Count('id')
+        ).order_by('-count')[:10]
+
+        data = {
+            'doctor_stats': doctor_stats,
+            'patient_stats': patient_stats,
+            'growth_trends': {
+                'doctors': [
+                    {
+                        'month': item['month'].strftime('%Y-%m'),
+                        'count': item['count']
+                    } for item in doctor_growth
+                ],
+                'patients': [
+                    {
+                        'month': item['month'].strftime('%Y-%m'),
+                        'count': item['count']
+                    } for item in patient_growth
+                ]
+            },
+            'specializations': [
+                {
+                    'specialization': item['specialization'],
+                    'count': item['count']
+                } for item in specializations
+            ]
+        }
+
+        serializer = AdminUsersSerializer(data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class PendingVerificationsView(APIView):
+    """
+    Get pending doctor verifications
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.role == 'admin':
+            return Response({'error': 'Admin access required'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+
+        pending_doctors = Doctor.objects.filter(
+            verification_status='pending_approval'
+        ).select_related('user').order_by('created_at')
+
+        data = {
+            'pending_verifications': [
+                {
+                    'id': str(doctor.id),
+                    'name': doctor.full_name,
+                    'email': doctor.user.email if doctor.user else '',
+                    'specialization': doctor.get_specialization_display() if doctor.specialization else '',
+                    'experience': doctor.experience,
+                    'license_number': doctor.license_number,
+                    'clinic_name': doctor.clinic_name,
+                    'location': doctor.location,
+                    'submitted_date': doctor.created_at.date(),
+                    'profile_complete': doctor.is_profile_setup_done,
+                    'education_complete': doctor.is_education_done,
+                    'certification_complete': doctor.is_certification_done,
+                    'license_complete': doctor.is_license_done
+                } for doctor in pending_doctors
+            ],
+            'total_pending': pending_doctors.count()
+        }
+
+        serializer = PendingVerificationsSerializer(data)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        """
+        Approve/Reject doctor verification
+        """
+        if not request.user.role == 'admin':
+            return Response({'error': 'Admin access required'}, 
+                          status=status.HTTP_403_FORBIDDEN)
+
+        doctor_id = request.data.get('doctor_id')
+        action = request.data.get('action')  # 'approve' or 'reject'
+        comment = request.data.get('comment', '')
+
+        if not doctor_id or not action:
+            return Response({'error': 'doctor_id and action are required'}, 
+                          status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            doctor = Doctor.objects.get(id=doctor_id)
+            
+            if action == 'approve':
+                doctor.verification_status = 'approved'
+            elif action == 'reject':
+                doctor.verification_status = 'rejected'
+            else:
+                return Response({'error': 'Invalid action'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+            
+            doctor.admin_comment = comment
+            doctor.save()
+
+            return Response({
+                'message': f'Doctor {action}d successfully',
+                'doctor_id': str(doctor_id),
+                'new_status': doctor.verification_status
+            }, status=status.HTTP_200_OK)
+
+        except Doctor.DoesNotExist:
+            return Response({'error': 'Doctor not found'}, 
+                          status=status.HTTP_404_NOT_FOUND)
+
+from rest_framework import status
+from rest_framework.views import APIView
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from django.db.models import Count, Sum, Q, Avg
+from django.db.models.functions import TruncMonth, TruncWeek, TruncDay
+from django.utils import timezone
+from datetime import datetime, timedelta
+from django.http import HttpResponse
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.graphics.shapes import Drawing
+from reportlab.graphics.charts.barcharts import VerticalBarChart
+from reportlab.graphics.charts.piecharts import Pie
+import io
+
+from doctor.models import User, Doctor, Patient, DoctorSubscription, SubscriptionPlan
+
+class AdminReportPDFView(APIView):
+    """
+    Enhanced PDF report generator for admin dashboard
+    """
+    permission_classes = [IsAuthenticated]
     
-    def get_recent_users(self, limit=10):
-        """Get recently registered users"""
-        recent = User.objects.select_related(
-            'doctor', 'patient'
-        ).order_by('-date_joined')[:limit]
+    def get(self, request):
+        if not request.user.role == 'admin':
+            return Response({'error': 'Admin access required'}, status=status.HTTP_403_FORBIDDEN)
         
-        return [{
-            'id': user.id,
-            'username': user.username,
-            'full_name': user.get_full_name() or user.username,
-            'email': user.email,
-            'user_type': 'Doctor' if hasattr(user, 'doctor') else 'Patient' if hasattr(user, 'patient') else 'Admin',
-            'date_joined': user.date_joined.strftime('%Y-%m-%d %H:%M'),
-            'is_active': user.is_active
-        } for user in recent]
-    
-    def get_recent_appointments(self, limit=10):
-        """Get recent appointments across the platform"""
-        from .models import Appointment  # Adjust import path
+        # Get date filters
+        start_date = request.GET.get('start_date')
+        end_date = request.GET.get('end_date')
         
-        recent = Appointment.objects.select_related(
-            'doctor__user', 'patient__user'
-        ).order_by('-created_at')[:limit]
-        
-        return [{
-            'id': apt.id,
-            'doctor_name': apt.doctor.user.get_full_name() or apt.doctor.user.username,
-            'patient_name': apt.patient.user.get_full_name() or apt.patient.user.username,
-            'date': apt.date.strftime('%Y-%m-%d'),
-            'time': apt.time_slot.strftime('%H:%M') if apt.time_slot else None,
-            'status': apt.status,
-            'fee': float(apt.fee) if hasattr(apt, 'fee') and apt.fee else 0
-        } for apt in recent]
-    
-    def get_pending_reviews(self, limit=10):
-        """Get pending reviews that need admin approval"""
-        from .models import DoctorReview  # Adjust import path
-        
-        pending = DoctorReview.objects.filter(
-            status='pending'
-        ).select_related(
-            'doctor__user', 'patient__user'
-        ).order_by('-created_at')[:limit]
-        
-        return [{
-            'id': review.id,
-            'doctor_name': review.doctor.user.get_full_name() or review.doctor.user.username,
-            'patient_name': review.patient.user.get_full_name() or review.patient.user.username,
-            'rating': review.rating,
-            'comment': review.comment[:100] + '...' if len(review.comment) > 100 else review.comment,
-            'created_at': review.created_at.strftime('%Y-%m-%d %H:%M')
-        } for review in pending]
-    
-    def get_user_growth_trend(self, months=6):
-        """Get user growth trend for the last N months"""
-        monthly_data = []
-        end_date = timezone.now().date()
-        
-        for i in range(months):
-            month_start = (end_date.replace(day=1) - timedelta(days=i*30)).replace(day=1)
-            next_month = (month_start + timedelta(days=32)).replace(day=1)
+        if start_date:
+            start_date = datetime.strptime(start_date, '%Y-%m-%d').date()
+        else:
+            start_date = timezone.now().date() - timedelta(days=30)
             
-            new_users = User.objects.filter(
-                date_joined__gte=month_start,
-                date_joined__lt=next_month
-            ).count()
+        if end_date:
+            end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+        else:
+            end_date = timezone.now().date()
+        
+        # Create PDF response
+        response = HttpResponse(content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="admin_comprehensive_report_{timezone.now().strftime("%Y%m%d_%H%M")}.pdf"'
+        
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=72, leftMargin=72, 
+                              topMargin=72, bottomMargin=18)
+        
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            spaceAfter=30,
+            alignment=1,  # Center alignment
+            textColor=colors.HexColor('#1f2937')
+        )
+        
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=16,
+            spaceAfter=12,
+            textColor=colors.HexColor('#374151'),
+            borderWidth=1,
+            borderColor=colors.HexColor('#e5e7eb'),
+            borderPadding=8,
+            backColor=colors.HexColor('#f9fafb')
+        )
+        
+        story = []
+        
+        # Title and Header
+        story.append(Paragraph("Admin Dashboard Report", title_style))
+        story.append(Paragraph(f"Generated on: {timezone.now().strftime('%B %d, %Y at %I:%M %p')}", styles['Normal']))
+        story.append(Paragraph(f"Report Period: {start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}", styles['Normal']))
+        story.append(Spacer(1, 30))
+        
+        # Executive Summary
+        story.append(Paragraph("Executive Summary", heading_style))
+        
+        # Get summary data
+        total_revenue = DoctorSubscription.objects.filter(
+            payment_status='completed'
+        ).aggregate(total=Sum('amount_paid'))['total'] or 0
+        
+        period_revenue = DoctorSubscription.objects.filter(
+            payment_status='completed',
+            paid_at__date__gte=start_date,
+            paid_at__date__lte=end_date
+        ).aggregate(total=Sum('amount_paid'))['total'] or 0
+        
+        active_subscriptions = DoctorSubscription.objects.filter(status='active').count()
+        total_doctors = Doctor.objects.count()
+        verified_doctors = Doctor.objects.filter(verification_status='approved').count()
+        total_patients = Patient.objects.count()
+        pending_verifications = Doctor.objects.filter(verification_status='pending_approval').count()
+        
+        summary_data = [
+            ['Metric', 'Value', 'Status'],
+            ['Total Revenue (All Time)', f"₹{total_revenue:,.2f}", '💰 Revenue'],
+            ['Period Revenue', f"₹{period_revenue:,.2f}", f'📊 Last {(end_date - start_date).days} days'],
+            ['Active Subscriptions', f"{active_subscriptions:,}", '✅ Currently Active'],
+            ['Total Doctors', f"{total_doctors:,}", f'{verified_doctors:,} Verified'],
+            ['Total Patients', f"{total_patients:,}", '👥 Registered Users'],
+            ['Pending Verifications', f"{pending_verifications:,}", '⏳ Awaiting Review'],
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[2.5*inch, 1.5*inch, 2*inch])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#3b82f6')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f8fafc')]),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
+            ('FONTSIZE', (0, 1), (-1, -1), 10),
+            ('PADDING', (0, 0), (-1, -1), 8),
+        ]))
+        
+        story.append(summary_table)
+        story.append(Spacer(1, 30))
+        
+        # Revenue Analysis
+        story.append(Paragraph("Revenue Analysis", heading_style))
+        
+        # Payment status breakdown
+        payment_stats = DoctorSubscription.objects.values('payment_status').annotate(
+            count=Count('id'),
+            total_amount=Sum('amount_paid')
+        ).order_by('-count')
+        
+        revenue_data = [
+            ['Payment Status', 'Count', 'Total Amount', 'Average'],
+        ]
+        
+        for stat in payment_stats:
+            avg_amount = (stat['total_amount'] or 0) / stat['count'] if stat['count'] > 0 else 0
+            revenue_data.append([
+                stat['payment_status'].title(),
+                f"{stat['count']:,}",
+                f"₹{(stat['total_amount'] or 0):,.2f}",
+                f"₹{avg_amount:,.2f}"
+            ])
+        
+        revenue_table = Table(revenue_data, colWidths=[2*inch, 1*inch, 1.5*inch, 1.5*inch])
+        revenue_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#10b981')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#ecfdf5')]),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('PADDING', (0, 0), (-1, -1), 6),
+        ]))
+        
+        story.append(revenue_table)
+        story.append(Spacer(1, 20))
+        
+        # Subscription plans breakdown
+        plan_breakdown = SubscriptionPlan.objects.annotate(
+            subscription_count=Count('doctorsubscription', filter=Q(doctorsubscription__status='active')),
+            total_revenue=Sum('doctorsubscription__amount_paid', 
+                            filter=Q(doctorsubscription__payment_status='completed'))
+        ).order_by('-total_revenue')
+        
+        if plan_breakdown.exists():
+            plan_data = [
+                ['Plan Name', 'Price', 'Active Subscriptions', 'Total Revenue', 'Market Share'],
+            ]
             
-            new_doctors = User.objects.filter(
-                doctor__isnull=False,
-                date_joined__gte=month_start,
-                date_joined__lt=next_month
-            ).count()
+            total_plan_revenue = sum((plan.total_revenue or 0) for plan in plan_breakdown)
             
-            new_patients = User.objects.filter(
-                patient__isnull=False,
-                date_joined__gte=month_start,
-                date_joined__lt=next_month
-            ).count()
+            for plan in plan_breakdown:
+                market_share = ((plan.total_revenue or 0) / total_plan_revenue * 100) if total_plan_revenue > 0 else 0
+                plan_data.append([
+                    plan.get_name_display(),
+                    f"₹{plan.price:,.2f}",
+                    f"{plan.subscription_count:,}",
+                    f"₹{(plan.total_revenue or 0):,.2f}",
+                    f"{market_share:.1f}%"
+                ])
             
-            monthly_data.append({
-                'month': month_start.strftime('%Y-%m'),
-                'month_name': month_start.strftime('%B %Y'),
-                'new_users': new_users,
-                'new_doctors': new_doctors,
-                'new_patients': new_patients
-            })
-        
-        return list(reversed(monthly_data))
-    
-    def get_platform_revenue_trend(self, months=6):
-        """Get platform revenue trend"""
-        from .models import Appointment  # Adjust import path
-        
-        monthly_data = []
-        end_date = timezone.now().date()
-        
-        for i in range(months):
-            month_start = (end_date.replace(day=1) - timedelta(days=i*30)).replace(day=1)
-            next_month = (month_start + timedelta(days=32)).replace(day=1)
+            plan_table = Table(plan_data, colWidths=[1.5*inch, 1*inch, 1.2*inch, 1.5*inch, 0.8*inch])
+            plan_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#8b5cf6')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#faf5ff')]),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('PADDING', (0, 0), (-1, -1), 6),
+            ]))
             
-            revenue = Appointment.objects.filter(
-                status='completed',
-                date__gte=month_start,
-                date__lt=next_month
-            ).aggregate(total=Sum('fee'))['total'] or 0
+            story.append(Paragraph("Subscription Plans Performance", styles['Heading3']))
+            story.append(plan_table)
+        
+        story.append(PageBreak())
+        
+        # User Analytics
+        story.append(Paragraph("User Analytics", heading_style))
+        
+        # Doctor statistics by verification status
+        doctor_stats = Doctor.objects.values('verification_status').annotate(
+            count=Count('id')
+        ).order_by('-count')
+        
+        doctor_data = [
+            ['Verification Status', 'Count', 'Percentage'],
+        ]
+        
+        for stat in doctor_stats:
+            percentage = (stat['count'] / total_doctors * 100) if total_doctors > 0 else 0
+            doctor_data.append([
+                stat['verification_status'].replace('_', ' ').title(),
+                f"{stat['count']:,}",
+                f"{percentage:.1f}%"
+            ])
+        
+        doctor_table = Table(doctor_data, colWidths=[2.5*inch, 1.5*inch, 1.5*inch])
+        doctor_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f59e0b')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fffbeb')]),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('PADDING', (0, 0), (-1, -1), 8),
+        ]))
+        
+        story.append(Paragraph("Doctor Verification Status", styles['Heading3']))
+        story.append(doctor_table)
+        story.append(Spacer(1, 20))
+        
+        # Top specializations
+        specializations = Doctor.objects.exclude(
+            specialization__isnull=True
+        ).values('specialization').annotate(
+            count=Count('id')
+        ).order_by('-count')[:10]
+        
+        if specializations.exists():
+            spec_data = [
+                ['Specialization', 'Doctor Count', 'Market Share'],
+            ]
             
-            appointments = Appointment.objects.filter(
-                status='completed',
-                date__gte=month_start,
-                date__lt=next_month
-            ).count()
+            for spec in specializations:
+                market_share = (spec['count'] / total_doctors * 100) if total_doctors > 0 else 0
+                spec_data.append([
+                    spec['specialization'],
+                    f"{spec['count']:,}",
+                    f"{market_share:.1f}%"
+                ])
             
-            monthly_data.append({
-                'month': month_start.strftime('%Y-%m'),
-                'month_name': month_start.strftime('%B %Y'),
-                'revenue': float(revenue),
-                'appointments': appointments
-            })
-        
-        return list(reversed(monthly_data))
-    
-    def get_appointment_trends(self, days=30):
-        """Get daily appointment trends for the last N days"""
-        daily_data = []
-        end_date = timezone.now().date()
-        start_date = end_date - timedelta(days=days-1)
-        
-        from .models import Appointment  # Adjust import path
-        
-        current_date = start_date
-        while current_date <= end_date:
-            appointments = Appointment.objects.filter(date=current_date).count()
-            completed = Appointment.objects.filter(date=current_date, status='completed').count()
+            spec_table = Table(spec_data, colWidths=[3*inch, 1.5*inch, 1.5*inch])
+            spec_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#06b6d4')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#ecfeff')]),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('PADDING', (0, 0), (-1, -1), 6),
+            ]))
             
-            daily_data.append({
-                'date': current_date.strftime('%Y-%m-%d'),
-                'total_appointments': appointments,
-                'completed_appointments': completed
-            })
+            story.append(Paragraph("Top Medical Specializations", styles['Heading3']))
+            story.append(spec_table)
+        
+        story.append(Spacer(1, 30))
+        
+        # Growth Analysis
+        story.append(Paragraph("Growth Analysis", heading_style))
+        
+        # Monthly growth for the last 6 months
+        monthly_doctor_growth = Doctor.objects.filter(
+            created_at__date__gte=timezone.now().date() - timedelta(days=180)
+        ).annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            count=Count('id')
+        ).order_by('month')
+        
+        monthly_patient_growth = Patient.objects.filter(
+            created_at__date__gte=timezone.now().date() - timedelta(days=180)
+        ).annotate(
+            month=TruncMonth('created_at')
+        ).values('month').annotate(
+            count=Count('id')
+        ).order_by('month')
+        
+        # Combine growth data
+        growth_data = [
+            ['Month', 'New Doctors', 'New Patients', 'Total New Users'],
+        ]
+        
+        # Create a dict for easy lookup
+        doctor_growth_dict = {item['month']: item['count'] for item in monthly_doctor_growth}
+        patient_growth_dict = {item['month']: item['count'] for item in monthly_patient_growth}
+        
+        # Get all months from both datasets
+        all_months = set(doctor_growth_dict.keys()) | set(patient_growth_dict.keys())
+        
+        for month in sorted(all_months):
+            doctor_count = doctor_growth_dict.get(month, 0)
+            patient_count = patient_growth_dict.get(month, 0)
+            total_count = doctor_count + patient_count
             
-            current_date += timedelta(days=1)
+            growth_data.append([
+                month.strftime('%B %Y'),
+                f"{doctor_count:,}",
+                f"{patient_count:,}",
+                f"{total_count:,}"
+            ])
         
-        return daily_data
-    
-    def get_top_doctors(self, limit=10):
-        """Get top performing doctors by revenue and ratings"""
-        from .models import Doctor  # Adjust import path
+        if len(growth_data) > 1:  # More than just headers
+            growth_table = Table(growth_data, colWidths=[2*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+            growth_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#dc2626')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#fef2f2')]),
+                ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#d1d5db')),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('PADDING', (0, 0), (-1, -1), 6),
+            ]))
+            
+            story.append(Paragraph("Monthly User Growth (Last 6 Months)", styles['Heading3']))
+            story.append(growth_table)
         
-        top_doctors = Doctor.objects.annotate(
-            total_appointments=Count('appointments'),
-            completed_appointments=Count('appointments', filter=Q(appointments__status='completed')),
-            total_revenue=Sum('appointments__fee', filter=Q(appointments__status='completed')),
-            avg_rating=Avg('reviews__rating', filter=Q(reviews__status='approved'))
-        ).filter(
-            total_appointments__gt=0
-        ).order_by('-total_revenue')[:limit]
+        # Footer information
+        story.append(Spacer(1, 50))
+        story.append(Paragraph("Report Notes:", styles['Heading3']))
+        story.append(Paragraph("• This report includes data up to the generation date.", styles['Normal']))
+        story.append(Paragraph("• Revenue figures include only completed payment transactions.", styles['Normal']))
+        story.append(Paragraph("• User statistics reflect current database state.", styles['Normal']))
+        story.append(Paragraph("• Growth metrics are calculated based on user registration dates.", styles['Normal']))
+        story.append(Spacer(1, 20))
+        story.append(Paragraph(f"Generated by: Admin Dashboard System | {timezone.now().strftime('%Y')}", 
+                             styles['Normal']))
         
-        return [{
-            'id': doctor.id,
-            'name': doctor.user.get_full_name() or doctor.user.username,
-            'specialization': getattr(doctor, 'specialization', 'N/A'),
-            'total_appointments': doctor.total_appointments or 0,
-            'completed_appointments': doctor.completed_appointments or 0,
-            'total_revenue': float(doctor.total_revenue or 0),
-            'average_rating': round(float(doctor.avg_rating or 0), 2),
-            'completion_rate': round((doctor.completed_appointments / doctor.total_appointments * 100), 2) if doctor.total_appointments > 0 else 0
-        } for doctor in top_doctors]
+        # Build the PDF
+        doc.build(story)
+        
+        pdf = buffer.getvalue()
+        buffer.close()
+        response.write(pdf)
+        return response

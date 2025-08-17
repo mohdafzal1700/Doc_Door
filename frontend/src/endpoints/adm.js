@@ -79,3 +79,24 @@ export const getAllAdminReviews = () =>
 // Moderate a single review (approve or reject)
 export const moderateAdminReview = (reviewId, status) =>
   adminAxios.patch(`reviews/${reviewId}/moderate/`, { status });
+
+// Admin Dashboard Stats
+export const getAdminDashboard = () =>
+    adminAxios.get('dashboard/');
+
+// Admin Revenue
+export const getAdminRevenue = () =>
+    adminAxios.get('revenue/');
+
+// Admin Users
+export const getAdminUsers = () =>
+    adminAxios.get('users/');
+
+// Pending Verifications
+export const getPendingVerifications = () =>
+    adminAxios.get('verifications/');
+
+// Admin Report PDF Download
+export const downloadAdminReport = (params) =>
+    adminAxios.get('report/pdf/', { params, responseType: 'blob' });
+

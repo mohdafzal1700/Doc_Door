@@ -13,6 +13,11 @@ from .views import (
     AdminAppointmentDetailView,
     AdminAppointmentListView,
     AdminReviewListView,
+    AdminDashboardView,
+    AdminRevenueView,
+    AdminUsersView,
+    PendingVerificationsView,
+    AdminReportPDFView,
     AdminReviewModerationView
 )
 
@@ -36,4 +41,9 @@ urlpatterns = [
     path('admins/appointments/<int:appointment_id>/', AdminAppointmentDetailView.as_view(), name='admin_appointment_detail'),
     path('admins/reviews/', AdminReviewListView.as_view(), name='admin-reviews-list'),
     path('admins/reviews/<int:review_id>/moderate/', AdminReviewModerationView.as_view(), name='admin-review-moderate'),
+    path('admins/dashboard/', AdminDashboardView.as_view(), name='admin-dashboard'),
+    path('admins/revenue/', AdminRevenueView.as_view(), name='admin-revenue'),
+    path('admins/users/', AdminUsersView.as_view(), name='admin-users'),
+    path('admins/verifications/', PendingVerificationsView.as_view(), name='pending-verifications'),
+    path('admins/report/pdf/', AdminReportPDFView.as_view(), name='admin-report-pdf'),
 ]

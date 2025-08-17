@@ -13,7 +13,7 @@ import PatientPortal from "./pages/PatientPortal"
 import PatientProfile from "./pages/PatientProfile"
 import EditProfile from "./pages/EditProfile"
 import AdminLogin from "./admin/AdminLoginPage"
-import Dashboard from "./admin/Dashboard"
+import AdminDashboard from "./admin/Dashboard"
 import PatientsPage from "./admin/PatientsPage"
 import DoctorRegistration from "./doctor/pages/DocVerification"
 import PreVerificationView from "./doctor/pages/preverification"
@@ -77,7 +77,7 @@ function App() {
         <Route path="/patientportal" element={<PatientPortal />} />
         <Route path="/patientprofile" element={<PatientProfile />} />
         <Route path="/editprofile" element={<EditProfile />} />
-        <Route path="/dashboard" element={<Dashboard />} />
+        <Route path="/dashboard" element={<AdminDashboard/>} />
         <Route path="/adminloginpage" element={<AdminLogin />} />
          <Route path="/adminREviewPage" element={<AdminReviewPage />} />
         <Route path='/patientspage' element={<PatientsPage/>}/>

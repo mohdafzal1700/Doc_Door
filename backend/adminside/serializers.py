@@ -348,3 +348,151 @@ class SubscriptionPlanSerializer(serializers.ModelSerializer):
 
         logger.debug("All validations passed")
         return data
+    
+from rest_framework import serializers
+
+
+class MonthlyTrendSerializer(serializers.Serializer):
+    """Monthly revenue/growth trends"""
+    month = serializers.CharField()
+    revenue = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    subscriptions = serializers.IntegerField(required=False)
+    count = serializers.IntegerField(required=False)
+
+
+class PlanBreakdownSerializer(serializers.Serializer):
+    """Subscription plan breakdown"""
+    plan_name = serializers.CharField()
+    price = serializers.DecimalField(max_digits=8, decimal_places=2)
+    active_subscriptions = serializers.IntegerField()
+    total_revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class RevenueDataSerializer(serializers.Serializer):
+    """Revenue metrics"""
+    total_revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
+    period_revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
+    active_subscriptions = serializers.IntegerField()
+    monthly_trends = MonthlyTrendSerializer(many=True)
+    plan_breakdown = PlanBreakdownSerializer(many=True)
+
+
+class UsersDataSerializer(serializers.Serializer):
+    """User statistics"""
+    total_doctors = serializers.IntegerField()
+    total_patients = serializers.IntegerField()
+    period_doctors = serializers.IntegerField()
+    period_patients = serializers.IntegerField()
+    verified_doctors = serializers.IntegerField()
+    pending_doctors = serializers.IntegerField()
+
+
+class DateRangeSerializer(serializers.Serializer):
+    """Date range for filtering"""
+    start_date = serializers.CharField()
+    end_date = serializers.CharField()
+
+
+class AdminDashboardSerializer(serializers.Serializer):
+    """Main admin dashboard serializer"""
+    revenue = RevenueDataSerializer()
+    users = UsersDataSerializer()
+    date_range = DateRangeSerializer()
+
+
+class DailyRevenueSerializer(serializers.Serializer):
+    """Daily revenue data"""
+    date = serializers.CharField()
+    revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
+    subscriptions = serializers.IntegerField()
+
+
+class PaymentBreakdownSerializer(serializers.Serializer):
+    """Payment status breakdown"""
+    status = serializers.CharField()
+    count = serializers.IntegerField()
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+
+class SubscriptionBreakdownSerializer(serializers.Serializer):
+    """Subscription status breakdown"""
+    status = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class AdminRevenueSerializer(serializers.Serializer):
+    """Detailed revenue analytics"""
+    daily_revenue = DailyRevenueSerializer(many=True)
+    payment_breakdown = PaymentBreakdownSerializer(many=True)
+    subscription_breakdown = SubscriptionBreakdownSerializer(many=True)
+
+
+class DoctorStatsSerializer(serializers.Serializer):
+    """Doctor statistics"""
+    total = serializers.IntegerField()
+    verified = serializers.IntegerField()
+    pending = serializers.IntegerField()
+    rejected = serializers.IntegerField()
+    with_subscription = serializers.IntegerField()
+
+
+class PatientStatsSerializer(serializers.Serializer):
+    """Patient statistics"""
+    total = serializers.IntegerField()
+
+
+class GrowthTrendsSerializer(serializers.Serializer):
+    """Growth trends data"""
+    doctors = MonthlyTrendSerializer(many=True)
+    patients = MonthlyTrendSerializer(many=True)
+
+
+class SpecializationSerializer(serializers.Serializer):
+    """Doctor specializations"""
+    specialization = serializers.CharField()
+    count = serializers.IntegerField()
+
+
+class AdminUsersSerializer(serializers.Serializer):
+    """User analytics serializer"""
+    doctor_stats = DoctorStatsSerializer()
+    patient_stats = PatientStatsSerializer()
+    growth_trends = GrowthTrendsSerializer()
+    specializations = SpecializationSerializer(many=True)
+
+
+class PendingDoctorSerializer(serializers.Serializer):
+    """Pending doctor verification data"""
+    id = serializers.CharField()
+    name = serializers.CharField()
+    email = serializers.EmailField()
+    specialization = serializers.CharField()
+    experience = serializers.IntegerField(allow_null=True)
+    license_number = serializers.CharField(allow_null=True, allow_blank=True)
+    clinic_name = serializers.CharField()
+    location = serializers.CharField()
+    submitted_date = serializers.DateField()
+    profile_complete = serializers.BooleanField()
+    education_complete = serializers.BooleanField()
+    certification_complete = serializers.BooleanField()
+    license_complete = serializers.BooleanField()
+
+
+class PendingVerificationsSerializer(serializers.Serializer):
+    """Pending verifications response"""
+    pending_verifications = PendingDoctorSerializer(many=True)
+    total_pending = serializers.IntegerField()
+
+
+class AdminActionRequestSerializer(serializers.Serializer):
+    """Admin action request (approve/reject)"""
+    doctor_id = serializers.UUIDField()
+    action = serializers.ChoiceField(choices=['approve', 'reject'])
+    comment = serializers.CharField(required=False, allow_blank=True)
+
+
+class AdminActionResponseSerializer(serializers.Serializer):
+    """Admin action response"""
+    message = serializers.CharField()
+    doctor_id = serializers.CharField()
+    new_status = serializers.CharField()
