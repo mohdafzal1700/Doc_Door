@@ -3146,213 +3146,159 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 import logging
+from .serializers import (
+    DoctorDashboardSerializer, 
+    DashboardDataService
+)
+import logging
+from django.utils import timezone
+from datetime import timedelta, datetime
+from django.db.models import Sum, Avg, Count
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
 
 logger = logging.getLogger(__name__)
 
 class DoctorDashboardView(APIView):
-    """Doctor Dashboard with stats and reports"""
+    """
+    Doctor Dashboard with stats and reports
+    GET: Returns dashboard data including stats, recent appointments, reviews, and revenue trends
+    """
     permission_classes = [IsAuthenticated]
-    
+    serializer_class = DoctorDashboardSerializer
+
     def get(self, request):
-        if not hasattr(request.user, 'doctor'):
+        # Enhanced debugging
+        print(f"🔍 Request user: {request.user}")
+        print(f"🔍 Is authenticated: {request.user.is_authenticated}")
+        print(f"🔍 User ID: {getattr(request.user, 'id', 'No ID')}")
+        print(f"🔍 User role: {getattr(request.user, 'role', 'No role')}")
+
+        # Check if user is authenticated first
+        if not request.user.is_authenticated:
+            print("❌ User is not authenticated")
             return Response({
                 'success': False,
-                'message': 'Only doctors can view dashboard'
-            }, status=status.HTTP_403_FORBIDDEN)
-        
+                'message': 'Authentication required'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+
+        # Enhanced doctor profile checking
         try:
-            doctor = request.user.doctor
+            # Method 1: Direct access
+            print(f"🔍 Has doctor_profile attribute: {hasattr(request.user, 'doctor_profile')}")
             
-            # Get date filters (optional)
+            if hasattr(request.user, 'doctor_profile'):
+                try:
+                    doctor_profile = request.user.doctor_profile
+                    print(f"🔍 Doctor profile accessed: {doctor_profile}")
+                except Exception as e:
+                    print(f"❌ Error accessing doctor_profile: {e}")
+                    doctor_profile = None
+            else:
+                doctor_profile = None
+
+            # Method 2: Database query to double-check
+            from django.contrib.auth import get_user_model
+            from .models import Doctor  # Import your Doctor model
+            
+            User = get_user_model()
+            
+            # Check if Doctor profile exists in database
+            doctor_exists = Doctor.objects.filter(user=request.user).exists()
+            print(f"🔍 Doctor exists in DB: {doctor_exists}")
+            
+            if doctor_exists:
+                doctor_from_db = Doctor.objects.get(user=request.user)
+                print(f"🔍 Doctor from DB: {doctor_from_db}")
+                doctor_profile = doctor_from_db
+            
+            # Method 3: Check user role
+            if hasattr(request.user, 'role'):
+                print(f"🔍 User role is: {request.user.role}")
+                if request.user.role != 'doctor':
+                    return Response({
+                        'success': False,
+                        'message': f'Access denied. User role is "{request.user.role}", but "doctor" role is required.'
+                    }, status=status.HTTP_403_FORBIDDEN)
+
+            # If no doctor profile found
+            if not doctor_profile:
+                print(f"❌ No doctor profile found for user {request.user.username}")
+                
+                # Helpful error message with next steps
+                error_message = (
+                    f"Doctor profile not found for user {request.user.username}. "
+                    f"Please complete your doctor profile setup first."
+                )
+                
+                return Response({
+                    'success': False,
+                    'message': error_message,
+                    'debug_info': {
+                        'user_id': str(request.user.id),
+                        'user_role': getattr(request.user, 'role', 'unknown'),
+                        'doctor_exists_in_db': doctor_exists,
+                        'has_doctor_profile_attr': hasattr(request.user, 'doctor_profile')
+                    }
+                }, status=status.HTTP_403_FORBIDDEN)
+
+        except Exception as e:
+            print(f"❌ Error in doctor profile checking: {str(e)}")
+            import traceback
+            print(f"❌ Full traceback: {traceback.format_exc()}")
+            
+            return Response({
+                'success': False,
+                'message': f'Error checking doctor profile: {str(e)}'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        try:
+            # Use the found doctor profile
+            doctor = doctor_profile
+            print(f"✅ Using doctor: {doctor}")
+
+            # Get query parameters for date filtering
             date_from = request.query_params.get('date_from')
             date_to = request.query_params.get('date_to')
-            
-            # Base queryset for appointments
-            appointments_qs = doctor.appointments.all()
-            
-            # Apply date filters if provided
-            if date_from:
-                try:
-                    date_from = datetime.strptime(date_from, '%Y-%m-%d').date()
-                    appointments_qs = appointments_qs.filter(date__gte=date_from)
-                except ValueError:
-                    pass
-            
-            if date_to:
-                try:
-                    date_to = datetime.strptime(date_to, '%Y-%m-%d').date()
-                    appointments_qs = appointments_qs.filter(date__lte=date_to)
-                except ValueError:
-                    pass
-            
-            # Calculate stats
-            stats = self.calculate_stats(doctor, appointments_qs)
-            
-            # Get recent activity
-            recent_appointments = self.get_recent_appointments(doctor)
-            recent_reviews = self.get_recent_reviews(doctor)
-            
-            # Monthly revenue trend (last 6 months)
-            monthly_revenue = self.get_monthly_revenue_trend(doctor)
+            print(f"🔍 Date filters: from={date_from}, to={date_to}")
+
+            # Initialize data service
+            data_service = DashboardDataService(doctor)
+            debug_info = data_service.debug_earnings_breakdown()
+            print(debug_info)
+
+            # Get filtered appointments
+            appointments_qs = data_service.get_filtered_appointments(date_from, date_to)
+            print(f"🔍 Filtered appointments count: {appointments_qs.count()}")
+
+            # Prepare dashboard data
+            dashboard_data = {
+                'stats': data_service.calculate_stats(appointments_qs),
+                'recent_appointments': data_service.get_recent_appointments(),
+                'recent_reviews': data_service.get_recent_reviews(),
+                'monthly_revenue_trend': data_service.get_monthly_revenue_trend()
+            }
+
+            print(f"🔍 Dashboard data keys: {dashboard_data.keys()}")
+
+            # Serialize the data for output
+            serializer = self.serializer_class(dashboard_data)
             
             return Response({
                 'success': True,
-                'data': {
-                    'stats': stats,
-                    'recent_appointments': recent_appointments,
-                    'recent_reviews': recent_reviews,
-                    'monthly_revenue_trend': monthly_revenue,
-                }
+                'data': serializer.data
             }, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
+            print(f"❌ Error in dashboard data processing: {str(e)}")
+            print(f"❌ Error type: {type(e)}")
+            import traceback
+            print(f"❌ Full traceback: {traceback.format_exc()}")
+            
             logger.error(f"Error in doctor dashboard: {str(e)}")
             return Response({
                 'success': False,
-                'message': 'Failed to load dashboard data'
+                'message': f'Failed to load dashboard data: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-    
-    def calculate_stats(self, doctor, appointments_qs):
-        """Calculate dashboard statistics"""
-        now = timezone.now()
-        today = now.date()
-        this_month_start = today.replace(day=1)
-        last_month_start = (this_month_start - timedelta(days=1)).replace(day=1)
-        
-        # Total appointments
-        total_appointments = appointments_qs.count()
-        
-        # Appointments by status
-        completed_appointments = appointments_qs.filter(status='completed').count()
-        pending_appointments = appointments_qs.filter(status='pending').count()
-        cancelled_appointments = appointments_qs.filter(status='cancelled').count()
-        
-        # Today's appointments
-        today_appointments = appointments_qs.filter(date=today).count()
-        
-        # This month's appointments
-        this_month_appointments = appointments_qs.filter(date__gte=this_month_start).count()
-        
-        # Revenue calculations (assuming you have a fee field on appointments or doctor)
-        # Adjust these based on your actual model structure
-        total_revenue = appointments_qs.filter(
-            status='completed'
-        ).aggregate(
-            total=Sum('fee')  # Assuming fee field exists on appointment
-        )['total'] or 0
-        
-        # This month's revenue
-        this_month_revenue = appointments_qs.filter(
-            status='completed',
-            date__gte=this_month_start
-        ).aggregate(
-            total=Sum('fee')
-        )['total'] or 0
-        
-        # Last month's revenue for comparison
-        last_month_revenue = appointments_qs.filter(
-            status='completed',
-            date__gte=last_month_start,
-            date__lt=this_month_start
-        ).aggregate(
-            total=Sum('fee')
-        )['total'] or 0
-        
-        # Calculate revenue growth percentage
-        revenue_growth = 0
-        if last_month_revenue > 0:
-            revenue_growth = ((this_month_revenue - last_month_revenue) / last_month_revenue) * 100
-        
-        # Average rating
-        avg_rating = doctor.reviews.filter(
-            status='approved'
-        ).aggregate(
-            avg=Avg('rating')
-        )['avg'] or 0
-        
-        # Total reviews
-        total_reviews = doctor.reviews.filter(status='approved').count()
-        
-        return {
-            'total_appointments': total_appointments,
-            'completed_appointments': completed_appointments,
-            'pending_appointments': pending_appointments,
-            'cancelled_appointments': cancelled_appointments,
-            'today_appointments': today_appointments,
-            'this_month_appointments': this_month_appointments,
-            'total_revenue': float(total_revenue),
-            'this_month_revenue': float(this_month_revenue),
-            'last_month_revenue': float(last_month_revenue),
-            'revenue_growth_percentage': round(revenue_growth, 2),
-            'average_rating': round(float(avg_rating), 2) if avg_rating else 0,
-            'total_reviews': total_reviews,
-            'completion_rate': round((completed_appointments / total_appointments * 100), 2) if total_appointments > 0 else 0
-        }
-    
-    def get_recent_appointments(self, doctor, limit=5):
-        """Get recent appointments for the doctor"""
-        recent = doctor.appointments.select_related(
-            'patient__user'
-        ).order_by('-date', '-time_slot')[:limit]
-        
-        return [{
-            'id': apt.id,
-            'patient_name': apt.patient.user.get_full_name() if apt.patient.user.get_full_name() else apt.patient.user.username,
-            'date': apt.date.strftime('%Y-%m-%d'),
-            'time': apt.time_slot.strftime('%H:%M') if apt.time_slot else None,
-            'status': apt.status,
-            'fee': float(apt.fee) if hasattr(apt, 'fee') and apt.fee else 0
-        } for apt in recent]
-    
-    def get_recent_reviews(self, doctor, limit=5):
-        """Get recent reviews for the doctor"""
-        recent = doctor.reviews.filter(
-            status='approved'
-        ).select_related(
-            'patient__user'
-        ).order_by('-created_at')[:limit]
-        
-        return [{
-            'id': review.id,
-            'patient_name': review.patient.user.get_full_name() if review.patient.user.get_full_name() else review.patient.user.username,
-            'rating': review.rating,
-            'comment': review.comment[:100] + '...' if len(review.comment) > 100 else review.comment,
-            'created_at': review.created_at.strftime('%Y-%m-%d %H:%M')
-        } for review in recent]
-    
-    def get_monthly_revenue_trend(self, doctor, months=6):
-        """Get monthly revenue trend for the last N months"""
-        end_date = timezone.now().date()
-        start_date = end_date.replace(day=1) - timedelta(days=(months-1)*30)  # Approximate
-        
-        monthly_data = []
-        current_date = start_date
-        
-        while current_date <= end_date:
-            month_start = current_date.replace(day=1)
-            next_month = (month_start + timedelta(days=32)).replace(day=1)
-            
-            revenue = doctor.appointments.filter(
-                status='completed',
-                date__gte=month_start,
-                date__lt=next_month
-            ).aggregate(
-                total=Sum('fee')
-            )['total'] or 0
-            
-            appointments_count = doctor.appointments.filter(
-                status='completed',
-                date__gte=month_start,
-                date__lt=next_month
-            ).count()
-            
-            monthly_data.append({
-                'month': month_start.strftime('%Y-%m'),
-                'month_name': month_start.strftime('%B %Y'),
-                'revenue': float(revenue),
-                'appointments': appointments_count
-            })
-            
-            current_date = next_month
-        
-        return monthly_data

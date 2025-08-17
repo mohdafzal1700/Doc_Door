@@ -75,122 +75,6 @@ from google.auth.transport import requests
 logger = logging.getLogger(__name__)
 
 
-
-class GoogleLoginView(APIView):
-    '''Google Authentication '''
-    
-    def post(self, request):
-        try:
-            # Extract data from request
-            id_token_str = request.data.get('id_token')
-            role = request.data.get('role')
-            
-            # Validate required fields
-            if not id_token_str or not role:
-                return Response(
-                    {'error': 'Missing id_token or role'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Validate role
-            if role not in ['patient', 'doctor']:
-                return Response(
-                    {'error': 'Role must be either "patient" or "doctor"'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Verify Google ID token
-            try:
-                # Specify the CLIENT_ID of the app that accesses the backend
-                google_client_id = getattr(settings, 'GOOGLE_OAUTH2_CLIENT_ID', None)
-                if not google_client_id:
-                    logger.error('GOOGLE_OAUTH2_CLIENT_ID not configured in settings')
-                    return Response(
-                        {'error': 'Google OAuth2 not configured'}, 
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
-                    )
-                
-                idinfo = id_token.verify_oauth2_token(
-                    id_token_str, 
-                    requests.Request(), 
-                    google_client_id
-                )
-                
-            except ValueError as e:
-                logger.error(f'Invalid Google ID token: {str(e)}')
-                return Response(
-                    {'error': 'Invalid token'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Extract user information from token
-            email = idinfo.get('email')
-            if not email:
-                return Response(
-                    {'error': 'Email not found in token'}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            first_name = idinfo.get('given_name', '')
-            last_name = idinfo.get('family_name', '')
-            name = idinfo.get('name', f'{first_name} {last_name}'.strip())
-            
-            # Check if user already exists
-            try:
-                user = User.objects.get(email=email)
-                
-                # Check if existing user has different role
-                if hasattr(user, 'role') and user.role != role:
-                    return Response(
-                        {'error': f'Already registered as {user.role}'}, 
-                        status=status.HTTP_400_BAD_REQUEST
-                    )
-                
-            except User.DoesNotExist:
-                # Create new user
-                user = User.objects.create_user(
-                    email=email,
-                    first_name=first_name,
-                    last_name=last_name,
-                    username=email,  # Use email as username
-                )
-                
-                # Set role if your User model has a role field
-                if hasattr(user, 'role'):
-                    user.role = role
-                    user.save()
-                
-                logger.info(f'New user created via Google OAuth: {email} as {role}')
-            
-            # Generate JWT tokens
-            refresh = RefreshToken.for_user(user)
-            access_token = refresh.access_token
-            
-            # Prepare response data
-            user_data = {
-                'id': user.id,
-                'email': user.email,
-                'name': user.first_name or name,
-                'role': getattr(user, 'role', role)
-            }
-            
-            response_data = {
-                'refresh': str(refresh),
-                'access': str(access_token),
-                'user': user_data
-            }
-            
-            logger.info(f'Successful Google OAuth login for user: {email}')
-            return Response(response_data, status=status.HTTP_200_OK)
-            
-        except Exception as e:
-            logger.error(f'Unexpected error in GoogleLoginView: {str(e)}')
-            return Response(
-                {'error': 'An unexpected error occurred'}, 
-                status=status.HTTP_500_INTERNAL_SERVER_ERROR
-            )
-
-
 class CustomTokenObtainPairView(TokenObtainPairView):
     """Token Verification & User"""
     
@@ -300,83 +184,95 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 {"success": False, "message": f"An error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            
 class CustomTokenRefreshView(TokenRefreshView):
-    """ Setting Refresh Token"""
+    """Cookie-based Token Refresh View"""
     permission_classes = [permissions.AllowAny]
     
     def post(self, request, *args, **kwargs):
         try:
-            logger.info("Token refresh attempt")
+            logger.info("🔄 Token refresh attempt")
             logger.info(f"Request cookies: {list(request.COOKIES.keys())}")
             
+            # Get refresh token from cookies
             refresh_token = request.COOKIES.get("refresh_token")
             if not refresh_token:
-                logger.warning("No refresh token found in cookies")
+                logger.warning("❌ No refresh token found in cookies")
                 return Response(
                     {"success": False, "message": "Refresh token not found in cookies"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            
-            request_data = request.data.copy()
-            request_data["refresh"] = refresh_token
-            request._mutable = True
-            request.data.update(request_data)
-            
-            response = super().post(request, *args, **kwargs)
-            
-            if response.status_code != 200:
-                logger.warning(f"Token refresh failed: {response.data}")
-                return Response(
-                    {"success": False, "message": "Refresh token expired or invalid"},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
-
-            token = response.data
-            access_token = token["access"]
-            refresh_token = token.get("refresh")
             
-            # logger.info(f"New access token generated: {access_token[:50]}...")
             
-            res = Response(status=status.HTTP_200_OK)
-            res.data = {"success": True, "message": "Access token refreshed"}
-
-            if access_token:
-                res.set_cookie(
-                    key="access_token",
-                    value=access_token,
-                    httponly=True,
-                    secure=False,  # Change to True in production with HTTPS
-                    samesite="Lax",
-                    path="/",
-                    max_age=60 * 60  # 1 hour
+            try:
+                from rest_framework_simplejwt.serializers import TokenRefreshSerializer
+                
+                serializer = TokenRefreshSerializer(data={'refresh': refresh_token})
+                if serializer.is_valid():
+                    # Generate new tokens
+                    validated_data = serializer.validated_data
+                    access_token = str(validated_data['access'])
+                    
+                    # Check if new refresh token is provided
+                    new_refresh_token = validated_data.get('refresh')
+                    if new_refresh_token:
+                        new_refresh_token = str(new_refresh_token)
+                    
+                    logger.info("✅ Token refresh successful")
+                    
+                    # Create response
+                    response = Response({
+                        "success": True, 
+                        "message": "Access token refreshed successfully"
+                    }, status=status.HTTP_200_OK)
+                    
+                    # Set new access token cookie
+                    response.set_cookie(
+                        key="access_token",
+                        value=access_token,
+                        httponly=True,
+                        secure=False,  # Set to True in production with HTTPS
+                        samesite="Lax",
+                        path="/",
+                        max_age=60 * 15  # 15 minutes
+                    )
+                    
+                    # Set new refresh token cookie if provided
+                    if new_refresh_token:
+                        response.set_cookie(
+                            key="refresh_token", 
+                            value=new_refresh_token,
+                            httponly=True,
+                            secure=False,  # Set to True in production
+                            samesite="Lax", 
+                            path="/",
+                            max_age=7 * 24 * 60 * 60  # 7 days
+                        )
+                        logger.info("🔁 Refresh token cookie updated")
+                    
+                    return response
+                    
+                else:
+                    logger.warning(f"❌ Token refresh validation failed: {serializer.errors}")
+                    return Response(
+                        {"success": False, "message": "Invalid refresh token"},
+                        status=status.HTTP_401_UNAUTHORIZED
+                    )
+                    
+            except Exception as token_error:
+                logger.error(f"❌ Token processing error: {str(token_error)}")
+                return Response(
+                    {"success": False, "message": "Token refresh failed"},
+                    status=status.HTTP_401_UNAUTHORIZED
                 )
-
-            #  Set refresh token cookie 
-            if refresh_token:
-                res.set_cookie(
-                    key="refresh_token",
-                    value=refresh_token,
-                    httponly=True,
-                    secure=False,
-                    samesite="Lax",
-                    path="/",
-                    max_age=7 * 24 * 60 * 60  # 7 days
-                )
-                logger.info("🔁 Refresh token cookie updated")
-
-            return res
-            
+                
         except Exception as e:
-            logger.error(f"Token refresh error: {str(e)}")
+            logger.error(f"❌ Token refresh error: {str(e)}")
             import traceback
             traceback.print_exc()
             return Response(
-                {"success": False, "message": f"Token refresh failed: {str(e)}"},
-                status=status.HTTP_400_BAD_REQUEST
+                {"success": False, "message": "Internal server error"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-
 
 
 class RegisterUserView(generics.CreateAPIView):
@@ -546,17 +442,13 @@ class ResetPasswordView(generics.GenericAPIView):
             'message': 'Please check your input and try again.'
         }, status=status.HTTP_400_BAD_REQUEST)
         
-        
-        
 class CustomLogoutView(APIView):
-    """Custom logout  and black listing the REfresh token"""
+    """Custom logout and blacklisting the Refresh token"""
     
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.AllowAny]  # Changed from IsAuthenticated
     
     def post(self, request, *args, **kwargs):
         try:
-            
-            
             refresh_token = request.COOKIES.get('refresh_token') or request.data.get('refresh_token')
             
             if refresh_token:
@@ -567,7 +459,7 @@ class CustomLogoutView(APIView):
                 except TokenError as e:
                     # Token might already be blacklisted or invalid
                     pass
-
+            
             # Create response
             res = Response(
                 {"success": True, "message": "Logout successful"},
@@ -578,13 +470,13 @@ class CustomLogoutView(APIView):
             res.delete_cookie(
                 key="access_token",
                 path='/',
-                samesite="None"
+                samesite="Lax"  # Changed from "None" to "Lax"
             )
             
             res.delete_cookie(
                 key="refresh_token", 
                 path='/',
-                samesite="None"
+                samesite="Lax"  # Changed from "None" to "Lax"
             )
             
             return res
@@ -594,7 +486,6 @@ class CustomLogoutView(APIView):
                 {"success": False, "message": f"An error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            
             
 
 class UserProfileView(APIView):
@@ -2521,3 +2412,248 @@ class Transaction(APIView):
                 'message': 'Failed to fetch transactions',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+import os
+
+
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny
+from rest_framework import status
+from google.oauth2 import id_token
+from google.auth.transport import requests
+from rest_framework_simplejwt.tokens import RefreshToken
+from django.contrib.auth import get_user_model
+from django.conf import settings
+import logging
+import os
+
+User = get_user_model()
+logger = logging.getLogger(__name__)
+
+
+@method_decorator(csrf_exempt, name='dispatch')
+class GoogleLoginView(APIView):
+    """Google Authentication with Cookie Support"""
+    permission_classes = [AllowAny]
+    authentication_classes = []
+
+    def post(self, request):
+        try:
+            # Extract data from request
+            id_token_str = request.data.get('id_token') or request.data.get('credential')
+            role = request.data.get('role', 'patient')
+
+            # Validate required fields
+            if not id_token_str:
+                return Response(
+                    {'error': 'Missing id_token or credential'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            if role not in ['patient', 'doctor']:
+                return Response(
+                    {'error': 'Role must be either "patient" or "doctor"'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Verify Google ID token
+            try:
+                google_client_id = getattr(settings, 'GOOGLE_OAUTH2_CLIENT_ID', None)
+                if not google_client_id:
+                    logger.error('GOOGLE_OAUTH2_CLIENT_ID not configured in settings')
+                    return Response(
+                        {'error': 'Google OAuth2 not configured'},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+
+                idinfo = id_token.verify_oauth2_token(
+                    id_token_str,
+                    requests.Request(),
+                    google_client_id
+                )
+            except ValueError as e:
+                logger.error(f'Invalid Google ID token: {str(e)}')
+                return Response(
+                    {'error': 'Invalid token'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Extract user information from token
+            email = idinfo.get('email')
+            if not email:
+                return Response(
+                    {'error': 'Email not found in token'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            first_name = idinfo.get('given_name', '')
+            last_name = idinfo.get('family_name', '')
+            name = idinfo.get('name', f'{first_name} {last_name}'.strip())
+
+            # Check if user already exists
+            try:
+                user = User.objects.get(email=email)
+                created = False
+                
+                # IMPORTANT: Ensure user is active
+                if not user.is_active:
+                    user.is_active = True
+                    user.save()
+                    logger.info(f'Activated user account for Google login: {email}')
+                
+                # Check if existing user has different role
+                if hasattr(user, 'role') and user.role != role:
+                    return Response(
+                        {'error': f'Already registered as {user.role}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            except User.DoesNotExist:
+                # Create new user - ENSURE is_active=True
+                user = User.objects.create_user(
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    username=email,
+                    is_active=True  # Explicitly set to True
+                )
+                created = True
+
+            # Set role if your User model has a role field
+            if hasattr(user, 'role'):
+                user.role = role
+                user.save()
+
+            # CLEAR ANY EXISTING REFRESH TOKENS for this user (prevent conflicts)
+            try:
+                from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+                OutstandingToken.objects.filter(user=user).delete()
+                logger.info(f'Cleared existing tokens for user: {email}')
+            except ImportError:
+                # Token blacklist not installed
+                pass
+            except Exception as e:
+                logger.warning(f'Could not clear existing tokens: {e}')
+
+            # Generate NEW JWT tokens
+            refresh = RefreshToken.for_user(user)
+            access_token = refresh.access_token
+
+            logger.info(f'Generated fresh tokens for user: {email}')
+            print(f"🔑 Fresh tokens generated for: {email}")
+            print(f"👤 User active status: {user.is_active}")
+            print(f"🆔 User ID: {user.id}")
+
+            # Prepare user data
+            user_data = {
+                'id': user.id,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'name': user.first_name or name,
+                'role': getattr(user, 'role', role),
+                'is_active': user.is_active,
+                'is_new_user': created
+            }
+
+            # Add doctor profile if user is a doctor
+            if role == 'doctor':
+                try:
+                    if hasattr(user, 'doctor_profile'):
+                        doctor_profile = user.doctor_profile
+                        user_data['doctor_profile'] = {
+                            'verification_status': getattr(doctor_profile, 'verification_status', 'incomplete'),
+                            'is_profile_setup_done': getattr(doctor_profile, 'is_profile_setup_done', False),
+                            'is_education_done': getattr(doctor_profile, 'is_education_done', False),
+                            'is_certification_done': getattr(doctor_profile, 'is_certification_done', False),
+                            'is_license_done': getattr(doctor_profile, 'is_license_done', False),
+                        }
+                    else:
+                        user_data['doctor_profile'] = {
+                            'verification_status': 'incomplete',
+                            'is_profile_setup_done': False,
+                            'is_education_done': False,
+                            'is_certification_done': False,
+                            'is_license_done': False,
+                        }
+                except Exception as profile_error:
+                    logger.error(f'Error fetching doctor profile: {profile_error}')
+                    user_data['doctor_profile'] = {
+                        'verification_status': 'incomplete',
+                        'is_profile_setup_done': False,
+                        'is_education_done': False,
+                        'is_certification_done': False,
+                        'is_license_done': False,
+                    }
+
+            # Consistent response structure
+            response_data = {
+                'message': 'Google authentication successful',
+                'user': user_data,
+                'access': str(access_token),
+                'refresh': str(refresh),
+                'success': True
+            }
+
+            # Create response
+            response = Response(response_data, status=status.HTTP_200_OK)
+
+            # CLEAR OLD COOKIES FIRST
+            self.clear_auth_cookies(response)
+            
+            # Set NEW HTTP-only cookies
+            self.set_auth_cookies(response, access_token, refresh)
+
+            logger.info(f'Successful Google OAuth login for user: {email}')
+            
+            return response
+
+        except Exception as e:
+            logger.error(f'Unexpected error in GoogleLoginView: {str(e)}')
+            print(f"❌ Google auth error: {e}")
+            return Response(
+                {'error': 'An unexpected error occurred'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    def clear_auth_cookies(self, response):
+        """Clear existing auth cookies"""
+        response.delete_cookie('access_token', path='/')
+        response.delete_cookie('refresh_token', path='/')
+        print("🧹 Cleared old auth cookies")
+
+    def set_auth_cookies(self, response, access_token, refresh_token):
+        """Set secure HTTP-only cookies for authentication"""
+        # Set access token cookie (shorter expiry)
+        response.set_cookie(
+            key='access_token',
+            value=str(access_token),
+            httponly=True,
+            secure=False,  # Set to True in production with HTTPS
+            samesite='Lax',
+            path='/',
+            max_age=60 * 15  # 15 minutes (shorter for security)
+        )
+
+        # Set refresh token cookie (longer expiry)
+        response.set_cookie(
+            key='refresh_token',
+            value=str(refresh_token),
+            httponly=True,
+            secure=False,  # Set to True in production with HTTPS
+            samesite='Lax',
+            path='/',
+            max_age=7 * 24 * 60 * 60  # 7 days
+        )
+
+        print(f"🍪 New access token cookie set: {str(access_token)[:20]}...")
+        print(f"🍪 New refresh token cookie set: {str(refresh_token)[:20]}...")
+

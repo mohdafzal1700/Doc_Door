@@ -1,4 +1,4 @@
-// Updated Login.jsx with Google OAuth integration
+// Updated Login.jsx with Google OAuth integration - FIXED USER DATA EXTRACTION
 "use client"
 import { useFormik } from "formik"
 import * as Yup from "yup"
@@ -28,7 +28,6 @@ const Login = () => {
   useEffect(() => {
     const loadGoogleScript = () => {
       if (window.google) return // Already loaded
-
       const script = document.createElement('script')
       script.src = 'https://accounts.google.com/gsi/client'
       script.async = true
@@ -41,7 +40,6 @@ const Login = () => {
       }
       document.head.appendChild(script)
     }
-
     loadGoogleScript()
   }, [])
 
@@ -60,7 +58,6 @@ const Login = () => {
       try {
         console.log("Starting login process:", values)
         let response;
-
         // Choose the appropriate login function based on userType
         if (values.userType === "doctor") {
           console.log("🩺 Calling doctor login...")
@@ -133,82 +130,97 @@ const Login = () => {
     },
   })
 
-  // Handle Google OAuth login
-// Updated handleGoogleLogin function for your Login.jsx
+  // FIXED: Updated handleGoogleLogin function with proper user data extraction
+  const handleGoogleLogin = async (idToken, userType) => {
+    setGoogleLoading(true)
+    try {
+      console.log("🔑 Starting Google OAuth login for:", userType)
+      
+      // Call your Google login API
+      const response = await googleLogin(idToken, userType)
+      console.log("📡 Google login response:", response.data)
 
-const handleGoogleLogin = async (idToken, userType) => {
-  setGoogleLoading(true)
-  try {
-    console.log("🔑 Starting Google OAuth login for:", userType)
-    
-    // Call your Google login API
-    const response = await googleLogin(idToken, userType)
-    console.log("📡 Google login response:", response.data)
-    
-    if (response.status === 200 && response.data) {
-      console.log("✅ Google login successful!")
-      toast.success("Google login successful", "Welcome!")
-      
-      // Extract user data and tokens from response
-      const userData = response.data.user
-      const tokens = {
-        access: response.data.access,
-        refresh: response.data.refresh
-      }
-      
-      console.log("👤 Google user data:", userData)
-      console.log("🔑 Google tokens received:", {
-        access: tokens.access ? "✅" : "❌",
-        refresh: tokens.refresh ? "✅" : "❌"
-      })
-      
-      if (userData && tokens.access) {
-        // Store auth data with improved function
-        const authStored = setAuthData(userData, tokens, userType)
+      if (response.status === 200 && response.data) {
+        console.log("✅ Google login successful!")
+        toast.success("Google login successful", "Welcome!")
+
+        // FIXED: Extract user data from the correct location
+        // Backend returns: { message: '...', data: { user: {...} }, access: '...', refresh: '...' }
+        // OR it might return: { message: '...', user: {...}, access: '...', refresh: '...' }
+        let userData;
         
-        if (authStored) {
-          console.log("✅ Google auth data stored successfully")
-          
-          // Dispatch auth state change event
-          window.dispatchEvent(new Event("authStateChanged"))
-          
-          // Small delay to ensure cookies are set
-          await new Promise(resolve => setTimeout(resolve, 200))
-          
-          // Navigate based on user type
-          if (userType === "doctor") {
-            handleDoctorRedirection(userData)
+        // Try multiple possible locations for user data
+        if (response.data.data && response.data.data.user) {
+          userData = response.data.data.user;
+          console.log("👤 Found user data in data.user:", userData);
+        } else if (response.data.user) {
+          userData = response.data.user;
+          console.log("👤 Found user data in user:", userData);
+        } else if (response.data.data) {
+          userData = response.data.data;
+          console.log("👤 Found user data in data:", userData);
+        }
+
+        const tokens = {
+          access: response.data.access,
+          refresh: response.data.refresh
+        }
+
+        console.log("👤 Final Google user data:", userData)
+        console.log("🔑 Google tokens received:", {
+          access: tokens.access ? "✅" : "❌",
+          refresh: tokens.refresh ? "✅" : "❌"
+        })
+
+        if (userData && tokens.access) {
+          // Store auth data with improved function
+          const authStored = setAuthData(userData, tokens, userType)
+
+          if (authStored) {
+            console.log("✅ Google auth data stored successfully")
+            
+            // Dispatch auth state change event
+            window.dispatchEvent(new Event("authStateChanged"))
+
+            // Small delay to ensure cookies are set
+            await new Promise(resolve => setTimeout(resolve, 200))
+
+            // Navigate based on user type
+            if (userType === "doctor") {
+              console.log("🩺 Google doctor login - checking verification...")
+              handleDoctorRedirection(userData)
+            } else {
+              console.log("🏥 Google patient login - going to home...")
+              navigate("/home")
+            }
           } else {
-            console.log("🏥 Google patient login - going to home...")
-            navigate("/home")
+            console.error("❌ Failed to store Google auth data")
+            toast.error("Failed to save login state. Please try again.")
           }
         } else {
-          console.error("❌ Failed to store Google auth data")
-          toast.error("Failed to save login state. Please try again.")
+          console.error("❌ No user details or tokens received from Google")
+          console.error("Available response data keys:", Object.keys(response.data))
+          toast.error("Invalid response from server. Please try again.")
         }
       } else {
-        console.error("❌ No user details or tokens received from Google")
-        toast.error("Invalid response from server. Please try again.")
+        console.log("❌ Google login not successful:", response.data)
+        toast.error(response.data.error || "Google login failed")
       }
-    } else {
-      console.log("❌ Google login not successful:", response.data)
-      toast.error(response.data.error || "Google login failed")
+    } catch (error) {
+      console.error("❌ Google login error:", error)
+      
+      // More specific error handling
+      if (error.response?.status === 400) {
+        toast.error("Invalid Google token. Please try again.")
+      } else if (error.response?.status === 500) {
+        toast.error("Server error. Please try again later.")
+      } else {
+        handleLoginError(error)
+      }
+    } finally {
+      setGoogleLoading(false)
     }
-  } catch (error) {
-    console.error("❌ Google login error:", error)
-    
-    // More specific error handling
-    if (error.response?.status === 400) {
-      toast.error("Invalid Google token. Please try again.")
-    } else if (error.response?.status === 500) {
-      toast.error("Server error. Please try again later.")
-    } else {
-      handleLoginError(error)
-    }
-  } finally {
-    setGoogleLoading(false)
   }
-}
 
   const handleDoctorRedirection = (userData) => {
     console.log("Doctor login - checking verification status from login response...")
@@ -296,8 +308,9 @@ const handleGoogleLogin = async (idToken, userType) => {
 
   const handleLoginError = (error) => {
     console.error("📡 Error response:", error?.response?.data)
+    
     let errorMessage = "Something went wrong. Please try again.";
-
+    
     if (error?.response?.data) {
       const errorData = error.response.data;
       if (errorData.message) {
@@ -338,56 +351,52 @@ const handleGoogleLogin = async (idToken, userType) => {
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-8">
         <Logo />
         <p className="text-center text-gray-600 mb-6">Please sign in to your account</p>
-        
+
         <form onSubmit={formik.handleSubmit}>
-          <UserTypeToggle 
-            value={formik.values.userType} 
-            onChange={(value) => formik.setFieldValue("userType", value)} 
+          <UserTypeToggle
+            value={formik.values.userType}
+            onChange={(value) => formik.setFieldValue("userType", value)}
           />
-          
-          <Input 
-            label="Email Address" 
-            type="email" 
-            placeholder="Enter your email" 
-            value={formik.values.email} 
-            onChange={(e) => formik.setFieldValue("email", e.target.value)} 
-            error={formik.touched.email && formik.errors.email} 
-            icon={<Mail size={18} className="text-gray-400" />} 
+
+          <Input
+            label="Email Address"
+            type="email"
+            placeholder="Enter your email"
+            value={formik.values.email}
+            onChange={(e) => formik.setFieldValue("email", e.target.value)}
+            error={formik.touched.email && formik.errors.email}
+            icon={<Mail size={18} className="text-gray-400" />}
           />
-          
-          <Input 
-            label="Password" 
-            type="password" 
-            placeholder="Enter your password" 
-            value={formik.values.password} 
-            onChange={(e) => formik.setFieldValue("password", e.target.value)} 
-            error={formik.touched.password && formik.errors.password} 
-            icon={<Lock size={18} className="text-gray-400" />} 
+
+          <Input
+            label="Password"
+            type="password"
+            placeholder="Enter your password"
+            value={formik.values.password}
+            onChange={(e) => formik.setFieldValue("password", e.target.value)}
+            error={formik.touched.password && formik.errors.password}
+            icon={<Lock size={18} className="text-gray-400" />}
           />
 
           <div className="text-right mb-6">
-            <button 
-              type="button" 
-              onClick={handleForgotPassword} 
+            <button
+              type="button"
+              onClick={handleForgotPassword}
               className="text-sm text-gray-500 hover:text-purple-600 transition-colors"
             >
               Forgot password?
             </button>
           </div>
 
-          <Button 
-            type="submit" 
-            className="mb-4" 
-            disabled={loading || googleLoading}
-          >
+          <Button type="submit" className="mb-4" disabled={loading || googleLoading}>
             <LogIn size={18} className="mr-2" />
             {loading ? "Signing in..." : "Sign in"}
           </Button>
         </form>
 
         <div className="text-center text-gray-500 text-sm my-4">Or continue with</div>
-        
-        <GoogleButton 
+
+        <GoogleButton
           userType={formik.values.userType}
           onGoogleLogin={handleGoogleLogin}
           disabled={loading || googleLoading}
@@ -396,12 +405,10 @@ const handleGoogleLogin = async (idToken, userType) => {
           Sign in with Google
         </GoogleButton>
 
-        
-
         <p className="text-center text-sm text-gray-600">
           Don't have an account?{" "}
-          <button 
-            onClick={() => navigate("/register")} 
+          <button
+            onClick={() => navigate("/register")}
             className="text-purple-600 hover:text-purple-700 font-medium underline transition-colors"
           >
             Create Account

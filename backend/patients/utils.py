@@ -430,3 +430,4 @@ def handle_appointment_cancellation(appointment, refund_amount):
     except Exception as e:
         logger.error(f"Error handling appointment cancellation: {str(e)}")
         return False, f"Error processing refund: {str(e)}"
+    

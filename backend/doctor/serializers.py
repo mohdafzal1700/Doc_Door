@@ -1888,3 +1888,357 @@ class SubscriptionHistorySerializer(serializers.ModelSerializer):
     
     def get_can_generate_invoice(self, obj):
         return obj.payment_status == 'completed'
+
+# serializers.py
+from rest_framework import serializers
+from django.db.models import Sum, Avg ,Count
+from django.utils import timezone
+from datetime import datetime, timedelta
+
+class RecentAppointmentSerializer(serializers.Serializer):
+    """Serializer for recent appointments in dashboard"""
+    id = serializers.IntegerField()
+    patient_name = serializers.CharField()
+    date = serializers.DateField()
+    time = serializers.TimeField(allow_null=True)
+    status = serializers.CharField()
+    fee = serializers.DecimalField(max_digits=10, decimal_places=2)
+
+class RecentReviewSerializer(serializers.Serializer):
+    """Serializer for recent reviews in dashboard"""
+    id = serializers.IntegerField()
+    patient_name = serializers.CharField()
+    rating = serializers.IntegerField()
+    comment = serializers.CharField()
+    created_at = serializers.DateTimeField()
+
+class MonthlyRevenueSerializer(serializers.Serializer):
+    """Serializer for monthly revenue trend data"""
+    month = serializers.CharField()
+    month_name = serializers.CharField()
+    revenue = serializers.DecimalField(max_digits=10, decimal_places=2)
+    debits = serializers.DecimalField(max_digits=10, decimal_places=2)
+    net_earnings = serializers.DecimalField(max_digits=10, decimal_places=2)
+    appointments = serializers.IntegerField()
+
+class DashboardStatsSerializer(serializers.Serializer):
+    """Serializer for dashboard statistics"""
+    # Appointments
+    total_appointments = serializers.IntegerField()
+    completed_appointments = serializers.IntegerField()
+    pending_appointments = serializers.IntegerField()
+    cancelled_appointments = serializers.IntegerField()
+    today_appointments = serializers.IntegerField()
+    this_month_appointments = serializers.IntegerField()
+    
+    # Revenue (Legacy - keeping for backward compatibility)
+    total_revenue = serializers.DecimalField(max_digits=10, decimal_places=2)
+    this_month_revenue = serializers.DecimalField(max_digits=10, decimal_places=2)
+    last_month_revenue = serializers.DecimalField(max_digits=10, decimal_places=2)
+    revenue_growth_percentage = serializers.DecimalField(max_digits=5, decimal_places=2)
+    
+    # New Earnings Fields
+    net_earnings = serializers.DecimalField(max_digits=10, decimal_places=2)
+    this_month_net_earnings = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_credits = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_credits_count = serializers.IntegerField()
+    total_debits = serializers.DecimalField(max_digits=10, decimal_places=2)
+    total_debits_count = serializers.IntegerField()
+    
+    # Reviews
+    average_rating = serializers.DecimalField(max_digits=3, decimal_places=2)
+    total_reviews = serializers.IntegerField()
+    
+    # Other metrics
+    completion_rate = serializers.DecimalField(max_digits=5, decimal_places=2)
+
+class DoctorDashboardSerializer(serializers.Serializer):
+    """Main serializer for doctor dashboard response"""
+    stats = DashboardStatsSerializer()
+    recent_appointments = RecentAppointmentSerializer(many=True)
+    recent_reviews = RecentReviewSerializer(many=True)
+    monthly_revenue_trend = MonthlyRevenueSerializer(many=True)
+
+# Updated DashboardDataService method for monthly revenue trend
+class DashboardDataService:
+    """Service class to handle dashboard data calculations"""
+    
+    def __init__(self, doctor):
+        self.doctor = doctor
+
+    def get_filtered_appointments(self, date_from=None, date_to=None):
+        """Get appointments with optional date filters"""
+        appointments_qs = self.doctor.appointments.all()
+        
+        if date_from:
+            try:
+                date_from = datetime.strptime(date_from, '%Y-%m-%d').date()
+                appointments_qs = appointments_qs.filter(appointment_date__gte=date_from)
+            except ValueError:
+                pass
+                
+        if date_to:
+            try:
+                date_to = datetime.strptime(date_to, '%Y-%m-%d').date()
+                appointments_qs = appointments_qs.filter(appointment_date__lte=date_to)
+            except ValueError:
+                pass
+                
+        return appointments_qs
+
+    def get_filtered_earnings(self, date_from=None, date_to=None):
+        """Get earnings with optional date filters based on appointment dates"""
+        earnings_qs = self.doctor.earnings.all()
+        
+        if date_from:
+            try:
+                date_from = datetime.strptime(date_from, '%Y-%m-%d').date()
+                earnings_qs = earnings_qs.filter(appointment__appointment_date__gte=date_from)
+            except ValueError:
+                pass
+                
+        if date_to:
+            try:
+                date_to = datetime.strptime(date_to, '%Y-%m-%d').date()
+                earnings_qs = earnings_qs.filter(appointment__appointment_date__lte=date_to)
+            except ValueError:
+                pass
+                
+        return earnings_qs
+
+    def calculate_stats(self, appointments_qs):
+        """Calculate dashboard statistics"""
+        now = timezone.now()
+        today = now.date()
+        this_month_start = today.replace(day=1)
+        last_month_start = (this_month_start - timedelta(days=1)).replace(day=1)
+        
+        # Appointment counts
+        total_appointments = appointments_qs.count()
+        completed_appointments = appointments_qs.filter(status__in=['completed', 'confirmed']).count()
+        pending_appointments = appointments_qs.filter(status='pending').count()
+        cancelled_appointments = appointments_qs.filter(status='cancelled').count()
+        today_appointments = appointments_qs.filter(appointment_date=today).count()
+        this_month_appointments = appointments_qs.filter(appointment_date__gte=this_month_start).count()
+        
+        # Revenue & earnings (DoctorEarning model)
+        credits = self.doctor.earnings.filter(type='credit').aggregate(
+            total=Sum('amount'),
+            count=Count('id')
+        )
+        debits = self.doctor.earnings.filter(type='debit').aggregate(
+            total=Sum('amount'),
+            count=Count('id')
+        )
+        
+        total_credits = credits['total'] or 0
+        total_debits = debits['total'] or 0
+        net_earnings = total_credits - total_debits
+        
+        # Monthly earnings
+        this_month_credits = self.doctor.earnings.filter(
+            type='credit',
+            appointment__appointment_date__gte=this_month_start
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        this_month_debits = self.doctor.earnings.filter(
+            type='debit',
+            appointment__appointment_date__gte=this_month_start
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        this_month_net_earnings = this_month_credits - this_month_debits
+        
+        # Revenue growth
+        this_month_revenue = this_month_credits
+        last_month_revenue = self.doctor.earnings.filter(
+            type='credit',
+            appointment__appointment_date__gte=last_month_start,
+            appointment__appointment_date__lt=this_month_start
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        revenue_growth = (
+            ((this_month_revenue - last_month_revenue) / last_month_revenue) * 100
+            if last_month_revenue > 0 else 0
+        )
+        
+        # Rating & reviews
+        avg_rating = self.doctor.reviews.filter(
+            status='approved'
+        ).aggregate(avg=Avg('rating'))['avg'] or 0
+        
+        total_reviews = self.doctor.reviews.filter(status='approved').count()
+        
+        # Completion rate
+        completion_rate = (
+            (completed_appointments / total_appointments * 100)
+            if total_appointments > 0 else 0
+        )
+        
+        return {
+            # Appointments
+            'total_appointments': total_appointments,
+            'completed_appointments': completed_appointments,
+            'pending_appointments': pending_appointments,
+            'cancelled_appointments': cancelled_appointments,
+            'today_appointments': today_appointments,
+            'this_month_appointments': this_month_appointments,
+            
+            # Revenue (Legacy fields)
+            'total_revenue': total_credits,  # For backward compatibility
+            'this_month_revenue': this_month_revenue,
+            'last_month_revenue': last_month_revenue,
+            'revenue_growth_percentage': round(revenue_growth, 2),
+            
+            # New Earnings fields
+            'net_earnings': net_earnings,
+            'this_month_net_earnings': this_month_net_earnings,
+            'total_credits': total_credits,
+            'total_credits_count': credits['count'] or 0,
+            'total_debits': total_debits,
+            'total_debits_count': debits['count'] or 0,
+            
+            # Reviews
+            'average_rating': round(float(avg_rating), 2) if avg_rating else 0,
+            'total_reviews': total_reviews,
+            
+            # Other metrics
+            'completion_rate': round(completion_rate, 2),
+        }
+
+    def get_recent_appointments(self, limit=5):
+        """Get recent appointments data"""
+        recent = self.doctor.appointments.select_related(
+            'patient__user'
+        ).order_by('-appointment_date', '-slot_time')[:limit]
+        
+        return [{
+            'id': apt.id,
+            'patient_name': (
+                apt.patient.user.get_full_name() 
+                if apt.patient.user.get_full_name() 
+                else apt.patient.user.username
+            ),
+            'date': apt.appointment_date,
+            'time': apt.slot_time,
+            'status': apt.status,
+            'fee': apt.total_fee
+        } for apt in recent]
+
+    def get_recent_reviews(self, limit=5):
+        """Get recent reviews data"""
+        recent = self.doctor.reviews.filter(
+            status='approved'
+        ).select_related(
+            'patient__user'
+        ).order_by('-created_at')[:limit]
+        
+        return [{
+            'id': review.id,
+            'patient_name': (
+                review.patient.user.get_full_name() 
+                if review.patient.user.get_full_name() 
+                else review.patient.user.username
+            ),
+            'rating': review.rating,
+            'comment': (
+                review.description[:100] + '...' 
+                if len(review.description) > 100 
+                else review.description
+            ),
+            'created_at': review.created_at
+        } for review in recent]
+
+    def get_monthly_revenue_trend(self, months=6):
+        """Get monthly revenue trend data from earnings"""
+        end_date = timezone.now().date()
+        start_date = end_date.replace(day=1) - timedelta(days=(months-1)*30)
+        
+        monthly_data = []
+        current_date = start_date
+        
+        while current_date <= end_date:
+            month_start = current_date.replace(day=1)
+            next_month = (month_start + timedelta(days=32)).replace(day=1)
+            
+            # Revenue from credit earnings
+            revenue = self.doctor.earnings.filter(
+                type='credit',
+                appointment__appointment_date__gte=month_start,
+                appointment__appointment_date__lt=next_month
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            
+            # Debits for the month
+            debits = self.doctor.earnings.filter(
+                type='debit',
+                appointment__appointment_date__gte=month_start,
+                appointment__appointment_date__lt=next_month
+            ).aggregate(total=Sum('amount'))['total'] or 0
+            
+            # Net earnings
+            net_earnings = revenue - debits
+            
+            # Appointments count
+            appointments_count = self.doctor.appointments.filter(
+                appointment_date__gte=month_start,
+                appointment_date__lt=next_month
+            ).count()
+            
+            monthly_data.append({
+                'month': month_start.strftime('%Y-%m'),
+                'month_name': month_start.strftime('%B %Y'),
+                'revenue': revenue,
+                'debits': debits,
+                'net_earnings': net_earnings,
+                'appointments': appointments_count
+            })
+            
+            current_date = next_month
+            
+        return monthly_data
+
+    def debug_earnings_breakdown(self):
+        """Debug method to see detailed earnings breakdown"""
+        now = timezone.now()
+        today = now.date()
+        this_month_start = today.replace(day=1)
+        
+        # This month's credits
+        this_month_credits = self.doctor.earnings.filter(
+            type='credit',
+            appointment__appointment_date__gte=this_month_start
+        )
+        
+        # This month's debits
+        this_month_debits = self.doctor.earnings.filter(
+            type='debit',
+            appointment__appointment_date__gte=this_month_start
+        )
+        
+        print("=== EARNINGS BREAKDOWN DEBUG ===")
+        print(f"Month: {this_month_start.strftime('%B %Y')}")
+        print("\n--- CREDITS (Revenue) ---")
+        total_credits = 0
+        for credit in this_month_credits:
+            print(f"ID: {credit.id}, Amount: {credit.amount}, Date: {credit.appointment.appointment_date}, Remarks: {credit.remarks}")
+            total_credits += credit.amount
+        print(f"Total Credits: {total_credits}")
+        
+        print("\n--- DEBITS (Deductions) ---")
+        total_debits = 0
+        for debit in this_month_debits:
+            print(f"ID: {debit.id}, Amount: {debit.amount}, Date: {debit.appointment.appointment_date}, Remarks: {debit.remarks}")
+            total_debits += debit.amount
+        print(f"Total Debits: {total_debits}")
+        
+        print(f"\n--- SUMMARY ---")
+        print(f"Revenue (Credits): ₹{total_credits}")
+        print(f"Deductions (Debits): ₹{total_debits}")
+        print(f"Net Earnings: ₹{total_credits - total_debits}")
+        
+        return {
+            'credits': total_credits,
+            'debits': total_debits,
+            'net_earnings': total_credits - total_debits,
+            'credit_details': list(this_month_credits.values('id', 'amount', 'remarks', 'appointment__appointment_date')),
+            'debit_details': list(this_month_debits.values('id', 'amount', 'remarks', 'appointment__appointment_date'))
+        }
