@@ -1,4 +1,4 @@
-// AxiosIntersptors/UserInterceptor.js
+// AxiosInterceptors/UserInterceptor.js - UPDATED VERSION
 import axios from "axios";
 
 const BASE_URL = 'http://localhost:8000/api/auth/';
@@ -10,14 +10,28 @@ const axiosInstance = axios.create({
     timeout: 10000,
 });
 
-// 🔑 REQUEST INTERCEPTOR - Cookies are sent automatically, no need to add tokens
+// Track if we're already refreshing to avoid multiple refresh calls
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+    failedQueue.forEach(({ resolve, reject }) => {
+        if (error) {
+            reject(error);
+        } else {
+            resolve(token);
+        }
+    });
+    
+    failedQueue = [];
+};
+
+// 🔑 REQUEST INTERCEPTOR - Cookies are sent automatically
 axiosInstance.interceptors.request.use(
     (config) => {
         // Log request for debugging
         console.log(`🚀 API Request: ${config.method?.toUpperCase()} ${config.url}`);
         console.log(`🍪 Cookies will be sent automatically`);
-        
-        // NO NEED to manually add Authorization header - cookies handle this
         return config;
     },
     (error) => {
@@ -43,8 +57,21 @@ axiosInstance.interceptors.response.use(
 
         // Handle 401 Unauthorized - Token expired
         if (error.response?.status === 401 && !originalRequest._retry) {
-            originalRequest._retry = true;
             
+            // If already refreshing, queue the request
+            if (isRefreshing) {
+                return new Promise((resolve, reject) => {
+                    failedQueue.push({ resolve, reject });
+                }).then(() => {
+                    return axiosInstance(originalRequest);
+                }).catch(err => {
+                    return Promise.reject(err);
+                });
+            }
+            
+            originalRequest._retry = true;
+            isRefreshing = true;
+
             try {
                 console.log('🔄 Attempting cookie-based token refresh...');
                 
@@ -53,12 +80,16 @@ axiosInstance.interceptors.response.use(
                     `${BASE_URL}token/refresh/`, // Your CustomTokenRefreshView endpoint
                     {}, // Empty body - refresh token comes from cookies
                     { 
-                        withCredentials: true // Ensures cookies are sent
+                        withCredentials: true, // Ensures cookies are sent
+                        timeout: 10000
                     }
                 );
-                
+
                 if (refreshResponse.status === 200) {
                     console.log('✅ Token refreshed successfully via cookies');
+                    
+                    // Process any queued requests
+                    processQueue(null);
                     
                     // The new access_token cookie is automatically set by your backend
                     // Just retry the original request
@@ -66,48 +97,54 @@ axiosInstance.interceptors.response.use(
                 } else {
                     throw new Error('Refresh request failed');
                 }
-                
+
             } catch (refreshError) {
                 console.error('❌ Token refresh failed:', refreshError);
                 
+                // Process failed queue
+                processQueue(refreshError);
+                
                 // Clear any localStorage auth data (if you have any)
-                localStorage.removeItem('access_token');
-                localStorage.removeItem('refresh_token');
-                localStorage.removeItem('user_details');
-                localStorage.removeItem('isAuthenticated');
-                localStorage.removeItem('user_type');
-                
-                // Clear cookies by calling logout endpoint or manually
+                const authKeys = ['access_token', 'refresh_token', 'user_details', 'isAuthenticated', 'user_type'];
+                authKeys.forEach(key => {
+                    localStorage.removeItem(key);
+                });
+
+                // Clear cookies by calling logout endpoint
                 try {
-                    await axios.post(`${BASE_URL}logout/`, {}, { withCredentials: true });
+                    await axios.post(`${BASE_URL}logout/`, {}, { 
+                        withCredentials: true,
+                        timeout: 5000
+                    });
+                    console.log('🚪 Logout endpoint called to clear cookies');
                 } catch (logoutError) {
-                    console.log('Logout endpoint not available, cookies may need manual clearing');
+                    console.log('⚠️ Logout endpoint failed, but continuing with cleanup');
                 }
-                
+
                 // Dispatch auth state change
                 window.dispatchEvent(new Event("authStateChanged"));
-                
-                // Redirect to login
-                if (typeof window !== 'undefined') {
+
+                // Redirect to login (avoid infinite redirects)
+                if (typeof window !== 'undefined' && 
+                    !window.location.pathname.includes('/login') && 
+                    !window.location.pathname.includes('/register')) {
+                    
+                    console.log('🔄 Redirecting to login...');
                     window.location.href = "/login";
                 }
-                
+
                 return Promise.reject(refreshError);
+            } finally {
+                isRefreshing = false;
             }
         }
 
-        // Handle other status codes same as before...
+        // Handle other status codes
         if (error.response?.status === 500) {
             console.error('🔥 Server Error 500:', error.response?.data);
-            return Promise.reject(error);
-        }
-
-        if (error.response?.status === 403) {
+        } else if (error.response?.status === 403) {
             console.error('🚫 Access Forbidden');
-            return Promise.reject(error);
-        }
-
-        if (!error.response) {
+        } else if (!error.response) {
             console.error('🌐 Network Error:', error.message);
         }
 

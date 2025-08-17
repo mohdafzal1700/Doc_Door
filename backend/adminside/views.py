@@ -871,3 +871,367 @@ class AdminReviewModerationView(APIView):
                 'message': 'Failed to moderate review',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
+
+class AdminDashboardView(APIView):
+    """Admin Dashboard with system-wide stats and reports"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        # Check if user is admin/staff
+        if not request.user.is_staff and not request.user.is_superuser:
+            return Response({
+                'success': False,
+                'message': 'Only administrators can view this dashboard'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        try:
+            # Get date filters (optional)
+            date_from = request.query_params.get('date_from')
+            date_to = request.query_params.get('date_to')
+            
+            # Calculate comprehensive stats
+            stats = self.calculate_system_stats(date_from, date_to)
+            
+            # Get recent activities
+            recent_users = self.get_recent_users()
+            recent_appointments = self.get_recent_appointments()
+            pending_reviews = self.get_pending_reviews()
+            
+            # Get trends and analytics
+            user_growth_trend = self.get_user_growth_trend()
+            revenue_trend = self.get_platform_revenue_trend()
+            appointment_trends = self.get_appointment_trends()
+            
+            # Top performers
+            top_doctors = self.get_top_doctors()
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'stats': stats,
+                    'recent_users': recent_users,
+                    'recent_appointments': recent_appointments,
+                    'pending_reviews': pending_reviews,
+                    'trends': {
+                        'user_growth': user_growth_trend,
+                        'revenue': revenue_trend,
+                        'appointments': appointment_trends,
+                    },
+                    'top_doctors': top_doctors,
+                }
+            }, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f"Error in admin dashboard: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to load dashboard data'
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def calculate_system_stats(self, date_from=None, date_to=None):
+        """Calculate system-wide statistics"""
+        from .models import Doctor, Patient, Appointment, DoctorReview  # Adjust import path
+        
+        now = timezone.now()
+        today = now.date()
+        this_month_start = today.replace(day=1)
+        last_month_start = (this_month_start - timedelta(days=1)).replace(day=1)
+        
+        # Date filtering setup
+        date_filter = Q()
+        if date_from:
+            try:
+                date_from = datetime.strptime(date_from, '%Y-%m-%d').date()
+                date_filter &= Q(date__gte=date_from)
+            except ValueError:
+                pass
+        if date_to:
+            try:
+                date_to = datetime.strptime(date_to, '%Y-%m-%d').date()
+                date_filter &= Q(date__lte=date_to)
+            except ValueError:
+                pass
+        
+        # User Statistics
+        total_users = User.objects.count()
+        total_doctors = Doctor.objects.count()
+        total_patients = Patient.objects.count()
+        
+        # New users this month
+        new_users_this_month = User.objects.filter(date_joined__gte=this_month_start).count()
+        new_doctors_this_month = Doctor.objects.filter(user__date_joined__gte=this_month_start).count()
+        new_patients_this_month = Patient.objects.filter(user__date_joined__gte=this_month_start).count()
+        
+        # Active users (users who have appointments in last 30 days)
+        active_users = User.objects.filter(
+            Q(doctor__appointments__date__gte=today - timedelta(days=30)) |
+            Q(patient__appointments__date__gte=today - timedelta(days=30))
+        ).distinct().count()
+        
+        # Appointment Statistics
+        all_appointments = Appointment.objects.all()
+        if date_filter:
+            filtered_appointments = all_appointments.filter(date_filter)
+        else:
+            filtered_appointments = all_appointments
+        
+        total_appointments = filtered_appointments.count()
+        completed_appointments = filtered_appointments.filter(status='completed').count()
+        pending_appointments = filtered_appointments.filter(status='pending').count()
+        cancelled_appointments = filtered_appointments.filter(status='cancelled').count()
+        
+        # Today's appointments
+        today_appointments = all_appointments.filter(date=today).count()
+        
+        # This month's appointments
+        this_month_appointments = all_appointments.filter(date__gte=this_month_start).count()
+        last_month_appointments = all_appointments.filter(
+            date__gte=last_month_start,
+            date__lt=this_month_start
+        ).count()
+        
+        # Appointment growth
+        appointment_growth = 0
+        if last_month_appointments > 0:
+            appointment_growth = ((this_month_appointments - last_month_appointments) / last_month_appointments) * 100
+        
+        # Revenue Statistics
+        total_platform_revenue = filtered_appointments.filter(
+            status='completed'
+        ).aggregate(total=Sum('fee'))['total'] or 0
+        
+        this_month_revenue = all_appointments.filter(
+            status='completed',
+            date__gte=this_month_start
+        ).aggregate(total=Sum('fee'))['total'] or 0
+        
+        last_month_revenue = all_appointments.filter(
+            status='completed',
+            date__gte=last_month_start,
+            date__lt=this_month_start
+        ).aggregate(total=Sum('fee'))['total'] or 0
+        
+        # Revenue growth
+        revenue_growth = 0
+        if last_month_revenue > 0:
+            revenue_growth = ((this_month_revenue - last_month_revenue) / last_month_revenue) * 100
+        
+        # Review Statistics
+        total_reviews = DoctorReview.objects.count()
+        pending_reviews_count = DoctorReview.objects.filter(status='pending').count()
+        approved_reviews = DoctorReview.objects.filter(status='approved').count()
+        
+        # Average platform rating
+        avg_platform_rating = DoctorReview.objects.filter(
+            status='approved'
+        ).aggregate(avg=Avg('rating'))['avg'] or 0
+        
+        # System health metrics
+        completion_rate = (completed_appointments / total_appointments * 100) if total_appointments > 0 else 0
+        cancellation_rate = (cancelled_appointments / total_appointments * 100) if total_appointments > 0 else 0
+        
+        return {
+            # User stats
+            'total_users': total_users,
+            'total_doctors': total_doctors,
+            'total_patients': total_patients,
+            'active_users': active_users,
+            'new_users_this_month': new_users_this_month,
+            'new_doctors_this_month': new_doctors_this_month,
+            'new_patients_this_month': new_patients_this_month,
+            
+            # Appointment stats
+            'total_appointments': total_appointments,
+            'completed_appointments': completed_appointments,
+            'pending_appointments': pending_appointments,
+            'cancelled_appointments': cancelled_appointments,
+            'today_appointments': today_appointments,
+            'this_month_appointments': this_month_appointments,
+            'appointment_growth_percentage': round(appointment_growth, 2),
+            
+            # Revenue stats
+            'total_platform_revenue': float(total_platform_revenue),
+            'this_month_revenue': float(this_month_revenue),
+            'last_month_revenue': float(last_month_revenue),
+            'revenue_growth_percentage': round(revenue_growth, 2),
+            
+            # Review stats
+            'total_reviews': total_reviews,
+            'pending_reviews': pending_reviews_count,
+            'approved_reviews': approved_reviews,
+            'average_platform_rating': round(float(avg_platform_rating), 2) if avg_platform_rating else 0,
+            
+            # Health metrics
+            'completion_rate': round(completion_rate, 2),
+            'cancellation_rate': round(cancellation_rate, 2),
+        }
+    
+    def get_recent_users(self, limit=10):
+        """Get recently registered users"""
+        recent = User.objects.select_related(
+            'doctor', 'patient'
+        ).order_by('-date_joined')[:limit]
+        
+        return [{
+            'id': user.id,
+            'username': user.username,
+            'full_name': user.get_full_name() or user.username,
+            'email': user.email,
+            'user_type': 'Doctor' if hasattr(user, 'doctor') else 'Patient' if hasattr(user, 'patient') else 'Admin',
+            'date_joined': user.date_joined.strftime('%Y-%m-%d %H:%M'),
+            'is_active': user.is_active
+        } for user in recent]
+    
+    def get_recent_appointments(self, limit=10):
+        """Get recent appointments across the platform"""
+        from .models import Appointment  # Adjust import path
+        
+        recent = Appointment.objects.select_related(
+            'doctor__user', 'patient__user'
+        ).order_by('-created_at')[:limit]
+        
+        return [{
+            'id': apt.id,
+            'doctor_name': apt.doctor.user.get_full_name() or apt.doctor.user.username,
+            'patient_name': apt.patient.user.get_full_name() or apt.patient.user.username,
+            'date': apt.date.strftime('%Y-%m-%d'),
+            'time': apt.time_slot.strftime('%H:%M') if apt.time_slot else None,
+            'status': apt.status,
+            'fee': float(apt.fee) if hasattr(apt, 'fee') and apt.fee else 0
+        } for apt in recent]
+    
+    def get_pending_reviews(self, limit=10):
+        """Get pending reviews that need admin approval"""
+        from .models import DoctorReview  # Adjust import path
+        
+        pending = DoctorReview.objects.filter(
+            status='pending'
+        ).select_related(
+            'doctor__user', 'patient__user'
+        ).order_by('-created_at')[:limit]
+        
+        return [{
+            'id': review.id,
+            'doctor_name': review.doctor.user.get_full_name() or review.doctor.user.username,
+            'patient_name': review.patient.user.get_full_name() or review.patient.user.username,
+            'rating': review.rating,
+            'comment': review.comment[:100] + '...' if len(review.comment) > 100 else review.comment,
+            'created_at': review.created_at.strftime('%Y-%m-%d %H:%M')
+        } for review in pending]
+    
+    def get_user_growth_trend(self, months=6):
+        """Get user growth trend for the last N months"""
+        monthly_data = []
+        end_date = timezone.now().date()
+        
+        for i in range(months):
+            month_start = (end_date.replace(day=1) - timedelta(days=i*30)).replace(day=1)
+            next_month = (month_start + timedelta(days=32)).replace(day=1)
+            
+            new_users = User.objects.filter(
+                date_joined__gte=month_start,
+                date_joined__lt=next_month
+            ).count()
+            
+            new_doctors = User.objects.filter(
+                doctor__isnull=False,
+                date_joined__gte=month_start,
+                date_joined__lt=next_month
+            ).count()
+            
+            new_patients = User.objects.filter(
+                patient__isnull=False,
+                date_joined__gte=month_start,
+                date_joined__lt=next_month
+            ).count()
+            
+            monthly_data.append({
+                'month': month_start.strftime('%Y-%m'),
+                'month_name': month_start.strftime('%B %Y'),
+                'new_users': new_users,
+                'new_doctors': new_doctors,
+                'new_patients': new_patients
+            })
+        
+        return list(reversed(monthly_data))
+    
+    def get_platform_revenue_trend(self, months=6):
+        """Get platform revenue trend"""
+        from .models import Appointment  # Adjust import path
+        
+        monthly_data = []
+        end_date = timezone.now().date()
+        
+        for i in range(months):
+            month_start = (end_date.replace(day=1) - timedelta(days=i*30)).replace(day=1)
+            next_month = (month_start + timedelta(days=32)).replace(day=1)
+            
+            revenue = Appointment.objects.filter(
+                status='completed',
+                date__gte=month_start,
+                date__lt=next_month
+            ).aggregate(total=Sum('fee'))['total'] or 0
+            
+            appointments = Appointment.objects.filter(
+                status='completed',
+                date__gte=month_start,
+                date__lt=next_month
+            ).count()
+            
+            monthly_data.append({
+                'month': month_start.strftime('%Y-%m'),
+                'month_name': month_start.strftime('%B %Y'),
+                'revenue': float(revenue),
+                'appointments': appointments
+            })
+        
+        return list(reversed(monthly_data))
+    
+    def get_appointment_trends(self, days=30):
+        """Get daily appointment trends for the last N days"""
+        daily_data = []
+        end_date = timezone.now().date()
+        start_date = end_date - timedelta(days=days-1)
+        
+        from .models import Appointment  # Adjust import path
+        
+        current_date = start_date
+        while current_date <= end_date:
+            appointments = Appointment.objects.filter(date=current_date).count()
+            completed = Appointment.objects.filter(date=current_date, status='completed').count()
+            
+            daily_data.append({
+                'date': current_date.strftime('%Y-%m-%d'),
+                'total_appointments': appointments,
+                'completed_appointments': completed
+            })
+            
+            current_date += timedelta(days=1)
+        
+        return daily_data
+    
+    def get_top_doctors(self, limit=10):
+        """Get top performing doctors by revenue and ratings"""
+        from .models import Doctor  # Adjust import path
+        
+        top_doctors = Doctor.objects.annotate(
+            total_appointments=Count('appointments'),
+            completed_appointments=Count('appointments', filter=Q(appointments__status='completed')),
+            total_revenue=Sum('appointments__fee', filter=Q(appointments__status='completed')),
+            avg_rating=Avg('reviews__rating', filter=Q(reviews__status='approved'))
+        ).filter(
+            total_appointments__gt=0
+        ).order_by('-total_revenue')[:limit]
+        
+        return [{
+            'id': doctor.id,
+            'name': doctor.user.get_full_name() or doctor.user.username,
+            'specialization': getattr(doctor, 'specialization', 'N/A'),
+            'total_appointments': doctor.total_appointments or 0,
+            'completed_appointments': doctor.completed_appointments or 0,
+            'total_revenue': float(doctor.total_revenue or 0),
+            'average_rating': round(float(doctor.avg_rating or 0), 2),
+            'completion_rate': round((doctor.completed_appointments / doctor.total_appointments * 100), 2) if doctor.total_appointments > 0 else 0
+        } for doctor in top_doctors]

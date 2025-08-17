@@ -192,3 +192,15 @@ export const getAllReviews = () => axios.get('reviews/');
 
 
 export const deleteReview = (reviewId) => axios.delete(`reviews/delete/${reviewId}/`);
+
+
+export const googleLogin = (id_token, role) => {
+  return axios.post("google/", {
+    id_token: id_token,
+    role: role, 
+  });
+};
+
+
+export const getWallet = () => axios.get('wallet/'); 
+export const getAllTransactions = () => axios.get('transaction/');

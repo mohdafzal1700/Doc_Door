@@ -377,7 +377,6 @@ class PatientWalletManager:
             return None
 
     
-
 @transaction.atomic
 def handle_appointment_cancellation(appointment, refund_amount):
     """
@@ -415,6 +414,15 @@ def handle_appointment_cancellation(appointment, refund_amount):
         
         if not patient_credit:
             return False, "Failed to credit to patient's wallet."
+        
+        # Create PatientTransaction record for the refund
+        PatientTransaction.objects.create(
+            patient=patient,
+            appointment=appointment,
+            amount=refund_amount,
+            type='credit',
+            remarks=f"Refund for cancelled appointment - Doctor: {doctor.user.get_full_name() or doctor.id}"
+        )
         
         logger.info(f"Successfully transferred ₹{refund_amount} from doctor {doctor.id} to patient {patient.id} for cancelled appointment {appointment.id}")
         return True, f"Successfully refunded ₹{refund_amount} to patient wallet."

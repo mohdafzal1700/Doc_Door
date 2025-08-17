@@ -48,6 +48,9 @@ import PaymentPage from "./pages/payment_conformation"
 import AdminReviewPage from "./admin/reviewaM"
 import { NotificationProvider } from "./components/home/notificationprovider"
 import WalletPage from "./pages/Wallet"
+import GoogleCallback from "./components/ui/simp"
+
+
 function App() {
 
 
@@ -106,7 +109,7 @@ function App() {
         <Route path='/confirm-payment' element={<PaymentPage/>}/>
         <Route path='/doctor-feedback' element={<DoctorFeedbackForm/>}/>
         <Route path='/patient/wallet' element={<WalletPage/>}/>
-        
+        <Route path="/auth/google/callback" element={<GoogleCallback />} />
         
         
         <Route path="/" element={<Navigate to="/login" replace />} />

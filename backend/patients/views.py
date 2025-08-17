@@ -25,7 +25,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import AuthenticationFailed
 
 from doctor.models import PatientWallet,PatientTransaction
-from patients.serializers import PatientWalletserializer,PatientTransactionserilizer
+from patients.serializers import PatientWalletSerializer,PatientTransactionSerializer
 
 import traceback
 
@@ -69,11 +69,126 @@ from patients.serializers import (
     PatientLocationUpdateSerializer,
     
 )
-
+from google.oauth2 import id_token
+from google.auth.transport import requests
 # Logger setup
 logger = logging.getLogger(__name__)
 
 
+
+class GoogleLoginView(APIView):
+    '''Google Authentication '''
+    
+    def post(self, request):
+        try:
+            # Extract data from request
+            id_token_str = request.data.get('id_token')
+            role = request.data.get('role')
+            
+            # Validate required fields
+            if not id_token_str or not role:
+                return Response(
+                    {'error': 'Missing id_token or role'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Validate role
+            if role not in ['patient', 'doctor']:
+                return Response(
+                    {'error': 'Role must be either "patient" or "doctor"'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Verify Google ID token
+            try:
+                # Specify the CLIENT_ID of the app that accesses the backend
+                google_client_id = getattr(settings, 'GOOGLE_OAUTH2_CLIENT_ID', None)
+                if not google_client_id:
+                    logger.error('GOOGLE_OAUTH2_CLIENT_ID not configured in settings')
+                    return Response(
+                        {'error': 'Google OAuth2 not configured'}, 
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                    )
+                
+                idinfo = id_token.verify_oauth2_token(
+                    id_token_str, 
+                    requests.Request(), 
+                    google_client_id
+                )
+                
+            except ValueError as e:
+                logger.error(f'Invalid Google ID token: {str(e)}')
+                return Response(
+                    {'error': 'Invalid token'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Extract user information from token
+            email = idinfo.get('email')
+            if not email:
+                return Response(
+                    {'error': 'Email not found in token'}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            first_name = idinfo.get('given_name', '')
+            last_name = idinfo.get('family_name', '')
+            name = idinfo.get('name', f'{first_name} {last_name}'.strip())
+            
+            # Check if user already exists
+            try:
+                user = User.objects.get(email=email)
+                
+                # Check if existing user has different role
+                if hasattr(user, 'role') and user.role != role:
+                    return Response(
+                        {'error': f'Already registered as {user.role}'}, 
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+            except User.DoesNotExist:
+                # Create new user
+                user = User.objects.create_user(
+                    email=email,
+                    first_name=first_name,
+                    last_name=last_name,
+                    username=email,  # Use email as username
+                )
+                
+                # Set role if your User model has a role field
+                if hasattr(user, 'role'):
+                    user.role = role
+                    user.save()
+                
+                logger.info(f'New user created via Google OAuth: {email} as {role}')
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            access_token = refresh.access_token
+            
+            # Prepare response data
+            user_data = {
+                'id': user.id,
+                'email': user.email,
+                'name': user.first_name or name,
+                'role': getattr(user, 'role', role)
+            }
+            
+            response_data = {
+                'refresh': str(refresh),
+                'access': str(access_token),
+                'user': user_data
+            }
+            
+            logger.info(f'Successful Google OAuth login for user: {email}')
+            return Response(response_data, status=status.HTTP_200_OK)
+            
+        except Exception as e:
+            logger.error(f'Unexpected error in GoogleLoginView: {str(e)}')
+            return Response(
+                {'error': 'An unexpected error occurred'}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -2293,61 +2408,31 @@ class PatientReviewCreateView(APIView):
 class PatientReviewListView(APIView):
     """List all reviews by the logged-in patient"""
     permission_classes = [IsAuthenticated]
-    
+   
     def get(self, request):
         if not hasattr(request.user, 'patient'):
             return Response({
                 'success': False,
                 'message': 'Only patients can view reviews'
             }, status=status.HTTP_403_FORBIDDEN)
-        
+       
         try:
             queryset = DoctorReview.objects.filter(
                 patient=request.user.patient
             ).select_related(
                 'doctor__user', 'appointment', 'reviewed_by'
             ).order_by('-created_at')
-            
-            # Optional filtering
-            status_filter = request.query_params.get('status')
-            if status_filter:
-                queryset = queryset.filter(status=status_filter)
-            
-            # # Pagination
-            # page = request.query_params.get('page', 1)
-            # page_size = request.query_params.get('page_size', 10)
-            
-            # try:
-            #     page = int(page)
-            #     page_size = int(page_size)
-            #     page_size = min(page_size, 50)
-            # except ValueError:
-            #     page = 1
-            #     page_size = 10
-            
-            # paginator = Paginator(queryset, page_size)
-            
-            # try:
-            #     reviews_page = paginator.page(page)
-            # except PageNotAnInteger:
-            #     reviews_page = paginator.page(1)
-            # except EmptyPage:
-            #     reviews_page = paginator.page(paginator.num_pages)
-            
-            serializer = DoctorReviewSerializer(many=True)
-            
+           
+
+           
+            # Fixed: Pass the queryset to the serializer
+            serializer = DoctorReviewSerializer(queryset, many=True)
+           
             return Response({
                 'success': True,
                 'data': serializer.data,
-                # 'pagination': {
-                #     'current_page': reviews_page.number,
-                #     'total_pages': paginator.num_pages,
-                #     'total_count': paginator.count,
-                #     'has_next': reviews_page.has_next(),
-                #     'has_previous': reviews_page.has_previous(),
-                # }
             }, status=status.HTTP_200_OK)
-            
+           
         except Exception as e:
             logger.error(f"Error listing patient reviews: {str(e)}")
             return Response({
@@ -2397,42 +2482,42 @@ class PatientReviewDeleteView(APIView):
                 'message': 'Failed to delete review'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-
 class Wallet(APIView):
-    permission_classes=[IsAuthenticated]
+    permission_classes = [IsAuthenticated]
     
-    def get(self,request):
+    def get(self, request):
         try:
-            wallet=request.user.Patient.wallet
-            result=PatientWalletserializer(wallet)
-            return Response(
-                {
-                    'data':result.data
-                }
-            )
+            # Fix: Use patient_profile instead of Patient
+            wallet = request.user.patient_profile.wallet
+            result = PatientWalletSerializer(wallet)
+            return Response({
+                'success': True,  # Add success field for consistency
+                'data': result.data
+            })
         except Exception as e:
             return Response({
                 'success': False,
                 'message': 'Failed to fetch wallet',
                 'error': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)	
-        
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class Transaction(APIView):
-    permission_classes=[IsAuthenticated]
+    permission_classes = [IsAuthenticated]
     
-    def get(self,request):
+    def get(self, request):
         try:
-            transaction=request.user.Patient.transactions.all()
-            serializer=PatientTransactionserilizer(transaction, many=True)
+            # Fix: Use patient_profile instead of Patient
+            transaction = request.user.patient_profile.transactions.all()
+            # Fix: Correct serializer name (remove typo)
+            serializer = PatientTransactionSerializer(transaction, many=True)
             
             return Response({
-                'success':True,
-                'data':serializer.data
+                'success': True,
+                'data': serializer.data
             })
         except Exception as e:
             return Response({
-                        'success': False,
-                        'message': 'Failed to fetch transactions',
-                        'error': str(e)
-                    }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)        
+                'success': False,
+                'message': 'Failed to fetch transactions',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

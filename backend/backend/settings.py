@@ -363,3 +363,5 @@ WEBRTC_CONFIG = {
         # }
     ]
 }
+
+GOOGLE_OAUTH2_CLIENT_ID = '7383262354-71u9o2d8sbea9p67efa8829p86n09j5n.apps.googleusercontent.com'

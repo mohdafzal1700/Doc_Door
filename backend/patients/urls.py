@@ -13,6 +13,7 @@ from .views import (
     UserProfileView,
     ProfilePictureView,
     AddressManagementView,
+    GoogleLoginView,
 
     # Doctor & Patient
     PatientDoctorView,
@@ -38,13 +39,17 @@ from .views import (
     
     PatientReviewCreateView,
     PatientReviewDeleteView,
-    PatientReviewListView
+    PatientReviewListView,
+    
+    Wallet,
+    Transaction
 )
 
 urlpatterns = [
     # Authentication
     path('login/', CustomTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('token/refresh/', CustomTokenRefreshView.as_view(), name='token_refresh'),
+    path('google/', GoogleLoginView.as_view(), name='google_login'),
     path('logout/', CustomLogoutView.as_view(), name='logout'),
 
     # Registration & OTP
@@ -96,4 +101,7 @@ urlpatterns = [
     path('reviews/', PatientReviewListView.as_view(), name='patient-review-list'),
     path('reviews/create/', PatientReviewCreateView.as_view(), name='patient-review-create'),
     path('reviews/delete/<int:pk>/', PatientReviewDeleteView.as_view(), name='patient-review-delete'),
+    
+    path('wallet/', Wallet.as_view(), name='wallet'),
+    path('transaction/', Transaction.as_view(), name='patient-transaction'),
 ]
