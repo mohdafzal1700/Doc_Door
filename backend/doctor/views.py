@@ -3302,3 +3302,111 @@ class DoctorDashboardView(APIView):
                 'success': False,
                 'message': f'Failed to load dashboard data: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+# views.py (Add this to your existing views file)
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+from django.http import HttpResponse
+from django.utils import timezone
+import logging
+from .serializers import DoctorReportPDFService
+
+logger = logging.getLogger(__name__)
+# views.py (Add this to your existing views file)
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from rest_framework import status
+from django.http import HttpResponse
+from django.utils import timezone
+import logging
+
+# Import your PDF service class
+from .serializers import DoctorReportPDFService
+
+logger = logging.getLogger(__name__)
+
+class DoctorReportDownloadView(APIView):
+    """
+    Download PDF report for doctor dashboard
+    GET: Returns PDF file with filtered data based on date range
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        logger.info(f"PDF report request from user: {request.user.id}")
+        
+        # Check authentication
+        if not request.user.is_authenticated:
+            return Response({
+                'success': False,
+                'message': 'Authentication required'
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        
+        # Get doctor profile
+        try:
+            if hasattr(request.user, 'doctor_profile'):
+                doctor = request.user.doctor_profile
+            else:
+                from .models import Doctor
+                doctor = Doctor.objects.get(user=request.user)
+            logger.info(f"Doctor found: {doctor.id}")
+        except Exception as e:
+            logger.error(f"Doctor profile error: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'message': 'Doctor profile not found. Please complete your profile setup first.'
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get date parameters
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        logger.info(f"Date range: {start_date} to {end_date}")
+        
+        try:
+            # Generate PDF
+            logger.info("Initializing PDF service...")
+            pdf_service = DoctorReportPDFService(doctor, start_date, end_date)
+            
+            logger.info("Generating PDF...")
+            pdf_buffer = pdf_service.generate_pdf()
+            
+            if not pdf_buffer:
+                raise Exception("PDF buffer is empty")
+            
+            # Prepare filename
+            filename_parts = ["doctor_report"]
+            if start_date:
+                filename_parts.append(f"from_{start_date}")
+            if end_date:
+                filename_parts.append(f"to_{end_date}")
+            filename = "_".join(filename_parts) + ".pdf"
+            
+            # Create HTTP response
+            logger.info(f"Creating response with filename: {filename}")
+            response = HttpResponse(pdf_buffer.getvalue(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            response['Content-Length'] = len(pdf_buffer.getvalue())
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"PDF generation error: {str(e)}", exc_info=True)
+            
+            # Determine error type and provide appropriate message
+            error_message = "Failed to generate PDF report"
+            if "Style" in str(e) and "already defined" in str(e):
+                error_message = "PDF styling configuration error. Please contact support."
+            elif "object has no attribute" in str(e):
+                error_message = "Data structure error. Some required data may be missing."
+            elif "Database" in str(e) or "relation" in str(e):
+                error_message = "Database connection error. Please try again."
+            else:
+                error_message = f"PDF generation failed: {str(e)}"
+            
+            return Response({
+                'success': False,
+                'message': error_message
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

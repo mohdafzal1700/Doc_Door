@@ -1,16 +1,10 @@
 import React, { useState, useEffect, useCallback, useMemo, useReducer } from 'react';
-import { 
-  AlertCircle, TrendingUp, Calendar, Users, DollarSign, Star, 
-  CheckCircle, Clock, XCircle, BarChart3, RefreshCw, Filter, Download 
-} from 'lucide-react';
-import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  BarChart, Bar 
-} from 'recharts';
+import { AlertCircle, TrendingUp, Calendar, Users, DollarSign, Star, CheckCircle, Clock, XCircle, BarChart3, RefreshCw, Filter, Download, FileDown, Loader2 } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import DocHeader from '../../components/ui/DocHeader';
 import DoctorSidebar from '../../components/ui/DocSide';
 import { isAuthenticated, isDoctorAuthenticated, getAuthState } from '../../utils/auth';
-import { fetchDoctorDashboard } from '../../endpoints/Doc';
+import { fetchDoctorDashboard, downloadDashboardReport } from '../../endpoints/Doc';
 
 // State reducer for better state management
 const dashboardReducer = (state, action) => {
@@ -20,32 +14,28 @@ const dashboardReducer = (state, action) => {
     case 'SET_ERROR':
       return { ...state, error: action.payload, loading: false };
     case 'SET_DATA':
-      return { 
-        ...state, 
-        dashboardData: action.payload, 
-        loading: false, 
-        error: null,
-        refreshing: false 
-      };
+      return { ...state, dashboardData: action.payload, loading: false, error: null, refreshing: false };
     case 'SET_FILTERS':
-      return { 
-        ...state, 
-        dateFilters: { ...state.dateFilters, ...action.payload } 
-      };
+      return { ...state, dateFilters: { ...state.dateFilters, ...action.payload } };
     case 'CLEAR_FILTERS':
-      return { 
-        ...state, 
-        dateFilters: { date_from: '', date_to: '' } 
-      };
+      return { ...state, dateFilters: { date_from: '', date_to: '' } };
     case 'SET_REFRESHING':
       return { ...state, refreshing: action.payload };
+    case 'SET_DOWNLOADING':
+      return { ...state, downloading: action.payload, downloadError: null };
+    case 'SET_DOWNLOAD_ERROR':
+      return { ...state, downloadError: action.payload, downloading: false };
+    case 'CLEAR_DOWNLOAD_ERROR':
+      return { ...state, downloadError: null };
     case 'RESET':
-      return {
-        dashboardData: null,
-        loading: true,
-        error: null,
-        dateFilters: { date_from: '', date_to: '' },
-        refreshing: false
+      return { 
+        dashboardData: null, 
+        loading: true, 
+        error: null, 
+        dateFilters: { date_from: '', date_to: '' }, 
+        refreshing: false,
+        downloading: false,
+        downloadError: null
       };
     default:
       return state;
@@ -57,7 +47,9 @@ const initialState = {
   loading: true,
   error: null,
   dateFilters: { date_from: '', date_to: '' },
-  refreshing: false
+  refreshing: false,
+  downloading: false,
+  downloadError: null
 };
 
 // Utility functions
@@ -67,15 +59,10 @@ const formatters = {
     const num = parseFloat(value);
     return isNaN(num) ? 0 : num;
   },
-
   currency: (value) => {
     const num = formatters.toNumber(value);
-    return `₹${num.toLocaleString('en-IN', { 
-      minimumFractionDigits: 2, 
-      maximumFractionDigits: 2 
-    })}`;
+    return `₹${num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   },
-
   time: (timeString) => {
     if (!timeString) return 'N/A';
     try {
@@ -84,31 +71,20 @@ const formatters = {
       return 'N/A';
     }
   },
-
   date: (dateString) => {
     if (!dateString) return 'N/A';
     try {
       const date = new Date(dateString);
-      return date.toLocaleDateString('en-IN', { 
-        day: '2-digit', 
-        month: 'short', 
-        year: 'numeric' 
-      });
+      return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
     } catch {
       return 'N/A';
     }
   },
-
   dateTime: (dateTimeString) => {
     if (!dateTimeString) return 'N/A';
     try {
       const date = new Date(dateTimeString);
-      return date.toLocaleDateString('en-IN', { 
-        day: '2-digit', 
-        month: 'short', 
-        hour: '2-digit', 
-        minute: '2-digit' 
-      });
+      return date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
     } catch {
       return 'N/A';
     }
@@ -117,26 +93,10 @@ const formatters = {
 
 // Status configuration
 const STATUS_CONFIG = {
-  completed: { 
-    color: 'text-green-600 bg-green-100 border-green-200', 
-    icon: CheckCircle, 
-    label: 'Completed' 
-  },
-  pending: { 
-    color: 'text-orange-600 bg-orange-100 border-orange-200', 
-    icon: Clock, 
-    label: 'Pending' 
-  },
-  cancelled: { 
-    color: 'text-red-600 bg-red-100 border-red-200', 
-    icon: XCircle, 
-    label: 'Cancelled' 
-  },
-  default: { 
-    color: 'text-gray-600 bg-gray-100 border-gray-200', 
-    icon: AlertCircle, 
-    label: 'Unknown' 
-  }
+  completed: { color: 'text-green-600 bg-green-100 border-green-200', icon: CheckCircle, label: 'Completed' },
+  pending: { color: 'text-orange-600 bg-orange-100 border-orange-200', icon: Clock, label: 'Pending' },
+  cancelled: { color: 'text-red-600 bg-red-100 border-red-200', icon: XCircle, label: 'Cancelled' },
+  default: { color: 'text-gray-600 bg-gray-100 border-gray-200', icon: AlertCircle, label: 'Unknown' }
 };
 
 // Color classes for stat cards
@@ -156,9 +116,7 @@ const StatCard = React.memo(({ icon: Icon, title, value, subtitle, trend, color 
         <Icon className="h-6 w-6" />
       </div>
       {trend && (
-        <div className={`flex items-center text-sm font-medium ${
-          trend > 0 ? 'text-green-600' : 'text-red-600'
-        }`}>
+        <div className={`flex items-center text-sm font-medium ${ trend > 0 ? 'text-green-600' : 'text-red-600' }`}>
           <TrendingUp className={`h-4 w-4 mr-1 ${trend < 0 ? 'rotate-180' : ''}`} />
           {Math.abs(formatters.toNumber(trend))}%
         </div>
@@ -189,16 +147,10 @@ const ErrorDisplay = ({ error, onRefresh, onRetry }) => (
       <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
       <p className="text-gray-600 mb-4">{error}</p>
       <div className="space-x-2">
-        <button 
-          onClick={onRefresh}
-          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
-        >
+        <button onClick={onRefresh} className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
           Refresh Page
         </button>
-        <button 
-          onClick={onRetry}
-          className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors"
-        >
+        <button onClick={onRetry} className="bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
           Retry
         </button>
       </div>
@@ -267,7 +219,6 @@ const DashboardFilters = ({ filters, onChange, onApply, onClear, onRefresh, refr
         placeholder="From Date"
       />
     </div>
-    
     <div className="flex items-center space-x-2 bg-white rounded-lg p-2 border">
       <input
         type="date"
@@ -278,21 +229,18 @@ const DashboardFilters = ({ filters, onChange, onApply, onClear, onRefresh, refr
         placeholder="To Date"
       />
     </div>
-    
     <button
       onClick={onApply}
       className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
     >
       Apply
     </button>
-    
     <button
       onClick={onClear}
       className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-200 transition-colors text-sm font-medium"
     >
       Clear
     </button>
-    
     <button
       onClick={onRefresh}
       disabled={refreshing}
@@ -301,6 +249,50 @@ const DashboardFilters = ({ filters, onChange, onApply, onClear, onRefresh, refr
     >
       <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
     </button>
+  </div>
+);
+
+// Component: DownloadButton
+const DownloadButton = ({ filters, downloading, onDownload, downloadError, onClearError }) => (
+  <div className="relative">
+    <button
+      onClick={onDownload}
+      disabled={downloading}
+      className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      title="Download PDF Report"
+    >
+      {downloading ? (
+        <>
+          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+          Generating...
+        </>
+      ) : (
+        <>
+          <FileDown className="h-4 w-4 mr-1" />
+          Export PDF
+        </>
+      )}
+    </button>
+    
+    {/* Download Error Toast */}
+    {downloadError && (
+      <div className="absolute top-full right-0 mt-2 w-72 bg-red-50 border border-red-200 rounded-lg p-3 shadow-lg z-50">
+        <div className="flex items-start space-x-2">
+          <AlertCircle className="h-4 w-4 text-red-500 mt-0.5 flex-shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-medium text-red-800">Download Failed</p>
+            <p className="text-xs text-red-600 mt-1">{downloadError}</p>
+          </div>
+          <button
+            onClick={onClearError}
+            className="text-red-500 hover:text-red-700"
+            title="Dismiss"
+          >
+            <XCircle className="h-4 w-4" />
+          </button>
+        </div>
+      </div>
+    )}
   </div>
 );
 
@@ -314,23 +306,19 @@ const DocDashboard = () => {
     const checkAuth = async () => {
       try {
         const currentAuthState = getAuthState();
-        
         if (!currentAuthState?.isLoggedIn) {
           dispatch({ type: 'SET_ERROR', payload: 'Please log in to access the dashboard' });
           return;
         }
-        
         if (!currentAuthState?.isDoctor) {
           dispatch({ type: 'SET_ERROR', payload: 'Only doctors can access this dashboard' });
           return;
         }
-
         const isValidDoctor = await isDoctorAuthenticated();
         if (!isValidDoctor) {
           dispatch({ type: 'SET_ERROR', payload: 'Authentication failed. Please log in again.' });
           return;
         }
-
         loadDashboardData();
       } catch (authError) {
         console.error('Auth error:', authError);
@@ -346,22 +334,15 @@ const DocDashboard = () => {
     try {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'SET_ERROR', payload: null });
-      
       const response = await fetchDoctorDashboard(filters);
-      
       if (response?.data?.success) {
         dispatch({ type: 'SET_DATA', payload: response.data.data });
       } else {
-        dispatch({ 
-          type: 'SET_ERROR', 
-          payload: response?.data?.message || 'Failed to load dashboard data' 
-        });
+        dispatch({ type: 'SET_ERROR', payload: response?.data?.message || 'Failed to load dashboard data' });
       }
     } catch (err) {
       console.error('Dashboard loading error:', err);
-      
       let errorMessage = 'Failed to load dashboard data';
-      
       if (err.response?.status === 401) {
         errorMessage = 'Your session has expired. Please log in again.';
       } else if (err.response?.status === 403) {
@@ -373,13 +354,76 @@ const DocDashboard = () => {
       } else if (err.response?.data?.message) {
         errorMessage = err.response.data.message;
       }
-      
       dispatch({ type: 'SET_ERROR', payload: errorMessage });
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
       dispatch({ type: 'SET_REFRESHING', payload: false });
     }
   }, []);
+
+  // PDF Download function
+  const handleDownloadReport = useCallback(async () => {
+    try {
+      dispatch({ type: 'SET_DOWNLOADING', payload: true });
+      dispatch({ type: 'CLEAR_DOWNLOAD_ERROR' });
+
+      // Prepare download parameters
+      const params = {};
+      if (state.dateFilters.date_from) {
+        params.start_date = state.dateFilters.date_from;
+      }
+      if (state.dateFilters.date_to) {
+        params.end_date = state.dateFilters.date_to;
+      }
+
+      // Call the download API
+      const response = await downloadDashboardReport(params);
+      
+      // Create blob from response
+      const blob = new Blob([response.data], { type: 'application/pdf' });
+      
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Generate filename
+      let filename = 'doctor_dashboard_report';
+      if (params.start_date) filename += `_from_${params.start_date}`;
+      if (params.end_date) filename += `_to_${params.end_date}`;
+      filename += '.pdf';
+      
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      
+      // Cleanup
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(link);
+      
+      dispatch({ type: 'SET_DOWNLOADING', payload: false });
+      
+    } catch (error) {
+      console.error('Download error:', error);
+      let errorMessage = 'Failed to download report. Please try again.';
+      
+      if (error.response?.status === 401) {
+        errorMessage = 'Your session has expired. Please log in again.';
+      } else if (error.response?.status === 403) {
+        errorMessage = 'You do not have permission to download reports.';
+      } else if (error.response?.status === 404) {
+        errorMessage = 'Report service not available. Please contact support.';
+      } else if (error.response?.status === 500) {
+        errorMessage = 'Server error while generating report. Please try again later.';
+      } else if (!error.response) {
+        errorMessage = 'Network error. Please check your internet connection.';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+      
+      dispatch({ type: 'SET_DOWNLOAD_ERROR', payload: errorMessage });
+    }
+  }, [state.dateFilters]);
 
   // Event handlers
   const handleRefresh = useCallback(async () => {
@@ -407,12 +451,15 @@ const DocDashboard = () => {
     loadDashboardData();
   }, [loadDashboardData]);
 
+  const clearDownloadError = useCallback(() => {
+    dispatch({ type: 'CLEAR_DOWNLOAD_ERROR' });
+  }, []);
+
   // Memoized chart data
   const chartData = useMemo(() => {
     if (!state.dashboardData?.monthly_revenue_trend || !Array.isArray(state.dashboardData.monthly_revenue_trend)) {
       return [];
     }
-    
     return state.dashboardData.monthly_revenue_trend.map(item => ({
       month: item?.month_name || item?.month || 'Unknown',
       revenue: formatters.toNumber(item?.revenue || item?.total_revenue || 0),
@@ -428,7 +475,7 @@ const DocDashboard = () => {
   // Render error state
   if (state.error) {
     return (
-      <ErrorDisplay 
+      <ErrorDisplay
         error={state.error}
         onRefresh={() => window.location.reload()}
         onRetry={() => loadDashboardData()}
@@ -442,7 +489,7 @@ const DocDashboard = () => {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-600 mb-4">No dashboard data available.</p>
-          <button 
+          <button
             onClick={() => loadDashboardData()}
             className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
           >
@@ -462,14 +509,12 @@ const DocDashboard = () => {
         <DoctorSidebar />
         <div className="flex-1 overflow-auto">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            
             {/* Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 space-y-4 sm:space-y-0">
               <div>
                 <h1 className="text-3xl font-bold text-gray-900">Dashboard Overview</h1>
                 <p className="text-gray-600 mt-1">Welcome back! Here's your practice summary.</p>
               </div>
-              
               <DashboardFilters
                 filters={state.dateFilters}
                 onChange={handleDateFilterChange}
@@ -482,33 +527,33 @@ const DocDashboard = () => {
 
             {/* Stats Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-              <StatCard 
-                icon={Calendar} 
-                title="Total Appointments" 
+              <StatCard
+                icon={Calendar}
+                title="Total Appointments"
                 value={formatters.toNumber(stats.total_appointments)}
                 subtitle={`${formatters.toNumber(stats.today_appointments)} scheduled today`}
-                color="blue" 
+                color="blue"
               />
-              <StatCard 
-                icon={Users} 
-                title="This Month" 
+              <StatCard
+                icon={Users}
+                title="This Month"
                 value={formatters.toNumber(stats.this_month_appointments)}
                 subtitle={`${formatters.toNumber(stats.completion_rate)}% completion rate`}
-                color="green" 
+                color="green"
               />
-              <StatCard 
-                icon={DollarSign} 
-                title="Total Revenue" 
+              <StatCard
+                icon={DollarSign}
+                title="Total Revenue"
                 value={formatters.currency(stats.total_revenue)}
                 trend={stats.revenue_growth_percentage}
-                color="purple" 
+                color="purple"
               />
-              <StatCard 
-                icon={Star} 
-                title="Average Rating" 
+              <StatCard
+                icon={Star}
+                title="Average Rating"
                 value={`${formatters.toNumber(stats.average_rating)}/5`}
                 subtitle={`${formatters.toNumber(stats.total_reviews)} reviews`}
-                color="orange" 
+                color="orange"
               />
             </div>
 
@@ -517,12 +562,14 @@ const DocDashboard = () => {
               <div className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm mb-8">
                 <div className="flex items-center justify-between mb-6">
                   <h2 className="text-xl font-semibold text-gray-900">Performance Analytics</h2>
-                  <button className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center">
-                    <Download className="h-4 w-4 mr-1" />
-                    Export Data
-                  </button>
+                  <DownloadButton
+                    filters={state.dateFilters}
+                    downloading={state.downloading}
+                    onDownload={handleDownloadReport}
+                    downloadError={state.downloadError}
+                    onClearError={clearDownloadError}
+                  />
                 </div>
-                
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
                   {/* Revenue Chart */}
                   <div>
@@ -533,18 +580,9 @@ const DocDashboard = () => {
                     <ResponsiveContainer width="100%" height={300}>
                       <LineChart data={chartData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis 
-                          dataKey="month" 
-                          stroke="#64748b" 
-                          fontSize={12} 
-                          tickMargin={10} 
-                        />
-                        <YAxis 
-                          stroke="#64748b" 
-                          fontSize={12} 
-                          tickFormatter={(value) => `₹${value/1000}k`}
-                        />
-                        <Tooltip 
+                        <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickMargin={10} />
+                        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(value) => `₹${value/1000}k`} />
+                        <Tooltip
                           formatter={(value) => [formatters.currency(value), 'Revenue']}
                           labelStyle={{ color: '#374151' }}
                           contentStyle={{
@@ -554,10 +592,10 @@ const DocDashboard = () => {
                             boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
                           }}
                         />
-                        <Line 
-                          type="monotone" 
-                          dataKey="revenue" 
-                          stroke="#3b82f6" 
+                        <Line
+                          type="monotone"
+                          dataKey="revenue"
+                          stroke="#3b82f6"
                           strokeWidth={3}
                           dot={{ fill: '#3b82f6', strokeWidth: 2, r: 5 }}
                           activeDot={{ r: 7, fill: '#1d4ed8' }}
@@ -575,14 +613,9 @@ const DocDashboard = () => {
                     <ResponsiveContainer width="100%" height={300}>
                       <BarChart data={chartData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis 
-                          dataKey="month" 
-                          stroke="#64748b" 
-                          fontSize={12} 
-                          tickMargin={10} 
-                        />
+                        <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickMargin={10} />
                         <YAxis stroke="#64748b" fontSize={12} />
-                        <Tooltip 
+                        <Tooltip
                           formatter={(value) => [value, 'Appointments']}
                           labelStyle={{ color: '#374151' }}
                           contentStyle={{
@@ -592,11 +625,7 @@ const DocDashboard = () => {
                             boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'
                           }}
                         />
-                        <Bar 
-                          dataKey="appointments" 
-                          fill="#10b981" 
-                          radius={[6, 6, 0, 0]} 
-                        />
+                        <Bar dataKey="appointments" fill="#10b981" radius={[6, 6, 0, 0]} />
                       </BarChart>
                     </ResponsiveContainer>
                   </div>
@@ -617,11 +646,13 @@ const DocDashboard = () => {
                     {recent_appointments.length} items
                   </span>
                 </div>
-                
                 <div className="space-y-3 max-h-96 overflow-y-auto">
                   {recent_appointments.length > 0 ? (
                     recent_appointments.map((appointment) => (
-                      <AppointmentCard key={appointment?.id || Math.random()} appointment={appointment} />
+                      <AppointmentCard
+                        key={appointment?.id || Math.random()}
+                        appointment={appointment}
+                      />
                     ))
                   ) : (
                     <div className="text-center py-8 text-gray-500">
@@ -643,11 +674,13 @@ const DocDashboard = () => {
                     {recent_reviews.length} items
                   </span>
                 </div>
-                
                 <div className="space-y-3 max-h-96 overflow-y-auto">
                   {recent_reviews.length > 0 ? (
                     recent_reviews.map((review) => (
-                      <ReviewCard key={review?.id || Math.random()} review={review} />
+                      <ReviewCard
+                        key={review?.id || Math.random()}
+                        review={review}
+                      />
                     ))
                   ) : (
                     <div className="text-center py-8 text-gray-500">

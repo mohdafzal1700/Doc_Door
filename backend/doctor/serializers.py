@@ -2242,3 +2242,554 @@ class DashboardDataService:
             'credit_details': list(this_month_credits.values('id', 'amount', 'remarks', 'appointment__appointment_date')),
             'debit_details': list(this_month_debits.values('id', 'amount', 'remarks', 'appointment__appointment_date'))
         }
+# pdf_report_service.py
+import io
+from datetime import datetime, timedelta
+from django.http import HttpResponse
+from django.db.models import Sum, Count, Q
+from django.utils import timezone
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.pdfgen import canvas
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.graphics.shapes import Drawing, Rect
+from reportlab.graphics.charts.linecharts import HorizontalLineChart
+from reportlab.graphics.widgets.markers import makeMarker
+from reportlab.lib.colors import HexColor
+
+class DoctorReportPDFService:
+    """Service class to generate PDF reports for doctor dashboard"""
+    
+    def __init__(self, doctor, start_date=None, end_date=None):
+        self.doctor = doctor
+        self.start_date = self._parse_date(start_date) if start_date else None
+        self.end_date = self._parse_date(end_date) if end_date else None
+        self.styles = getSampleStyleSheet()
+        self._setup_custom_styles()
+        # Calculate available width for tables
+        self.doc_width = A4[0] - 100  # Subtracting left and right margins
+    
+    def _parse_date(self, date_string):
+        """Parse date string to date object"""
+        try:
+            return datetime.strptime(date_string, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            return None
+    
+    def _setup_custom_styles(self):
+        """Setup custom paragraph styles"""
+        # Only add styles that don't already exist
+        style_names = [style.name for style in self.styles.byName.values()]
+        
+        if 'CustomTitle' not in style_names:
+            self.styles.add(ParagraphStyle(
+                name='CustomTitle',
+                parent=self.styles['Heading1'],
+                fontSize=16,
+                spaceAfter=20,
+                alignment=TA_CENTER,
+                textColor=colors.darkblue,
+                fontName='Helvetica-Bold'
+            ))
+        
+        if 'SectionHeader' not in style_names:
+            self.styles.add(ParagraphStyle(
+                name='SectionHeader',
+                parent=self.styles['Heading2'],
+                fontSize=12,
+                spaceAfter=10,
+                spaceBefore=15,
+                textColor=colors.darkblue,
+                leftIndent=0,
+                fontName='Helvetica-Bold'
+            ))
+        
+        if 'CustomNormal' not in style_names:
+            self.styles.add(ParagraphStyle(
+                name='CustomNormal',
+                parent=self.styles['Normal'],
+                fontSize=9,
+                spaceAfter=4,
+                fontName='Helvetica'
+            ))
+        
+        if 'TableText' not in style_names:
+            self.styles.add(ParagraphStyle(
+                name='TableText',
+                parent=self.styles['Normal'],
+                fontSize=8,
+                fontName='Helvetica'
+            ))
+    
+    def _get_filtered_appointments(self):
+        """Get appointments within date range"""
+        appointments_qs = self.doctor.appointments.all()
+        
+        if self.start_date:
+            appointments_qs = appointments_qs.filter(appointment_date__gte=self.start_date)
+        
+        if self.end_date:
+            appointments_qs = appointments_qs.filter(appointment_date__lte=self.end_date)
+        
+        return appointments_qs.select_related('patient__user')
+    
+    def _get_filtered_earnings(self):
+        """Get earnings within date range"""
+        earnings_qs = self.doctor.earnings.all()
+        
+        if self.start_date:
+            earnings_qs = earnings_qs.filter(appointment__appointment_date__gte=self.start_date)
+        
+        if self.end_date:
+            earnings_qs = earnings_qs.filter(appointment__appointment_date__lte=self.end_date)
+        
+        return earnings_qs.select_related('appointment__patient__user')
+    
+    def _calculate_stats(self, appointments_qs, earnings_qs):
+        """Calculate report statistics"""
+        # Appointment stats
+        total_appointments = appointments_qs.count()
+        completed_appointments = appointments_qs.filter(status__in=['completed', 'confirmed']).count()
+        pending_appointments = appointments_qs.filter(status='pending').count()
+        cancelled_appointments = appointments_qs.filter(status='cancelled').count()
+        
+        # Earnings stats
+        credits = earnings_qs.filter(type='credit').aggregate(
+            total=Sum('amount'),
+            count=Count('id')
+        )
+        debits = earnings_qs.filter(type='debit').aggregate(
+            total=Sum('amount'),
+            count=Count('id')
+        )
+        
+        total_credits = credits['total'] or 0
+        total_debits = debits['total'] or 0
+        net_earnings = total_credits - total_debits
+        
+        return {
+            'appointments': {
+                'total': total_appointments,
+                'completed': completed_appointments,
+                'pending': pending_appointments,
+                'cancelled': cancelled_appointments
+            },
+            'earnings': {
+                'total_credits': total_credits,
+                'total_debits': total_debits,
+                'net_earnings': net_earnings,
+                'credits_count': credits['count'] or 0,
+                'debits_count': debits['count'] or 0
+            }
+        }
+    
+    def _format_currency(self, amount):
+        """Format currency with Rupee symbol - using Rs for better PDF compatibility"""
+        if amount is None:
+            return "Rs. 0.00"
+        try:
+            # Convert to float first to handle any string or decimal types
+            amount_float = float(amount)
+            return f"Rs. {amount_float:,.2f}"
+        except (ValueError, TypeError):
+            return "Rs. 0.00"
+    
+    def _format_date(self, date_obj):
+        """Format date to DD-MM-YYYY"""
+        if not date_obj:
+            return "N/A"
+        return date_obj.strftime("%d-%m-%Y")
+    
+    def _format_time(self, time_obj):
+        """Format time to HH:MM"""
+        if not time_obj:
+            return "N/A"
+        return time_obj.strftime("%H:%M")
+    
+    def _create_header_footer(self, canvas, doc):
+        """Create header and footer for each page with fixed positioning"""
+        canvas.saveState()
+        
+        # Get page dimensions
+        page_width, page_height = A4
+        
+        # Header - Fixed positioning from top of page
+        header_y_start = page_height - 40  # Start 40 points from top
+        
+        canvas.setFont('Helvetica-Bold', 14)
+        canvas.setFillColor(colors.darkblue)
+        
+        # Get doctor's full name and handle long names
+        doctor_name = self.doctor.user.get_full_name()
+        if len(doctor_name) > 30:
+            doctor_name = doctor_name[:27] + "..."
+        canvas.drawString(50, header_y_start, f"Dr. {doctor_name}")
+        
+        canvas.setFont('Helvetica', 9)
+        canvas.setFillColor(colors.black)
+        canvas.drawString(50, header_y_start - 15, f"Specialization: {getattr(self.doctor, 'specialization', 'Not specified')}")
+        
+        # Handle long email addresses
+        email = self.doctor.user.email
+        if len(email) > 40:
+            email = email[:37] + "..."
+        canvas.drawString(50, header_y_start - 28, f"Email: {email}")
+        
+        # Header line
+        canvas.setStrokeColor(colors.darkblue)
+        canvas.setLineWidth(1)
+        canvas.line(50, header_y_start - 38, page_width - 50, header_y_start - 38)
+        
+        # Footer - Fixed positioning from bottom of page
+        footer_y_start = 50  # Start 50 points from bottom
+        
+        canvas.setFont('Helvetica', 8)
+        canvas.setFillColor(colors.grey)
+        canvas.drawString(50, footer_y_start - 5, f"Generated on: {timezone.now().strftime('%d-%m-%Y %H:%M')}")
+        canvas.drawRightString(page_width - 50, footer_y_start - 5, f"Page {canvas.getPageNumber()}")
+        
+        # Footer line
+        canvas.setStrokeColor(colors.grey)
+        canvas.setLineWidth(0.5)
+        canvas.line(50, footer_y_start + 10, page_width - 50, footer_y_start + 10)
+        
+        canvas.restoreState()
+    
+    def _create_appointments_table(self, appointments):
+        """Create appointments table with better formatting"""
+        if not appointments:
+            return [Paragraph("No appointments found in the specified date range.", self.styles['CustomNormal'])]
+        
+        # Table headers
+        headers = ['Date', 'Patient', 'Time', 'Status', 'Fee']
+        data = [headers]
+        
+        # Table data
+        for apt in appointments:
+            patient_name = (
+                apt.patient.user.get_full_name() 
+                if apt.patient.user.get_full_name() 
+                else apt.patient.user.username
+            )
+            # Truncate long names
+            if len(patient_name) > 18:
+                patient_name = patient_name[:15] + "..."
+            
+            data.append([
+                self._format_date(apt.appointment_date),
+                patient_name,
+                self._format_time(apt.slot_time),
+                apt.status.title(),
+                self._format_currency(apt.total_fee)
+            ])
+        
+        # Calculate column widths to fit page - optimized for better layout
+        col_widths = [
+            self.doc_width * 0.18,  # Date
+            self.doc_width * 0.32,  # Patient - increased width
+            self.doc_width * 0.15,  # Time
+            self.doc_width * 0.18,  # Status
+            self.doc_width * 0.17   # Fee
+        ]
+        
+        # Create table
+        table = Table(data, colWidths=col_widths, repeatRows=1)
+        table.setStyle(TableStyle([
+            # Header styling
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            # Body styling
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, HexColor('#f8f9fa')]),
+            # Prevent awkward breaks
+            ('KEEPWITHIN', (0, 0), (-1, -1), 1)
+        ]))
+        
+        # Force manual table splitting for ANY table with more than 5 data rows
+        if len(data) > 6:  # More than 5 data rows (plus header)
+            tables = []
+            chunk_size = 5  # Only 5 data rows per chunk to ensure it fits on one page
+            first_chunk = True
+            
+            for i in range(1, len(data), chunk_size):
+                chunk_data = [headers] + data[i:i+chunk_size]
+                chunk_table = Table(chunk_data, colWidths=col_widths, repeatRows=1)
+                chunk_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('TOPPADDING', (0, 0), (-1, 0), 8),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 1), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, HexColor('#f8f9fa')])
+                ]))
+                
+                if not first_chunk:
+                    tables.append(PageBreak())
+                    tables.append(Paragraph("Appointments Details - Continued", self.styles['SectionHeader']))
+                
+                tables.append(chunk_table)
+                tables.append(Spacer(1, 10))
+                first_chunk = False
+            
+            return tables
+        
+        return [table]
+    
+    def _create_earnings_tables(self, earnings):
+        """Create earnings tables (credits and debits) with better formatting"""
+        tables = []
+        
+        # Credits table
+        credits = earnings.filter(type='credit')
+        if credits.exists():
+            tables.append(Paragraph("Credits (Revenue)", self.styles['SectionHeader']))
+            
+            headers = ['Date', 'Patient', 'Amount', 'Remarks']
+            data = [headers]
+            
+            for earning in credits:
+                patient_name = (
+                    earning.appointment.patient.user.get_full_name() 
+                    if earning.appointment.patient.user.get_full_name() 
+                    else earning.appointment.patient.user.username
+                )
+                if len(patient_name) > 20:
+                    patient_name = patient_name[:17] + "..."
+                
+                remarks = earning.remarks or 'Payment received'
+                if len(remarks) > 40:
+                    remarks = remarks[:37] + "..."
+                
+                data.append([
+                    self._format_date(earning.appointment.appointment_date),
+                    patient_name,
+                    self._format_currency(earning.amount),
+                    remarks
+                ])
+            
+            col_widths = [
+                self.doc_width * 0.18,  # Date
+                self.doc_width * 0.22,  # Patient
+                self.doc_width * 0.18,  # Amount
+                self.doc_width * 0.42   # Remarks - increased width
+            ]
+            
+            # Always split tables manually - even small ones for consistency
+            chunk_size = 5  # 5 data rows per chunk to ensure it fits on one page
+            first_chunk = True
+            
+            for i in range(1, len(data), chunk_size):
+                chunk_data = [headers] + data[i:i+chunk_size]
+                chunk_table = Table(chunk_data, colWidths=col_widths, repeatRows=1)
+                chunk_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.green),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('TOPPADDING', (0, 0), (-1, 0), 8),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 1), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, HexColor('#f0f8f0')])
+                ]))
+                
+                if not first_chunk:
+                    tables.append(PageBreak())
+                    tables.append(Paragraph("Credits (Revenue) - Continued", self.styles['SectionHeader']))
+                
+                tables.append(chunk_table)
+                tables.append(Spacer(1, 10))
+                first_chunk = False
+            
+            tables.append(Spacer(1, 15))
+        
+        # Debits table
+        debits = earnings.filter(type='debit')
+        if debits.exists():
+            tables.append(Paragraph("Debits (Deductions)", self.styles['SectionHeader']))
+            
+            headers = ['Date', 'Patient', 'Amount', 'Reason']
+            data = [headers]
+            
+            for earning in debits:
+                patient_name = (
+                    earning.appointment.patient.user.get_full_name() 
+                    if earning.appointment.patient.user.get_full_name() 
+                    else earning.appointment.patient.user.username
+                )
+                if len(patient_name) > 20:
+                    patient_name = patient_name[:17] + "..."
+                
+                reason = earning.remarks or 'Deduction'
+                if len(reason) > 40:
+                    reason = reason[:37] + "..."
+                
+                data.append([
+                    self._format_date(earning.appointment.appointment_date),
+                    patient_name,
+                    self._format_currency(earning.amount),
+                    reason
+                ])
+            
+            col_widths = [
+                self.doc_width * 0.18,  # Date
+                self.doc_width * 0.22,  # Patient
+                self.doc_width * 0.18,  # Amount
+                self.doc_width * 0.42   # Reason - increased width
+            ]
+            
+            # Always split tables manually - even small ones for consistency
+            chunk_size = 5  # 5 data rows per chunk to ensure it fits on one page
+            first_chunk = True
+            
+            for i in range(1, len(data), chunk_size):
+                chunk_data = [headers] + data[i:i+chunk_size]
+                chunk_table = Table(chunk_data, colWidths=col_widths, repeatRows=1)
+                chunk_table.setStyle(TableStyle([
+                    ('BACKGROUND', (0, 0), (-1, 0), colors.red),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 9),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+                    ('TOPPADDING', (0, 0), (-1, 0), 8),
+                    ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+                    ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                    ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                    ('FONTSIZE', (0, 1), (-1, -1), 8),
+                    ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('TOPPADDING', (0, 1), (-1, -1), 6),
+                    ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, HexColor('#fff0f0')])
+                ]))
+                
+                if not first_chunk:
+                    tables.append(PageBreak())
+                    tables.append(Paragraph("Debits (Deductions) - Continued", self.styles['SectionHeader']))
+                
+                tables.append(chunk_table)
+                tables.append(Spacer(1, 10))
+                first_chunk = False
+        
+        return tables
+    
+    def generate_pdf(self):
+        """Generate the complete PDF report"""
+        buffer = io.BytesIO()
+        
+        # Create document with better margins - increased top margin to avoid header overlap
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=50,
+            leftMargin=50,
+            topMargin=120,  # Increased from 90 to 120 to accommodate header
+            bottomMargin=80   # Increased from 60 to 80 to accommodate footer
+        )
+        
+        # Get data
+        appointments = self._get_filtered_appointments()
+        earnings = self._get_filtered_earnings()
+        stats = self._calculate_stats(appointments, earnings)
+        
+        # Build document content
+        story = []
+        
+        # Title
+        date_range = ""
+        if self.start_date and self.end_date:
+            date_range = f" ({self._format_date(self.start_date)} to {self._format_date(self.end_date)})"
+        elif self.start_date:
+            date_range = f" (From {self._format_date(self.start_date)})"
+        elif self.end_date:
+            date_range = f" (Until {self._format_date(self.end_date)})"
+        
+        story.append(Paragraph(f"Doctor Dashboard Report{date_range}", self.styles['CustomTitle']))
+        story.append(Spacer(1, 20))
+        
+        # Summary section
+        story.append(Paragraph("Summary", self.styles['SectionHeader']))
+        
+        summary_data = [
+            ['Metric', 'Count/Amount'],
+            ['Total Appointments', str(stats['appointments']['total'])],
+            ['Completed Appointments', str(stats['appointments']['completed'])],
+            ['Pending Appointments', str(stats['appointments']['pending'])],
+            ['Cancelled Appointments', str(stats['appointments']['cancelled'])],
+            ['Total Credits', self._format_currency(stats['earnings']['total_credits'])],
+            ['Total Debits', self._format_currency(stats['earnings']['total_debits'])],
+            ['Net Earnings', self._format_currency(stats['earnings']['net_earnings'])]
+        ]
+        
+        summary_table = Table(summary_data, colWidths=[self.doc_width * 0.6, self.doc_width * 0.4])
+        summary_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 9),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+            ('TOPPADDING', (0, 0), (-1, 0), 8),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.white),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, HexColor('#f8f9fa')])
+        ]))
+        
+        story.append(summary_table)
+        story.append(Spacer(1, 20))
+        
+        # Appointments section
+        story.append(Paragraph("Appointments Details", self.styles['SectionHeader']))
+        appointments_table = self._create_appointments_table(appointments.order_by('-appointment_date'))
+        story.extend(appointments_table)
+        story.append(Spacer(1, 20))
+        
+        # Earnings section
+        story.append(Paragraph("Earnings Details", self.styles['SectionHeader']))
+        earnings_tables = self._create_earnings_tables(earnings.order_by('-appointment__appointment_date'))
+        story.extend(earnings_tables)
+        
+        # Build PDF
+        doc.build(story, onFirstPage=self._create_header_footer, onLaterPages=self._create_header_footer)
+        
+        buffer.seek(0)
+        return buffer

@@ -852,3 +852,7 @@ export const getSubscriptionInvoiceById = (subscriptionId) => {
 export const fetchDoctorDashboard = (options = {}) => {
   return axios.get("dashboard/", { params: options });
 };
+
+
+export const downloadDashboardReport = (params) =>
+    axios.get('dashboard-report/', { params, responseType: 'blob' });

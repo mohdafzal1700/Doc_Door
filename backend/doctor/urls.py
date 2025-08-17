@@ -56,6 +56,7 @@ urlpatterns = [
     path('invoice/subscription/', SubscriptionInvoiceView.as_view(), name='current-subscription-invoice'),
     
     path('dashboard/', views.DoctorDashboardView.as_view(), name='doctor-dashboard'),
+    path('dashboard-report/', views.DoctorReportDownloadView.as_view(), name='doctor-dashboard-report'),
 ]
 
 
