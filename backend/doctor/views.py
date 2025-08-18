@@ -3410,3 +3410,25 @@ class DoctorReportDownloadView(APIView):
                 'success': False,
                 'message': error_message
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
+class Review(APIView):
+    
+    def get(self,request):
+        try:
+            review=request.user.doctor_profile.review.all()
+            return Response(
+                {
+                    'success':True,
+                    'data':review
+                }
+            )
+        except Exception as e:
+            
+            return Response(
+                {
+                    'success':False,
+                    'message':'something went wrong'
+                    
+                }
+            )

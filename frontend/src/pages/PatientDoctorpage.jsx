@@ -1,88 +1,136 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Star, MapPin, MessageCircle, Calendar, GraduationCap, Phone, Mail, Clock, Award, User, Stethoscope, DollarSign, Globe } from "lucide-react";
-import { getPatientDoctor, handleApiError } from '../endpoints/APIs'; 
+import { getPatientDoctor, handleApiError, getDoctorReviews } from '../endpoints/APIs';
 import Header from '../components/home/Header';
-import CallButton from '../videocall/callbutton';
+
 import Button from '../components/ui/Button';
 
 export default function PatientDoctor() {
-    const { id } = useParams();
-    const navigate = useNavigate();
-    const [doctor, setDoctor] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const [doctor, setDoctor] = useState(null);
+  const [reviews, setReviews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-    useEffect(() => {
-        const fetchDoctor = async () => {
-            try {
-                setLoading(true);
-                setError(null);
-                
-                const response = await getPatientDoctor(id);
-                setDoctor(response.data);
-            } catch (err) {
-                const errorInfo = handleApiError(err);
-                setError(errorInfo.message);
-                console.error('Error fetching doctor:', err);
-            } finally {
-                setLoading(false);
-            }
-        };
+  // Fetch doctor reviews function - moved outside and fixed
+  const fetchDoctorReviews = async (doctorData) => {
+    try {
+      setReviewsLoading(true);
+      
+      // Use the doctor's actual ID, not the user ID
+      const doctorId = doctorData?.id; // This should be the doctor's UUID
+      
+      if (!doctorId) {
+        console.log('No doctor ID available, skipping review fetch');
+        setReviews([]);
+        return;
+      }
+      
+      console.log('Fetching reviews for doctor ID:', doctorId);
+      const response = await getDoctorReviews(doctorId);
+      console.log('Reviews response:', response);
+      
+      if (response.data && response.data.success) {
+        setReviews(response.data.data || []);
+      } else {
+        setReviews([]);
+      }
+    } catch (err) {
+      console.error('Error fetching reviews:', err);
+      setReviews([]);
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
 
-        if (id) {
-            fetchDoctor();
-        }
-    }, [id]);
-
-    const handleBookAppointment = () => {
-        navigate(`/patient/appointmentBooking/${id}`);
+  // Fetch doctor data
+  useEffect(() => {
+    const fetchDoctor = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response = await getPatientDoctor(id);
+        const doctorData = response.data;
+        setDoctor(doctorData);
+        
+        // Fetch reviews after doctor data is loaded
+        await fetchDoctorReviews(doctorData);
+      } catch (err) {
+        const errorInfo = handleApiError(err);
+        setError(errorInfo.message);
+        console.error('Error fetching doctor:', err);
+      } finally {
+        setLoading(false);
+      }
     };
 
-    const handleReview = () => {
+    if (id) {
+      fetchDoctor();
+    }
+  }, [id]);
+
+  const handleBookAppointment = () => {
+    navigate(`/patient/appointmentBooking/${id}`);
+  };
+
+  const handleReview = () => {
     navigate("/doctor-feedback", {
-    state: {
+      state: {
         doctorId: doctor.id,
         doctorName: doctor.full_name,
         doctorDept: doctor.doctor_department,
-        
-        },
+      },
     });
-};
+  };
 
-    const handleVideoCall = () => {
+  const calculateAverageRating = () => {
+    if (reviews.length === 0) return 0;
+    const sum = reviews.reduce((acc, review) => acc + review.rating, 0);
+    return (sum / reviews.length).toFixed(1);
+  };
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const handleVideoCall = () => {
     // Navigate to the video call page with the doctor's/user's ID
     navigate(`/video-call/${id}`);
   };
 
-  
-    const handleSendMessage = () => {
+  const handleSendMessage = () => {
     // Make sure we're passing the doctor's ID, not the current user's ID
     console.log('Navigating to chat with doctor ID:', doctor.id);
     navigate(`/chat/${doctor.id}`); // This should be the doctor's ID
-};
+  };
 
-    const renderStars = (rating = 4.5) => {
-        const stars = [];
-        const fullStars = Math.floor(rating);
-        const hasHalfStar = rating % 1 !== 0;
+  const renderStars = (rating = 4.5) => {
+    const stars = [];
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 !== 0;
 
-        for (let i = 0; i < fullStars; i++) {
-            stars.push(<Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />);
-        }
+    for (let i = 0; i < fullStars; i++) {
+      stars.push(<Star key={i} className="w-4 h-4 fill-yellow-400 text-yellow-400" />);
+    }
 
-        if (hasHalfStar) {
-            stars.push(<Star key="half" className="w-4 h-4 fill-yellow-400 text-yellow-400 opacity-50" />);
-        }
+    if (hasHalfStar) {
+      stars.push(<Star key="half" className="w-4 h-4 fill-yellow-400 text-yellow-400 opacity-50" />);
+    }
 
-        const remainingStars = 5 - Math.ceil(rating);
-        for (let i = 0; i < remainingStars; i++) {
-            stars.push(<Star key={`empty-${i}`} className="w-4 h-4 text-gray-300" />);
-        }
+    const remainingStars = 5 - Math.ceil(rating);
+    for (let i = 0; i < remainingStars; i++) {
+      stars.push(<Star key={`empty-${i}`} className="w-4 h-4 text-gray-300" />);
+    }
 
-        return stars;
-    };
-
+    return stars;
+  };
     if (loading) {
         return (
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
@@ -118,7 +166,7 @@ export default function PatientDoctor() {
                 <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center">
                     <h2 className="text-xl font-semibold text-red-800 mb-2">Error Loading Doctor Profile</h2>
                     <p className="text-red-600">{error}</p>
-                    <button 
+                    <button
                         onClick={() => navigate('/patient/doctors')}
                         className="mt-4 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors"
                     >
@@ -135,7 +183,7 @@ export default function PatientDoctor() {
                 <div className="bg-gray-50 border border-gray-200 rounded-xl p-6 text-center">
                     <h2 className="text-xl font-semibold text-gray-800 mb-2">Doctor Not Found</h2>
                     <p className="text-gray-600">The requested doctor profile could not be found.</p>
-                    <button 
+                    <button
                         onClick={() => navigate('/patient/doctors')}
                         className="mt-4 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
                     >
@@ -149,7 +197,6 @@ export default function PatientDoctor() {
     return (
         <div className="min-h-screen bg-gray-50">
             <Header />
-            
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
                 {/* Main Profile Card */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -160,9 +207,9 @@ export default function PatientDoctor() {
                                 <div className="relative">
                                     <div className="w-32 h-32 rounded-full overflow-hidden border-4 border-white shadow-md bg-gray-100">
                                         {doctor.profile_picture_url ? (
-                                            <img 
-                                                src={doctor.profile_picture_url} 
-                                                alt={doctor.full_name} 
+                                            <img
+                                                src={doctor.profile_picture_url}
+                                                alt={doctor.full_name}
                                                 className="w-full h-full object-cover"
                                                 onError={(e) => {
                                                     e.target.style.display = 'none';
@@ -170,7 +217,10 @@ export default function PatientDoctor() {
                                                 }}
                                             />
                                         ) : null}
-                                        <div className="w-full h-full flex items-center justify-center bg-blue-100 text-blue-600" style={{display: doctor.profile_picture_url ? 'none' : 'flex'}}>
+                                        <div
+                                            className="w-full h-full flex items-center justify-center bg-blue-100 text-blue-600"
+                                            style={{display: doctor.profile_picture_url ? 'none' : 'flex'}}
+                                        >
                                             <User className="w-12 h-12" />
                                         </div>
                                     </div>
@@ -178,7 +228,7 @@ export default function PatientDoctor() {
                                         {doctor.doctor_is_available ? 'Available' : 'Busy'}
                                     </span>
                                 </div>
-                                
+
                                 {/* Action Buttons - Mobile */}
                                 <div className="flex gap-3 mt-6 w-full lg:hidden">
                                     <button
@@ -210,17 +260,15 @@ export default function PatientDoctor() {
                                                 {doctor.doctor_department}
                                             </span>
                                         )}
-                                        
                                         {doctor.doctor_experience >= 0 && (
                                             <span className="flex items-center gap-1 text-gray-600 text-sm">
                                                 <Clock className="w-4 h-4 text-gray-400" />
                                                 {doctor.doctor_experience === 0 ? "New practitioner" : `${doctor.doctor_experience}+ years experience`}
                                             </span>
                                         )}
-                                        
                                         <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                            doctor.doctor_verification_status === 'approved' 
-                                                ? 'bg-green-100 text-green-800' 
+                                            doctor.doctor_verification_status === 'approved'
+                                                ? 'bg-green-100 text-green-800'
                                                 : 'bg-yellow-100 text-yellow-800'
                                         }`}>
                                             {doctor.doctor_verification_status === 'approved' ? 'Verified' : 'Pending Verification'}
@@ -235,21 +283,18 @@ export default function PatientDoctor() {
                                             <span>{doctor.doctor_clinic_name}</span>
                                         </div>
                                     )}
-                                    
                                     {doctor.doctor_location && (
                                         <div className="flex items-start gap-2 text-gray-600">
                                             <MapPin className="w-4 h-4 mt-0.5 text-gray-400 flex-shrink-0" />
                                             <span>{doctor.doctor_location}</span>
                                         </div>
                                     )}
-
                                     {doctor.email && (
                                         <div className="flex items-start gap-2 text-gray-600">
                                             <Mail className="w-4 h-4 mt-0.5 text-gray-400 flex-shrink-0" />
                                             <span className="break-all">{doctor.email}</span>
                                         </div>
                                     )}
-
                                     {doctor.phone_number && (
                                         <div className="flex items-start gap-2 text-gray-600">
                                             <Phone className="w-4 h-4 mt-0.5 text-gray-400 flex-shrink-0" />
@@ -258,17 +303,21 @@ export default function PatientDoctor() {
                                     )}
                                 </div>
 
-                                 <CallButton 
-                                        receiverId={id} 
-                                        doctorName={doctor.full_name || `Dr. ${doctor.doctor_first_name} ${doctor.doctor_last_name}`} 
-                                        />
+                                {/* <CallButton
+                                    receiverId={id}
+                                    doctorName={doctor.full_name || `Dr. ${doctor.doctor_first_name} ${doctor.doctor_last_name}`}
+                                /> */}
 
-      
                                 <div className="flex items-center gap-2">
                                     <div className="flex">
-                                        {renderStars(4.5)}
+                                        {renderStars(reviews.length > 0 ? parseFloat(calculateAverageRating()) : 0)}
                                     </div>
-                                    <span className="text-sm text-gray-600">4.8 (87 reviews)</span>
+                                    <span className="text-sm text-gray-600">
+                                        {reviews.length > 0 
+                                            ? `${calculateAverageRating()} (${reviews.length} reviews)` 
+                                            : 'No reviews yet'
+                                        }
+                                    </span>
                                 </div>
                             </div>
 
@@ -321,7 +370,6 @@ export default function PatientDoctor() {
                                     <Stethoscope className="w-5 h-5 text-blue-600" />
                                     Professional Details
                                 </h2>
-                                
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     {doctor.doctor_license_number && (
                                         <div className="space-y-1">
@@ -329,7 +377,6 @@ export default function PatientDoctor() {
                                             <p className="text-gray-600">{doctor.doctor_license_number}</p>
                                         </div>
                                     )}
-
                                     {doctor.doctor_consultation_fee > 0 ? (
                                         <div className="space-y-1">
                                             <h3 className="font-medium text-gray-900">Consultation Fee</h3>
@@ -344,7 +391,6 @@ export default function PatientDoctor() {
                                             <p className="text-gray-600">Free</p>
                                         </div>
                                     )}
-
                                     <div className="space-y-1">
                                         <h3 className="font-medium text-gray-900">Consultation Modes</h3>
                                         <div className="flex flex-wrap gap-2">
@@ -362,18 +408,14 @@ export default function PatientDoctor() {
                                             )}
                                         </div>
                                     </div>
-
                                     {doctor.doctor_experience >= 0 && (
                                         <div className="space-y-1">
                                             <h3 className="font-medium text-gray-900">Experience</h3>
                                             <p className="text-gray-600">
-                                                {doctor.doctor_experience === 0 
-                                                    ? "New practitioner" 
-                                                    : `${doctor.doctor_experience} years`}
+                                                {doctor.doctor_experience === 0 ? "New practitioner" : `${doctor.doctor_experience} years`}
                                             </p>
                                         </div>
                                     )}
-
                                     {doctor.doctor_date_of_birth && (
                                         <div className="space-y-1">
                                             <h3 className="font-medium text-gray-900">Age</h3>
@@ -382,7 +424,6 @@ export default function PatientDoctor() {
                                             </p>
                                         </div>
                                     )}
-
                                     {doctor.doctor_gender && (
                                         <div className="space-y-1">
                                             <h3 className="font-medium text-gray-900">Gender</h3>
@@ -463,19 +504,78 @@ export default function PatientDoctor() {
                 {/* Reviews Section */}
                 <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div className="p-6 md:p-8">
-                        <h2 className="text-lg font-semibold mb-4">Patient Reviews</h2>
-                        <div className="space-y-4">
-                            <div className="text-center py-8 text-gray-500">
-                                <MessageCircle className="w-12 h-12 mx-auto mb-3 text-gray-400" />
-                              
-                                <p>No reviews available yet.</p>
-                                <button 
-                                    className="mt-4 text-blue-600 hover:text-blue-800 font-medium"
-                                    onClick={handleReview}
-                                >
-                                    Be the first to review
-                                </button>
+                        <div className="flex justify-between items-center mb-6">
+                            <div>
+                                <h2 className="text-lg font-semibold">Patient Reviews</h2>
+                                {reviews.length > 0 && (
+                                    <div className="flex items-center mt-2">
+                                        <div className="flex items-center mr-3">
+                                            {renderStars(parseFloat(calculateAverageRating()))}
+                                        </div>
+                                        <span className="text-sm text-gray-600">
+                                            {calculateAverageRating()} out of 5 ({reviews.length} review{reviews.length !== 1 ? 's' : ''})
+                                        </span>
+                                    </div>
+                                )}
                             </div>
+                            <button
+                                className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                                onClick={handleReview}
+                            >
+                                Write Review
+                            </button>
+                        </div>
+
+                        <div className="space-y-4">
+                            {reviewsLoading ? (
+                                <div className="text-center py-8 text-gray-500">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                                    <p className="mt-2">Loading reviews...</p>
+                                </div>
+                            ) : reviews.length > 0 ? (
+                                <div className="space-y-4">
+                                    {reviews.map((review) => (
+                                        <div key={review.id} className="border-b border-gray-200 pb-4 last:border-b-0">
+                                            <div className="flex items-start justify-between mb-2">
+                                                <div>
+                                                    <div className="flex items-center mb-1">
+                                                        <span className="font-medium text-gray-900 mr-2">
+                                                            {review.patient_name || 'Anonymous Patient'}
+                                                        </span>
+                                                        <div className="flex items-center">
+                                                            {renderStars(review.rating)}
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-sm text-gray-500">
+                                                        {formatDate(review.created_at)}
+                                                        {review.appointment_date && (
+                                                            <span className="ml-2">
+                                                                • Appointment: {formatDate(review.appointment_date)}
+                                                            </span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {review.description && (
+                                                <p className="text-gray-700 text-sm leading-relaxed">
+                                                    {review.description}
+                                                </p>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-8 text-gray-500">
+                                    <MessageCircle className="w-12 h-12 mx-auto mb-3 text-gray-400" />
+                                    <p>No reviews available yet.</p>
+                                    <button
+                                        className="mt-4 text-blue-600 hover:text-blue-800 font-medium"
+                                        onClick={handleReview}
+                                    >
+                                        Be the first to review
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

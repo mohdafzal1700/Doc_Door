@@ -2296,40 +2296,76 @@ class PatientReviewCreateView(APIView):
                 'message': f'Failed to submit review: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-class PatientReviewListView(APIView):
-    """List all reviews by the logged-in patient"""
-    permission_classes = [IsAuthenticated]
-   
-    def get(self, request):
-        if not hasattr(request.user, 'patient'):
-            return Response({
-                'success': False,
-                'message': 'Only patients can view reviews'
-            }, status=status.HTTP_403_FORBIDDEN)
-       
+            
+from django.db.models import Avg
+from django.db import models        
+class DoctorReviewsListView(APIView):
+    """List all approved reviews for a specific doctor"""
+    
+    def get(self, request, doctor_id):
         try:
+            # The doctor_id parameter might actually be a user_id
+            # First try to get the doctor by their own ID
+            doctor = None
+            
+            try:
+                # Try getting doctor by doctor ID first
+                doctor = Doctor.objects.get(id=doctor_id)
+                actual_doctor_id = doctor.id
+                logger.info(f"Found doctor by doctor ID: {doctor.id}")
+            except Doctor.DoesNotExist:
+                # If not found, try getting doctor by user ID
+                try:
+                    doctor = Doctor.objects.get(user__id=doctor_id)
+                    actual_doctor_id = doctor.id
+                    logger.info(f"Found doctor by user ID: {doctor_id}, doctor ID: {doctor.id}")
+                except Doctor.DoesNotExist:
+                    logger.error(f"No doctor found with ID or User ID: {doctor_id}")
+                    return Response({
+                        'success': False,
+                        'message': 'Doctor not found'
+                    }, status=status.HTTP_404_NOT_FOUND)
+            
+            # Now get reviews using the actual doctor ID
             queryset = DoctorReview.objects.filter(
-                patient=request.user.patient
+                doctor_id=actual_doctor_id,
+                status='approved'
             ).select_related(
-                'doctor__user', 'appointment', 'reviewed_by'
+                'patient__user', 'doctor__user', 'appointment', 'reviewed_by'
             ).order_by('-created_at')
-           
-
-           
-            # Fixed: Pass the queryset to the serializer
+            
+            logger.info(f"Found {queryset.count()} approved reviews for doctor {actual_doctor_id}")
+            
             serializer = DoctorReviewSerializer(queryset, many=True)
-           
+            
+            # Calculate average rating
+            total_reviews = queryset.count()
+            if total_reviews > 0:
+                avg_rating = queryset.aggregate(
+                    avg_rating=models.Avg('rating')
+                )['avg_rating']
+                avg_rating = round(avg_rating, 1) if avg_rating else 0
+            else:
+                avg_rating = 0
+            
             return Response({
                 'success': True,
                 'data': serializer.data,
+                'total_reviews': total_reviews,
+                'average_rating': avg_rating,
             }, status=status.HTTP_200_OK)
-           
+            
         except Exception as e:
-            logger.error(f"Error listing patient reviews: {str(e)}")
+            logger.error(f"Error listing doctor reviews: {str(e)}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return Response({
                 'success': False,
-                'message': 'Failed to retrieve reviews'
+                'message': 'Failed to retrieve reviews',
+                'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+            
 
 class PatientReviewDeleteView(APIView):
     """Delete a review (only if still pending)"""

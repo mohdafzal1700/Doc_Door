@@ -188,8 +188,7 @@ export const getPaymentStatus = (appointmentId) =>
 
 export const createReview = (data) => axios.post('reviews/create/', data);
 
-export const getAllReviews = () => axios.get('reviews/');
-
+export const getDoctorReviews = (doctorId) => axios.get(`reviews/doctor/${doctorId}/`);
 
 export const deleteReview = (reviewId) => axios.delete(`reviews/delete/${reviewId}/`);
 

@@ -1007,10 +1007,7 @@ class UserConsumer(AsyncWebsocketConsumer):
         print(f"🔗 UserConsumer connect attempt")
         
         try:
-            # logger.info("🔌 WebSocket connect() called")
-            # logger.info(f"Headers: {self.scope.get('headers', [])}")
-            # logger.info(f"Query string: {self.scope.get('query_string', b'').decode()}")
-            # Get user from ASGI scope (authenticated by middleware)
+            
             self.user = self.scope['user']
             
             # Authentication check
@@ -1019,13 +1016,12 @@ class UserConsumer(AsyncWebsocketConsumer):
                 await self.close(code=4001)
                 return
             
-            logger.info(f" User authenticated: {self.user.username} (ID: {self.user.id})")
             
             self.user_group_name = f'user_{self.user.id}'
             await self.channel_layer.group_add(self.user_group_name, self.channel_name)
             await self.accept()
             
-            logger.info(f" User {self.user.username} connected to notifications")
+            
             
             # Send unread notifications on connect
             await self.send_unread_notifications()
@@ -1036,15 +1032,13 @@ class UserConsumer(AsyncWebsocketConsumer):
             await self.close(code=4000)
 
     async def disconnect(self, close_code):
-        logger.info(f"🔌 WebSocket disconnected with code: {close_code}")
+        
         if hasattr(self, "user") and self.user and not getattr(self.user, "is_anonymous", True):
             username = getattr(self.user, "username", "Unknown")
         else:
             username = "Unknown"
 
-        logger.info(f" UserConsumer disconnect: {username} (code: {close_code})")
-
-    # Remove from group if it exists
+        
         if hasattr(self, "user_group_name"):
             await self.channel_layer.group_discard(self.user_group_name, self.channel_name)
 
@@ -1055,8 +1049,7 @@ class UserConsumer(AsyncWebsocketConsumer):
         try:
             data = json.loads(text_data)
             event_type = data.get('type')
-            logger.info(f" Event type: {event_type}")
-
+            
             if event_type == 'mark_read':
                 notification_id = data.get('notification_id')
             
@@ -1070,10 +1063,9 @@ class UserConsumer(AsyncWebsocketConsumer):
                     'timestamp': timezone.now().isoformat()
                 }
                 await self.send(text_data=json.dumps(response))
-                logger.info(f" Sent mark_read_response: {success} for notification {notification_id}")
-
+                
             elif event_type == 'mark_all_read':
-                logger.info(f" Marking ALL notifications as read for {self.user.username}")
+                
                 count = await self.mark_all_notifications_read()
                 
                 # Send response back to client
@@ -1084,10 +1076,9 @@ class UserConsumer(AsyncWebsocketConsumer):
                     'timestamp': timezone.now().isoformat()
                 }
                 await self.send(text_data=json.dumps(response))
-                logger.info(f" Sent mark_all_read_response: {count} notifications updated")
-
+                
             else:
-                logger.info(f" Unknown event type: {event_type}")
+                
                 await self.send(text_data=json.dumps({
                     'type': 'error',
                     'message': f'Unknown event type: {event_type}'
@@ -1120,7 +1111,7 @@ class UserConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             print(f" Error sending notification: {e}")
 
-    # REMOVED: get_user_from_token method - no longer needed!
+    
 
     @database_sync_to_async
     def get_unread_notifications(self):
@@ -1144,7 +1135,7 @@ class UserConsumer(AsyncWebsocketConsumer):
                     } if notif.sender else None
                 })
             
-            logger.info(f" Found {len(formatted_notifications)} unread notifications for {self.user.username}")
+
             return formatted_notifications
             
         except Exception as e:
@@ -1154,7 +1145,7 @@ class UserConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def mark_notification_read(self, notification_id):
         """Mark single notification as read"""
-        logger.info(f"\n DATABASE: Marking notification {notification_id} as read for user {self.user.id}")
+        
         try:
             if not notification_id:
                 logger.error(" No notification_id provided")
@@ -1167,7 +1158,7 @@ class UserConsumer(AsyncWebsocketConsumer):
             ).update(is_read=True, read_at=timezone.now())
             
             success = updated > 0
-            logger.info(f"{'✅' if success else '⚠️'} Updated {updated} notifications. Success: {success}")
+            
             return success
             
         except Exception as e:
@@ -1177,14 +1168,14 @@ class UserConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def mark_all_notifications_read(self):
         """Mark all notifications as read"""
-        logger.info(f"\n DATABASE: Marking ALL notifications as read for user {self.user.id}")
+       
         try:
             # Update all unread notifications
             updated = self.user.notifications.filter(is_read=False).update(
                 is_read=True,
                 read_at=timezone.now()
             )
-            logger.info(f" DATABASE: Successfully updated {updated} notifications")
+            
             return updated
         except Exception as e:
             logger.error(f" Database error marking all notifications as read: {e}")
@@ -1192,7 +1183,6 @@ class UserConsumer(AsyncWebsocketConsumer):
 
     async def send_unread_notifications(self):
         """Send unread notifications when user connects"""
-        logger.info(f" Sending unread notifications to {self.user.username}")
         try:
             notifications = await self.get_unread_notifications()
             
@@ -1203,7 +1193,7 @@ class UserConsumer(AsyncWebsocketConsumer):
             }
             
             await self.send(text_data=json.dumps(response))
-            logger.info(f" Sent {len(notifications)} unread notifications")
+            
             
         except Exception as e:
             logger.error(f" Error sending unread notifications: {e}")
