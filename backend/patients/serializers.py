@@ -1842,12 +1842,7 @@ class AdminReviewModerationSerializer(serializers.ModelSerializer):
     
     
 from doctor.models import PatientWallet
-class PatientWalletSerializer(serializers.ModelSerializer):
-    
-    class Meta:
-        model=PatientWallet
-        
-        fields=['patient','balance']
+
         
 from doctor.models import PatientTransaction
 
@@ -1855,4 +1850,15 @@ class PatientTransactionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model=PatientTransaction
-        fields=['patient','amount','type','remark']
+        fields=['patient','amount','type','remarks']
+        
+class PatientWalletSerializer(serializers.ModelSerializer):
+    recent_transactions = PatientTransactionSerializer(
+        source='patient.transactions', 
+        many=True, 
+        read_only=True
+    )
+    
+    class Meta:
+        model = PatientWallet
+        fields = ['balance', 'recent_transactions', 'updated_at']

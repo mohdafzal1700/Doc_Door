@@ -270,7 +270,6 @@ class DoctorEarningsManager:
             return None
     
     
-    
 class PatientWalletManager:
     """Utility class to manage patient wallet balance and transactions"""
     
@@ -301,13 +300,13 @@ class PatientWalletManager:
             if existing_credit:
                 logger.warning(f"Credit already exists for patient {patient.id} appointment {appointment.id}")
                 return existing_credit
-
+            
             # Get or create wallet
             wallet, created = PatientWallet.objects.get_or_create(
                 patient=patient,
                 defaults={'balance': Decimal('0.00')}
             )
-
+            
             # Create credit transaction
             transaction_obj = PatientTransaction.objects.create(
                 patient=patient,
@@ -316,18 +315,18 @@ class PatientWalletManager:
                 type='credit',
                 remarks=remarks or f"Refund for cancelled appointment on {appointment.appointment_date}"
             )
-
+            
             # Update wallet balance
             wallet.balance += Decimal(str(amount))
             wallet.save()
-
+            
             logger.info(f"Credit added: ₹{amount} to patient {patient.id} for appointment {appointment.id}. New balance: ₹{wallet.balance}")
             return transaction_obj
-
+            
         except Exception as e:
             logger.error(f"Error adding credit to patient {patient.id}: {str(e)}")
             return None
-
+    
     @staticmethod
     @transaction.atomic
     def add_debit(patient, appointment, amount, remarks=None):
@@ -350,12 +349,12 @@ class PatientWalletManager:
                 patient=patient,
                 defaults={'balance': Decimal('0.00')}
             )
-
+            
             # Check if wallet has sufficient balance
             if wallet.balance < Decimal(str(amount)):
                 logger.error(f"Insufficient balance in patient {patient.id} wallet. Required: ₹{amount}, Available: ₹{wallet.balance}")
                 return None
-
+            
             # Create debit transaction
             transaction_obj = PatientTransaction.objects.create(
                 patient=patient,
@@ -364,19 +363,18 @@ class PatientWalletManager:
                 type='debit',
                 remarks=remarks or f"Payment for appointment on {appointment.appointment_date}"
             )
-
+            
             # Update wallet balance
             wallet.balance -= Decimal(str(amount))
             wallet.save()
-
+            
             logger.info(f"Debit added: ₹{amount} from patient {patient.id} for appointment {appointment.id}. New balance: ₹{wallet.balance}")
             return transaction_obj
-
+            
         except Exception as e:
             logger.error(f"Error adding debit to patient {patient.id}: {str(e)}")
             return None
 
-    
 @transaction.atomic
 def handle_appointment_cancellation(appointment, refund_amount):
     """
@@ -390,6 +388,8 @@ def handle_appointment_cancellation(appointment, refund_amount):
         tuple: (success: bool, message: str)
     """
     try:
+        from patients.utils import DoctorEarningsManager
+        
         doctor = appointment.doctor
         patient = appointment.patient
         
@@ -409,20 +409,11 @@ def handle_appointment_cancellation(appointment, refund_amount):
             patient=patient,
             appointment=appointment,
             amount=refund_amount,
-            remarks=f"Refund for cancelled appointment - Doctor: {doctor.id}"
+            remarks=f"Refund for cancelled appointment - Doctor: {doctor.user.get_full_name() or doctor.id}"
         )
         
         if not patient_credit:
             return False, "Failed to credit to patient's wallet."
-        
-        # Create PatientTransaction record for the refund
-        PatientTransaction.objects.create(
-            patient=patient,
-            appointment=appointment,
-            amount=refund_amount,
-            type='credit',
-            remarks=f"Refund for cancelled appointment - Doctor: {doctor.user.get_full_name() or doctor.id}"
-        )
         
         logger.info(f"Successfully transferred ₹{refund_amount} from doctor {doctor.id} to patient {patient.id} for cancelled appointment {appointment.id}")
         return True, f"Successfully refunded ₹{refund_amount} to patient wallet."
@@ -430,4 +421,3 @@ def handle_appointment_cancellation(appointment, refund_amount):
     except Exception as e:
         logger.error(f"Error handling appointment cancellation: {str(e)}")
         return False, f"Error processing refund: {str(e)}"
-    

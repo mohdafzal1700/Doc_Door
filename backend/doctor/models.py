@@ -887,10 +887,8 @@ class Appointment(models.Model):
 
 class Payment(models.Model):
     PAYMENT_METHOD_CHOICES = [
-        ('cash', 'Cash'),
-        ('card', 'Card'),
-        ('upi', 'UPI'),
-        ('bank_transfer', 'Bank Transfer'),
+        ('wallet', 'Wallet'),
+        ('razorpay', 'Razorpay'),
     ]
 
     PAYMENT_STATUS_CHOICES = [
@@ -905,7 +903,7 @@ class Payment(models.Model):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
     status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
-    
+    failure_reason = models.TextField(blank=True, null=True)
     razorpay_order_id = models.CharField(max_length=100, blank=True, null=True)
     razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
     razorpay_signature = models.CharField(max_length=200, blank=True, null=True) 
@@ -1194,11 +1192,13 @@ class DoctorWallet(models.Model):
 
     def __str__(self):
         return f"{self.doctor.full_name} Wallet - ₹{self.balance}"
-    
+
+from django.utils import timezone
 class PatientWallet(models.Model):
     patient=models.OneToOneField('Patient',on_delete=models.CASCADE, related_name='wallet')
     balance=models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
-
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
 class PatientTransaction(models.Model):
     """Model to track patient wallet transactions"""

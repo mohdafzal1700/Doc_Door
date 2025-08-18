@@ -1989,16 +1989,43 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from django.shortcuts import get_object_or_404
+from django.db import transaction
+from django.utils import timezone
+from django.conf import settings
+import razorpay
+import hmac
+import hashlib
+import logging
+from decimal import Decimal
+
+from .utils import PatientWalletManager
+from patients.utils import DoctorEarningsManager
+from chat.utils import create_and_send_notification
 import razorpay
 from django.conf import settings
 from patients.serializers import PaymentInitiationSerializer,PaymentVerificationSerializer,PaymentSerializer  
+import logging
+import hmac
+import hashlib
+from decimal import Decimal
+
+
+
+
+logger = logging.getLogger(__name__)
+
 
 class PaymentInitiationView(APIView):
-    """Initiate payment for confirmed appointment"""
+    """Initiate payment for confirmed appointment - supports both wallet and razorpay"""
     permission_classes = [IsAuthenticated]
 
     def post(self, request, appointment_id):
-        """Create Razorpay order for payment"""
+        """Create payment order based on selected method"""
         try:
             # Get appointment and verify ownership
             appointment = get_object_or_404(
@@ -2020,16 +2047,146 @@ class PaymentInitiationView(APIView):
                     'message': 'Payment already completed for this appointment'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
+            # Validate input with better error handling
+            serializer = PaymentInitiationSerializer(data=request.data)
+            if not serializer.is_valid():
+                # Log the validation errors for debugging
+                logger.error(f"Payment initiation validation failed: {serializer.errors}")
+                return Response({
+                    'success': False,
+                    'message': 'Invalid payment data',
+                    'field_errors': serializer.errors,
+                    'received_data': request.data  # Add this for debugging
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            payment_method = serializer.validated_data['method']
+
+            # Validate payment method
+            if payment_method not in ['wallet', 'razorpay']:
+                return Response({
+                    'success': False,
+                    'message': f'Invalid payment method: {payment_method}. Must be "wallet" or "razorpay"'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Get or create payment record
             payment, created = Payment.objects.get_or_create(
                 appointment=appointment,
                 defaults={
                     'amount': appointment.total_fee,
-                    'method': 'razorpay',
+                    'method': payment_method,
                     'status': 'pending'
                 }
             )
 
+            # Update method if payment exists but method changed
+            if not created and payment.method != payment_method:
+                payment.method = payment_method
+                payment.status = 'pending'
+                payment.failure_reason = None
+                payment.save()
+
+            # Handle wallet payment
+            if payment_method == 'wallet':
+                return self._process_wallet_payment(payment, appointment)
+
+            # Handle Razorpay payment
+            elif payment_method == 'razorpay':
+                return self._process_razorpay_payment(payment, appointment)
+
+        except Exception as e:
+            logger.error(f"Error initiating payment for appointment {appointment_id}: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to initiate payment',
+                'error': str(e)  # Include error for debugging
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _process_wallet_payment(self, payment, appointment):
+        """Process immediate wallet payment"""
+        try:
+            with transaction.atomic():
+                # Get or create wallet first
+                wallet, _ = PatientWallet.objects.get_or_create(
+                    patient=appointment.patient,
+                    defaults={'balance': Decimal('0.00')}
+                )
+
+                # Check wallet balance
+                if wallet.balance < payment.amount:
+                    payment.status = 'failed'
+                    payment.failure_reason = f"Insufficient wallet balance. Available: ₹{wallet.balance}, Required: ₹{payment.amount}"
+                    payment.save()
+                    
+                    return Response({
+                        'success': False,
+                        'message': f"Insufficient wallet balance. Available: ₹{wallet.balance}, Required: ₹{payment.amount}",
+                        'wallet_balance': float(wallet.balance),
+                        'required_amount': float(payment.amount)
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Deduct amount from wallet using existing PatientWalletManager
+                wallet_transaction = PatientWalletManager.add_debit(
+                    patient=appointment.patient,
+                    appointment=appointment,
+                    amount=payment.amount,
+                    remarks=f"Payment for appointment with Dr. {appointment.doctor.user.get_full_name()}"
+                )
+
+                if not wallet_transaction:
+                    payment.status = 'failed'
+                    payment.failure_reason = "Wallet transaction failed"
+                    payment.save()
+                    
+                    return Response({
+                        'success': False,
+                        'message': 'Wallet transaction failed. Please try again.'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+                # Update payment status
+                payment.status = 'success'
+                payment.paid_at = timezone.now()
+                payment.save()
+
+                # Update appointment
+                appointment.is_paid = True
+                appointment.save()
+
+                # Add credit to doctor
+                doctor_earning = DoctorEarningsManager.add_credit(
+                    doctor=appointment.doctor,
+                    appointment=appointment,
+                    amount=payment.amount,
+                    remarks=f"Wallet payment from {appointment.patient.user.get_full_name()}"
+                )
+
+                # Send notifications
+                self._send_payment_notifications(appointment, payment)
+
+                return Response({
+                    'success': True,
+                    'message': 'Wallet payment completed successfully',
+                    'data': {
+                        'payment_id': payment.id,
+                        'method': 'wallet',
+                        'amount': float(payment.amount),
+                        'paid_at': payment.paid_at.isoformat(),
+                        'wallet_transaction_id': wallet_transaction.id,
+                        'doctor_credit_added': doctor_earning is not None,
+                        'remaining_balance': float(wallet.balance - payment.amount)
+                    }
+                }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            logger.error(f"Wallet payment error: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Wallet payment failed',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _process_razorpay_payment(self, payment, appointment):
+        """Process Razorpay payment initiation"""
+        try:
             # Create Razorpay order
             order = payment.create_razorpay_order()
             if not order:
@@ -2040,18 +2197,19 @@ class PaymentInitiationView(APIView):
 
             return Response({
                 'success': True,
-                'message': 'Payment initiated successfully',
+                'message': 'Razorpay payment initiated successfully',
                 'data': {
-                    'key': settings.RAZORPAY_KEY_ID,  
+                    'key': settings.RAZORPAY_KEY_ID,
                     'payment_id': payment.id,
                     'razorpay_order_id': order['id'],
-                    'order_id': order['id'],  
-                    'amount': int(payment.amount * 100),  
+                    'order_id': order['id'],
+                    'amount': int(payment.amount * 100),  # Amount in paise
                     'currency': 'INR',
+                    'method': 'razorpay',
                     'appointment': {
                         'id': appointment.id,
                         'doctor_name': f"{appointment.doctor.user.first_name} {appointment.doctor.user.last_name}",
-                        'appointment_date': appointment.appointment_date,
+                        'appointment_date': appointment.appointment_date.isoformat(),
                         'slot_time': appointment.slot_time.strftime('%H:%M'),
                         'service': appointment.service.service_name if appointment.service else None
                     }
@@ -2059,23 +2217,43 @@ class PaymentInitiationView(APIView):
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            logger.error(f"Error initiating payment for appointment {appointment_id}: {str(e)}")
+            logger.error(f"Razorpay payment initiation error: {str(e)}")
             return Response({
                 'success': False,
-                'message': 'Failed to initiate payment'
+                'message': 'Failed to initiate Razorpay payment',
+                'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-from patients.utils import DoctorEarningsManager
-from chat.utils import create_and_send_notification
+    def _send_payment_notifications(self, appointment, payment):
+        """Send notifications after successful payment"""
+        try:
+            # Patient notification
+            create_and_send_notification(
+                user_id=appointment.patient.user.id,
+                message=f"Payment successful! Your appointment with Dr. {appointment.doctor.user.get_full_name()} on {appointment.appointment_date.strftime('%B %d, %Y')} at {appointment.slot_time.strftime('%I:%M %p')} is confirmed.",
+                notification_type='appointment',
+                related_object_id=str(appointment.id),
+                sender_id=None
+            )
+
+            # Doctor notification
+            create_and_send_notification(
+                user_id=appointment.doctor.user.id,
+                message=f"New appointment confirmed! {appointment.patient.user.get_full_name()} has paid ₹{payment.amount} for appointment on {appointment.appointment_date.strftime('%B %d, %Y')} at {appointment.slot_time.strftime('%I:%M %p')}.",
+                notification_type='appointment',
+                related_object_id=str(appointment.id),
+                sender_id=appointment.patient.user.id
+            )
+        except Exception as e:
+            logger.error(f"Error sending notifications: {str(e)}")
+
 
 class PaymentVerificationView(APIView):
-    """Verify and complete payment"""
+    """Verify and complete Razorpay payment"""
     permission_classes = [IsAuthenticated]
-    
+
     def post(self, request, appointment_id):
-        """Verify Razorpay payment and update appointment status"""
-        
-        
+        """Verify Razorpay payment signature and update payment status"""
         try:
             # Get appointment and verify ownership
             appointment = get_object_or_404(
@@ -2083,7 +2261,7 @@ class PaymentVerificationView(APIView):
                 id=appointment_id,
                 patient__user=request.user
             )
-            
+
             # Get payment record
             try:
                 payment = Payment.objects.get(appointment=appointment)
@@ -2092,7 +2270,14 @@ class PaymentVerificationView(APIView):
                     'success': False,
                     'message': 'Payment record not found'
                 }, status=status.HTTP_404_NOT_FOUND)
-            
+
+            # Only verify Razorpay payments
+            if payment.method != 'razorpay':
+                return Response({
+                    'success': False,
+                    'message': 'Payment verification only applicable for Razorpay payments'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
             # Validate payment data
             serializer = PaymentVerificationSerializer(data=request.data)
             if not serializer.is_valid():
@@ -2101,76 +2286,138 @@ class PaymentVerificationView(APIView):
                     'message': 'Invalid payment verification data',
                     'field_errors': serializer.errors
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Verify that the order ID matches
+
+            # Verify order ID match
             if payment.razorpay_order_id != serializer.validated_data['razorpay_order_id']:
                 return Response({
                     'success': False,
                     'message': 'Order ID mismatch'
                 }, status=status.HTTP_400_BAD_REQUEST)
-            
-            # Update payment record with verification details
+
+            # Verify Razorpay signature
+            if not self._verify_razorpay_signature(serializer.validated_data):
+                payment.status = 'failed'
+                payment.failure_reason = 'Invalid payment signature'
+                payment.save()
+                return Response({
+                    'success': False,
+                    'message': 'Payment verification failed'
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Complete payment
             with transaction.atomic():
+                # Update payment record
                 payment.razorpay_payment_id = serializer.validated_data['razorpay_payment_id']
                 payment.razorpay_signature = serializer.validated_data['razorpay_signature']
                 payment.status = 'success'
                 payment.paid_at = timezone.now()
                 payment.save()
-                
-                
-                #Adding amount to the Doctor account
+
+                # Add credit to doctor
                 doctor_earning = DoctorEarningsManager.add_credit(
                     doctor=appointment.doctor,
                     appointment=appointment,
                     amount=payment.amount,
-                    remarks=f"Payment received from {appointment.patient.user.get_full_name()} for appointment on {appointment.appointment_date}"
+                    remarks=f"Razorpay payment from {appointment.patient.user.get_full_name()}"
                 )
-                
-                if not doctor_earning:
-                    logger.warning(f"Failed to add credit to doctor for appointment {appointment_id}")
-                
-                
+
                 # Update appointment
                 appointment.is_paid = True
                 appointment.save()
-                
-            patient_notification = create_and_send_notification(
-                user_id=appointment.patient.user.id,
-                message=f"Payment successful! Your appointment with Dr. {appointment.doctor.user.get_full_name()} on {appointment.appointment_date.strftime('%B %d, %Y')} at {appointment.slot_time.strftime('%I:%M %p')} is confirmed.",
-                notification_type='appointment',
-                related_object_id=str(appointment.id),
-                sender_id=None
-            )
-            
-            # Create notification for DOCTOR
-            doctor_notification = create_and_send_notification(
-                user_id=appointment.doctor.user.id,
-                message=f"New appointment confirmed! {appointment.patient.user.get_full_name()} has paid ₹{payment.amount} for appointment on {appointment.appointment_date.strftime('%B %d, %Y')} at {appointment.slot_time.strftime('%I:%M %p')}.",
-                notification_type='appointment',
-                related_object_id=str(appointment.id),
-                sender_id=appointment.patient.user.id
-            )
-            
-            # Send confirmation (you can add email/SMS notification here)
-            logger.info(f"Payment completed for appointment {appointment_id}")
-            
+
+                # Send notifications
+                self._send_payment_notifications(appointment, payment)
+
             return Response({
                 'success': True,
                 'message': 'Payment verified and completed successfully',
                 'data': {
                     'payment_id': payment.id,
+                    'method': 'razorpay',
                     'amount': float(payment.amount),
                     'paid_at': payment.paid_at.isoformat(),
                     'appointment_status': appointment.status,
                     'doctor_credit_added': doctor_earning is not None
                 }
             }, status=status.HTTP_200_OK)
-            
+
         except Exception as e:
             logger.error(f"Error verifying payment for appointment {appointment_id}: {str(e)}")
             return Response({
                 'success': False,
-                'message': 'Payment verification failed'
+                'message': 'Payment verification failed',
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    def _verify_razorpay_signature(self, payment_data):
+        """Verify Razorpay payment signature"""
+        try:
+            # Create signature string
+            signature_string = f"{payment_data['razorpay_order_id']}|{payment_data['razorpay_payment_id']}"
+            
+            # Generate signature
+            generated_signature = hmac.new(
+                settings.RAZORPAY_KEY_SECRET.encode('utf-8'),
+                signature_string.encode('utf-8'),
+                hashlib.sha256
+            ).hexdigest()
+            
+            return hmac.compare_digest(generated_signature, payment_data['razorpay_signature'])
+        except Exception as e:
+            logger.error(f"Error verifying Razorpay signature: {str(e)}")
+            return False
+
+    def _send_payment_notifications(self, appointment, payment):
+        """Send notifications after successful payment"""
+        try:
+            # Patient notification
+            create_and_send_notification(
+                user_id=appointment.patient.user.id,
+                message=f"Payment successful! Your appointment with Dr. {appointment.doctor.user.get_full_name()} on {appointment.appointment_date.strftime('%B %d, %Y')} at {appointment.slot_time.strftime('%I:%M %p')} is confirmed.",
+                notification_type='appointment',
+                related_object_id=str(appointment.id),
+                sender_id=None
+            )
+
+            # Doctor notification
+            create_and_send_notification(
+                user_id=appointment.doctor.user.id,
+                message=f"New appointment confirmed! {appointment.patient.user.get_full_name()} has paid ₹{payment.amount} for appointment on {appointment.appointment_date.strftime('%B %d, %Y')} at {appointment.slot_time.strftime('%I:%M %p')}.",
+                notification_type='appointment',
+                related_object_id=str(appointment.id),
+                sender_id=appointment.patient.user.id
+            )
+        except Exception as e:
+            logger.error(f"Error sending notifications: {str(e)}")
+
+
+class Wallet(APIView):
+    """Get wallet balance and details"""
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            # Get or create wallet for the patient
+            patient = request.user.patient_profile  # or however you access the patient profile
+            wallet, created = PatientWallet.objects.get_or_create(
+                patient=patient,
+                defaults={'balance': Decimal('0.00')}
+            )
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'balance': float(wallet.balance),
+                    'currency': 'INR',
+                    'last_updated': wallet.updated_at.isoformat() if hasattr(wallet, 'updated_at') else None
+                }
+            })
+        except Exception as e:
+            logger.error(f"Error fetching wallet: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to fetch wallet',
+                'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
 
