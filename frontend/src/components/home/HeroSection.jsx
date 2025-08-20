@@ -157,14 +157,9 @@ const HeroSection = () => {
         <div
           className={`mt-20 max-w-4xl mx-auto transition-all duration-1000 delay-1500 ${isVisible ? "opacity-100 translate-y-0" : "opacity-0 translate-y-10"}`}
         >
-          <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg p-8 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 hover:shadow-2xl transition-all duration-300">
-            <div className="text-center mb-6">
-              <h3 className="text-2xl font-semibold text-gray-900 dark:text-white mb-2">Find Your Perfect Doctor</h3>
-              <p className="text-gray-600 dark:text-gray-300">
-                Search by location and specialty to find the best healthcare professionals near you
-              </p>
-            </div>
-
+          {/* <div className="bg-white/80 dark:bg-gray-800/80 backdrop-blur-lg p-8 rounded-2xl shadow-xl border border-gray-100 dark:border-gray-700 hover:shadow-2xl transition-all duration-300">
+           */}
+{/* 
             <div className="grid md:grid-cols-2 gap-6 mb-6">
               <div className="group">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
@@ -203,18 +198,18 @@ const HeroSection = () => {
                   <option value="oncology">Oncology</option>
                 </select>
               </div>
-            </div>
+            </div> */}
 
-            <button
+            {/* <button
               onClick={() => navigate("/find-doctor")}
               className="group w-full px-8 py-4 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-xl hover:from-purple-700 hover:to-blue-700 transform hover:scale-105 transition-all duration-300 font-semibold text-lg shadow-lg hover:shadow-xl relative overflow-hidden"
             >
               <div className="absolute inset-0 bg-white/20 transform -skew-x-12 -translate-x-full group-hover:translate-x-full transition-transform duration-700"></div>
               <span className="relative z-10">Search Doctors</span>
-            </button>
+            </button> */}
           </div>
         </div>
-      </div>
+      {/* </div> */}
     </section>
   )
 }

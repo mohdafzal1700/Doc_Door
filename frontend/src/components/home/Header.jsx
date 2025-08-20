@@ -28,7 +28,7 @@ const Header = () => {
   const navItems = [
     { name: "Home", path: ROUTES.HOME, icon: Home },
     { name: "Find Doctor", path: ROUTES.FIND_DOCTOR, icon: Search },
-    { name: "Video Consultation", path: ROUTES.CONSULTATION, icon: Video },
+    
     { name: "About Us", path: ROUTES.ABOUT, icon: Info },
   ]
 

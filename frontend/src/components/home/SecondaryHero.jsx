@@ -46,7 +46,7 @@ const SecondaryHero = () => {
             </div>
 
             <button
-              onClick={() => navigate("/find-doctor")}
+              onClick={() => navigate("/patient/nearbyDoctorFinder")}
               className="inline-flex items-center px-8 py-4 bg-white text-purple-600 rounded-lg font-semibold hover:bg-gray-100 transform hover:scale-105 transition-all duration-200 shadow-lg hover:shadow-xl"
             >
               Get Started
@@ -84,4 +84,3 @@ const SecondaryHero = () => {
 }
 
 export default SecondaryHero
-

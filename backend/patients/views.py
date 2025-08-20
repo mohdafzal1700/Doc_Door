@@ -1,49 +1,70 @@
-from datetime import timedelta
+from datetime import timedelta, datetime
 from io import BytesIO
 import logging
+import os
+import hmac
+import hashlib
+import traceback
+from decimal import Decimal
+from math import radians, cos, sin, asin, sqrt, degrees
 
-from django.shortcuts import render, get_object_or_404
+from PIL import Image
+import razorpay
+import cloudinary
+import cloudinary.uploader
+from cloudinary.exceptions import Error as CloudinaryError
+
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
-from patients.utils import DoctorEarning
+from django.http import Http404
 from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import transaction, models
 from django.db.models import Q
-
-from .utils import handle_appointment_cancellation, PatientWalletManager
-from math import radians, cos, sin, asin, sqrt
-from datetime import datetime
-
-from django.http import Http404
-from django.db import transaction
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+from django.conf import settings
+from django.contrib.auth import get_user_model
 
 # REST Framework
 from rest_framework import generics, status, permissions
 from rest_framework.views import APIView
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import AuthenticationFailed
-
-from doctor.models import PatientWallet,PatientTransaction
-from patients.serializers import PatientWalletSerializer,PatientTransactionSerializer
-
-import traceback
-
 
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
+# Google Auth
+from google.oauth2 import id_token
+from google.auth.transport import requests
 
-import cloudinary
-import cloudinary.uploader
-from cloudinary.exceptions import Error as CloudinaryError
+# Project utils
+from patients.utils import DoctorEarning, DoctorEarningsManager
+from .utils import handle_appointment_cancellation, PatientWalletManager
+from chat.utils import create_and_send_notification
 
+# Models
+from doctor.models import (
+    User,
+    EmailOTP,
+    Patient,
+    Address,
+    Medical_Record,
+    Appointment,
+    Payment,
+    Schedules,
+    Doctor,
+    PatientLocation,
+    DoctorLocation,
+    PatientWallet,
+    PatientTransaction,
+    DoctorReview,
+)
 
-from PIL import Image
-
-
-from doctor.models import User, EmailOTP, Patient, Address, Medical_Record,Appointment,Payment,Schedules,Doctor,PatientLocation,DoctorLocation
+# Serializers
 from doctor.serializers import DoctorProfileSerializer
 
 from patients.serializers import (
@@ -63,14 +84,17 @@ from patients.serializers import (
     MedicalRecordSerializer,
     BookingDoctorDetailSerializer,
     PaymentSerializer,
-    
     PatientLocationSerializer,
     DoctorLocationSerializer,
     PatientLocationUpdateSerializer,
-    
+    PatientWalletSerializer,
+    PatientTransactionSerializer,
+    PaymentInitiationSerializer,
+    PaymentVerificationSerializer,
+    PatientReviewCreateSerializer,
+    DoctorReviewSerializer,
 )
-from google.oauth2 import id_token
-from google.auth.transport import requests
+
 # Logger setup
 logger = logging.getLogger(__name__)
 
@@ -915,16 +939,16 @@ class ProfilePictureView(APIView):
             if not cloudinary_url:
                 return None
             
-            # Cloudinary URLs have format: .../image/upload/v{version}/{public_id}.{format}
+            
             if '/image/upload/' in cloudinary_url:
                 parts = cloudinary_url.split('/image/upload/')
                 if len(parts) > 1:
-                    # Get everything after /image/upload/v{version}/
+                    
                     after_upload = parts[1]
-                    # Remove version if present (v1234567890/)
+                    
                     if after_upload.startswith('v') and '/' in after_upload:
                         after_upload = after_upload.split('/', 1)[1]
-                    # Remove file extension
+                    
                     public_id = after_upload.rsplit('.', 1)[0]
                     return public_id
             return None
@@ -935,7 +959,7 @@ class ProfilePictureView(APIView):
     def _update_user_profile(self, user, url):
         """Update user profile with new picture URL"""
         try:
-            # Update user.profile_url if it exists
+            
             if hasattr(user, 'profile_url'):
                 user.profile_url = url
                 user.save()
@@ -1809,10 +1833,6 @@ class CurrentPatientLocationView(generics.RetrieveAPIView):
             
             
 
-# View to find nearby doctors using bounding box filtering + Haversine distance calculation
-
-from math import radians, cos, sin, asin, sqrt, degrees
-
 
 class SearchNearbyDoctorsView(generics.ListAPIView):
     """Find NearBy doctors using bounding box filtering +
@@ -1989,33 +2009,6 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-from django.shortcuts import get_object_or_404
-from django.db import transaction
-from django.utils import timezone
-from django.conf import settings
-import razorpay
-import hmac
-import hashlib
-import logging
-from decimal import Decimal
-
-from .utils import PatientWalletManager
-from patients.utils import DoctorEarningsManager
-from chat.utils import create_and_send_notification
-import razorpay
-from django.conf import settings
-from patients.serializers import PaymentInitiationSerializer,PaymentVerificationSerializer,PaymentSerializer  
-import logging
-import hmac
-import hashlib
-from decimal import Decimal
-
-
-
 
 logger = logging.getLogger(__name__)
 
@@ -2459,19 +2452,14 @@ class PaymentStatusView(APIView):
                 'message': 'Failed to get payment status'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-from doctor.models import DoctorReview
-from patients.serializers import PatientReviewCreateSerializer , DoctorReviewSerializer      
+    
 
 class PatientReviewCreateView(APIView):
     """Patient submits a new review"""
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
-        # Debug: Print user and check patient relationship
-        print(f"User: {request.user}")
-        print(f"User ID: {request.user.id}")
-        print(f"User Role: {request.user.role}")
-        print(f"Request Data: {request.data}")
+        
         
         # Check if user is a patient by role
         if request.user.role != 'patient':
@@ -2544,15 +2532,14 @@ class PatientReviewCreateView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             
-from django.db.models import Avg
-from django.db import models        
+
+    
 class DoctorReviewsListView(APIView):
     """List all approved reviews for a specific doctor"""
     
     def get(self, request, doctor_id):
         try:
-            # The doctor_id parameter might actually be a user_id
-            # First try to get the doctor by their own ID
+            
             doctor = None
             
             try:
@@ -2680,9 +2667,9 @@ class Transaction(APIView):
     
     def get(self, request):
         try:
-            # Fix: Use patient_profile instead of Patient
+            
             transaction = request.user.patient_profile.transactions.all()
-            # Fix: Correct serializer name (remove typo)
+            
             serializer = PatientTransactionSerializer(transaction, many=True)
             
             return Response({
@@ -2697,31 +2684,6 @@ class Transaction(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
-import os
-
-
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import AllowAny
-from rest_framework import status
-from google.oauth2 import id_token
-from google.auth.transport import requests
-from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import get_user_model
-from django.conf import settings
-import logging
-import os
-
-User = get_user_model()
-logger = logging.getLogger(__name__)
-
 
 @method_decorator(csrf_exempt, name='dispatch')
 class GoogleLoginView(APIView):
@@ -2734,6 +2696,7 @@ class GoogleLoginView(APIView):
             # Extract data from request
             id_token_str = request.data.get('id_token') or request.data.get('credential')
             role = request.data.get('role', 'patient')
+            logger.info(f"Received Google login request with role: {role}")
 
             # Validate required fields
             if not id_token_str:
@@ -2759,9 +2722,7 @@ class GoogleLoginView(APIView):
                     )
 
                 idinfo = id_token.verify_oauth2_token(
-                    id_token_str,
-                    requests.Request(),
-                    google_client_id
+                    id_token_str, requests.Request(), google_client_id
                 )
             except ValueError as e:
                 logger.error(f'Invalid Google ID token: {str(e)}')
@@ -2782,25 +2743,37 @@ class GoogleLoginView(APIView):
             last_name = idinfo.get('family_name', '')
             name = idinfo.get('name', f'{first_name} {last_name}'.strip())
 
-            # Check if user already exists
+            
             try:
                 user = User.objects.get(email=email)
                 created = False
+                logger.info(f"Existing user found: {email}, current role: {getattr(user, 'role', 'None')}")
+
                 
-                # IMPORTANT: Ensure user is active
                 if not user.is_active:
                     user.is_active = True
                     user.save()
                     logger.info(f'Activated user account for Google login: {email}')
+
                 
-                # Check if existing user has different role
-                if hasattr(user, 'role') and user.role != role:
+                existing_role = getattr(user, 'role', None)
+                if existing_role and existing_role != role:
+                    logger.warning(f"Role conflict for {email}: existing={existing_role}, requested={role}")
                     return Response(
-                        {'error': f'Already registered as {user.role}'},
+                        {'error': f'Already registered as {existing_role}'},
                         status=status.HTTP_400_BAD_REQUEST
                     )
+
+                
+                if not existing_role or existing_role != role:
+                    logger.info(f"Updating user role for {email} from {existing_role} to {role}")
+                    user.role = role
+                    user.save()
+                    logger.info(f"User role updated to: {user.role}")
+
             except User.DoesNotExist:
-                # Create new user - ENSURE is_active=True
+                
+                logger.info(f"Creating new user {email} with role: {role}")
                 user = User.objects.create_user(
                     email=email,
                     first_name=first_name,
@@ -2810,12 +2783,31 @@ class GoogleLoginView(APIView):
                 )
                 created = True
 
-            # Set role if your User model has a role field
-            if hasattr(user, 'role'):
+                
+                user.role = role
+                user.save()  # Make sure to save after setting role
+                logger.info(f"New user created with role: {user.role}")
+
+            # VERIFY the role is actually set correctly
+            user.refresh_from_db()  # Refresh from database to ensure we have latest data
+            final_role = getattr(user, 'role', None)
+            logger.debug(f"Final user role after save for {email}: {final_role}")
+            
+            if final_role != role:
+                logger.error(f"Role not saved correctly for {email}! Expected: {role}, Got: {final_role}")
+                # Force set the role again
                 user.role = role
                 user.save()
+                user.refresh_from_db()
+                logger.info(f"After forced save, role is: {getattr(user, 'role', None)}")
 
-            # CLEAR ANY EXISTING REFRESH TOKENS for this user (prevent conflicts)
+            # Create doctor profile if user is a doctor and doesn't have one
+            if role == 'doctor':
+                if not hasattr(user, 'doctor_profile') or not user.doctor_profile:
+                    logger.info(f"Creating doctor profile for {email}")
+                    
+
+            
             try:
                 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
                 OutstandingToken.objects.filter(user=user).delete()
@@ -2824,33 +2816,30 @@ class GoogleLoginView(APIView):
                 # Token blacklist not installed
                 pass
             except Exception as e:
-                logger.warning(f'Could not clear existing tokens: {e}')
+                logger.warning(f'Could not clear existing tokens for {email}: {e}')
 
             # Generate NEW JWT tokens
             refresh = RefreshToken.for_user(user)
             access_token = refresh.access_token
-
             logger.info(f'Generated fresh tokens for user: {email}')
-            print(f"🔑 Fresh tokens generated for: {email}")
-            print(f"👤 User active status: {user.is_active}")
-            print(f"🆔 User ID: {user.id}")
+            logger.debug(f"User active status: {user.is_active}, ID: {user.id}, Role: {getattr(user, 'role', 'None')}")
 
-            # Prepare user data
+            
             user_data = {
                 'id': user.id,
                 'email': user.email,
                 'first_name': user.first_name,
                 'last_name': user.last_name,
                 'name': user.first_name or name,
-                'role': getattr(user, 'role', role),
+                'role': getattr(user, 'role', role),  # Use the actual role from user object
                 'is_active': user.is_active,
                 'is_new_user': created
             }
 
-            # Add doctor profile if user is a doctor
+            
             if role == 'doctor':
                 try:
-                    if hasattr(user, 'doctor_profile'):
+                    if hasattr(user, 'doctor_profile') and user.doctor_profile:
                         doctor_profile = user.doctor_profile
                         user_data['doctor_profile'] = {
                             'verification_status': getattr(doctor_profile, 'verification_status', 'incomplete'),
@@ -2868,7 +2857,7 @@ class GoogleLoginView(APIView):
                             'is_license_done': False,
                         }
                 except Exception as profile_error:
-                    logger.error(f'Error fetching doctor profile: {profile_error}')
+                    logger.error(f'Error fetching doctor profile for {email}: {profile_error}')
                     user_data['doctor_profile'] = {
                         'verification_status': 'incomplete',
                         'is_profile_setup_done': False,
@@ -2876,6 +2865,9 @@ class GoogleLoginView(APIView):
                         'is_certification_done': False,
                         'is_license_done': False,
                     }
+
+            # Debug log the final user data
+            logger.debug(f"Returning user data for {email}: {user_data}")
 
             # Consistent response structure
             response_data = {
@@ -2891,17 +2883,15 @@ class GoogleLoginView(APIView):
 
             # CLEAR OLD COOKIES FIRST
             self.clear_auth_cookies(response)
-            
+
             # Set NEW HTTP-only cookies
             self.set_auth_cookies(response, access_token, refresh)
 
-            logger.info(f'Successful Google OAuth login for user: {email}')
-            
+            logger.info(f'Successful Google OAuth login for user: {email} as {role}')
             return response
 
         except Exception as e:
-            logger.error(f'Unexpected error in GoogleLoginView: {str(e)}')
-            print(f"❌ Google auth error: {e}")
+            logger.error(f'Unexpected error in GoogleLoginView: {str(e)}', exc_info=True)
             return Response(
                 {'error': 'An unexpected error occurred'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -2911,7 +2901,7 @@ class GoogleLoginView(APIView):
         """Clear existing auth cookies"""
         response.delete_cookie('access_token', path='/')
         response.delete_cookie('refresh_token', path='/')
-        print("🧹 Cleared old auth cookies")
+        logger.debug("Cleared old auth cookies")
 
     def set_auth_cookies(self, response, access_token, refresh_token):
         """Set secure HTTP-only cookies for authentication"""
@@ -2937,6 +2927,5 @@ class GoogleLoginView(APIView):
             max_age=7 * 24 * 60 * 60  # 7 days
         )
 
-        print(f"🍪 New access token cookie set: {str(access_token)[:20]}...")
-        print(f"🍪 New refresh token cookie set: {str(refresh_token)[:20]}...")
-
+        logger.debug(f"New access token cookie set: {str(access_token)[:20]}...")
+        logger.debug(f"New refresh token cookie set: {str(refresh_token)[:20]}...")

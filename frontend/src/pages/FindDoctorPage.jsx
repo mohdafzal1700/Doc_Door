@@ -355,14 +355,7 @@ export default function FindDoctorPage() {
                                             <Calendar className="mr-2 h-4 w-4" />
                                             Book
                                         </Button>
-                                        <Button 
-                                            variant="outline" 
-                                            className="flex-1"
-                                            onClick={() => handleSendMessage(doctor.id)}
-                                        >
-                                            <MessageCircle className="mr-2 h-4 w-4" />
-                                            Message
-                                        </Button>
+                                        
                                     </div>
                                 </div>
                             </div>
