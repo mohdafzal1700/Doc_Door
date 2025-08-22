@@ -32,7 +32,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.exceptions import AuthenticationFailed
-
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
@@ -94,6 +94,7 @@ from patients.serializers import (
     PatientReviewCreateSerializer,
     DoctorReviewSerializer,
 )
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -146,13 +147,9 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             token = response.data
             access_token = token['access']
             refresh_token = token["refresh"]
-            
-            logger.info("Tokens generated successfully")
-            
-                                    
+            logger.info("Tokens generated successfully")                        
             res = Response(status=status.HTTP_200_OK)
                         
-            
             res.data = {
                 "success": True,
                 "message": "Patient login successful",
@@ -168,7 +165,6 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                     "phone_number": user.phone_number
                 }
             }
-            
             
             res.set_cookie(
                 key="access_token",
@@ -208,27 +204,27 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 {"success": False, "message": f"An error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+            
+            
 class CustomTokenRefreshView(TokenRefreshView):
     """Cookie-based Token Refresh View"""
     permission_classes = [permissions.AllowAny]
     
     def post(self, request, *args, **kwargs):
         try:
-            logger.info("🔄 Token refresh attempt")
+            logger.info(" Token refresh attempt")
             logger.info(f"Request cookies: {list(request.COOKIES.keys())}")
             
             # Get refresh token from cookies
             refresh_token = request.COOKIES.get("refresh_token")
             if not refresh_token:
-                logger.warning("❌ No refresh token found in cookies")
+                logger.warning(" No refresh token found in cookies")
                 return Response(
                     {"success": False, "message": "Refresh token not found in cookies"},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
             
-            
             try:
-                from rest_framework_simplejwt.serializers import TokenRefreshSerializer
                 
                 serializer = TokenRefreshSerializer(data={'refresh': refresh_token})
                 if serializer.is_valid():
@@ -241,7 +237,7 @@ class CustomTokenRefreshView(TokenRefreshView):
                     if new_refresh_token:
                         new_refresh_token = str(new_refresh_token)
                     
-                    logger.info("✅ Token refresh successful")
+                    logger.info(" Token refresh successful")
                     
                     # Create response
                     response = Response({
@@ -276,21 +272,21 @@ class CustomTokenRefreshView(TokenRefreshView):
                     return response
                     
                 else:
-                    logger.warning(f"❌ Token refresh validation failed: {serializer.errors}")
+                    logger.warning(f" Token refresh validation failed: {serializer.errors}")
                     return Response(
                         {"success": False, "message": "Invalid refresh token"},
                         status=status.HTTP_401_UNAUTHORIZED
                     )
                     
             except Exception as token_error:
-                logger.error(f"❌ Token processing error: {str(token_error)}")
+                logger.error(f" Token processing error: {str(token_error)}")
                 return Response(
                     {"success": False, "message": "Token refresh failed"},
                     status=status.HTTP_401_UNAUTHORIZED
                 )
                 
         except Exception as e:
-            logger.error(f"❌ Token refresh error: {str(e)}")
+            logger.error(f" Token refresh error: {str(e)}")
             import traceback
             traceback.print_exc()
             return Response(
@@ -328,7 +324,6 @@ class RegisterUserView(generics.CreateAPIView):
 
 
 
-
 class EmailOTPVerifyView(generics.GenericAPIView):
     """Verify Emil OTP"""
     
@@ -359,7 +354,6 @@ class EmailOTPVerifyView(generics.GenericAPIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     
-    
 class ResendOTPView(generics.GenericAPIView):
     """ If the user did not get OTP try  Resent OTP """
     
@@ -381,8 +375,6 @@ class ResendOTPView(generics.GenericAPIView):
             'message': 'Failed to resend OTP.',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-        
-        
         
         
 class ForgotPasswordView(generics.GenericAPIView):
@@ -407,8 +399,6 @@ class ForgotPasswordView(generics.GenericAPIView):
         }, status=status.HTTP_400_BAD_REQUEST)
         
         
-        
-        
 class VerifyForgotPasswordOTPView(generics.GenericAPIView):
     """Verify and complete ForgetPassword"""
     
@@ -429,7 +419,6 @@ class VerifyForgotPasswordOTPView(generics.GenericAPIView):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
-
 class ResetPasswordView(generics.GenericAPIView):
     """Verify and complete password"""
     
@@ -437,8 +426,6 @@ class ResetPasswordView(generics.GenericAPIView):
 
     def post(self, request, *args, **kwargs):
         logger.info(f"Reset password request data: {request.data}")
-        
-        
         serializer = self.get_serializer(data=request.data)
 
         if serializer.is_valid():
@@ -459,7 +446,6 @@ class ResetPasswordView(generics.GenericAPIView):
 
         logger.error(f"Password reset validation errors: {serializer.errors}")
         
-        
         return Response({
             'success': False,
             'errors': serializer.errors,
@@ -469,7 +455,7 @@ class ResetPasswordView(generics.GenericAPIView):
 class CustomLogoutView(APIView):
     """Custom logout and blacklisting the Refresh token"""
     
-    permission_classes = [permissions.AllowAny]  # Changed from IsAuthenticated
+    permission_classes = [permissions.AllowAny]  #IsAuthenticated
     
     def post(self, request, *args, **kwargs):
         try:
@@ -510,8 +496,8 @@ class CustomLogoutView(APIView):
                 {"success": False, "message": f"An error occurred: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
-            
-
+        
+        
 class UserProfileView(APIView):
     """Handle user profile and patient data operations"""
     
@@ -565,7 +551,6 @@ class UserProfileView(APIView):
                 'message': 'Failed to update profile',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 
 class AddressManagementView(APIView):
@@ -712,7 +697,7 @@ class AddressManagementView(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-from rest_framework.parsers import MultiPartParser, FormParser
+
 class ProfilePictureView(APIView):
     """Handle profile picture operations"""
     permission_classes = [IsAuthenticated]
@@ -1042,7 +1027,6 @@ class PatientDoctorView(APIView):
                 'details': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            
 
 class MedicalRecordManagementView(APIView):
     """
@@ -1059,26 +1043,20 @@ class MedicalRecordManagementView(APIView):
             logger.info(f"User email: {request.user.email}")
             logger.info(f"User type: {type(request.user)}")
             
-            
-            
-            # Check if user has patient profile
             try:
                 patient = request.user.patient_profile
                 logger.info(f"Patient profile found: {patient.id}")
-            
                 
             except Patient.DoesNotExist:
                 logger.error(f"Patient profile not found for user {request.user.id}")
-            
                 
                 # Check if there are any patient profiles in the system
                 total_patients = Patient.objects.count()
                 
-                
                 # Check if this user has any related patient profiles
                 try:
                     related_patients = Patient.objects.filter(user=request.user)
-                 
+                    
                     for rp in related_patients:
                         logger.info(f"   - Patient: {rp.id}, User: {rp.user}")
                 except Exception as e:
@@ -1096,7 +1074,7 @@ class MedicalRecordManagementView(APIView):
             
             except AttributeError as e:
                 logger.error(f" AttributeError accessing patient_profile: {str(e)}")
-              
+            
                 return Response({
                     'success': False,
                     'message': 'Error accessing patient profile',
@@ -1112,11 +1090,9 @@ class MedicalRecordManagementView(APIView):
                 medical_record = Medical_Record.objects.get(patient=patient)
                 logger.info(f"Medical record found: {medical_record.id}")
                 
-                
                 serializer = MedicalRecordSerializer(medical_record)
                 logger.info(f"Medical record serialized successfully")
-               
-                
+            
                 return Response({
                     'success': True,
                     'data': serializer.data
@@ -1125,17 +1101,12 @@ class MedicalRecordManagementView(APIView):
             except Medical_Record.DoesNotExist:
                 logger.info(f" Medical record not found for patient {patient.id}")
                 
-                
-                # Check if there are any medical records in the system
                 total_records = Medical_Record.objects.count()
                 
-                # List all medical records for debugging
                 all_records = Medical_Record.objects.all()[:5]  # Limit to first 5
             
                 for record in all_records:
                     logger.info(f"   - Record ID: {record.id}, Patient: {record.patient.id}")
-                
-                
                 
                 return Response({
                     'success': False,
@@ -1151,12 +1122,8 @@ class MedicalRecordManagementView(APIView):
             logger.error(f" Error type: {type(e)}")
             logger.error(f" Error args: {e.args}")
             
-        
-            
-            
             import traceback
             traceback.print_exc()
-            
             
             return Response({
                 'success': False,
@@ -1167,7 +1134,6 @@ class MedicalRecordManagementView(APIView):
                     'user_id': str(request.user.id) if hasattr(request, 'user') else 'N/A'
                 }
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
             
     def post(self, request):
         """Create medical record for the authenticated patient"""
@@ -1561,6 +1527,7 @@ class AppointmentDetailView(APIView):
                 'message': 'Failed to cancel appointment'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class DoctorBookingDetailView(APIView):
     """Doctor details for booking page"""
     permission_classes = [IsAuthenticated]
@@ -1579,7 +1546,6 @@ class DoctorBookingDetailView(APIView):
             serializer = BookingDoctorDetailSerializer(doctor)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
-            
             return Response({
                 'error': 'Doctor not found or not available',
                 'details': str(e)
@@ -1651,7 +1617,6 @@ class DoctorSchedulesView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-
 class UpdatePatientLocationView(generics.CreateAPIView):
     """POST /patients/location/update/"""
     
@@ -1700,10 +1665,10 @@ class UpdatePatientLocationView(generics.CreateAPIView):
     
     def create(self, request, *args, **kwargs):
         """Override create to provide custom response messages"""
-        logger.debug("="*50)
-        logger.debug("UpdatePatientLocationView.create() called")
-        logger.debug(f"User: {request.user.id} ({request.user.username})")
-        logger.debug(f"Request data: {request.data}")
+        # logger.debug("="*50)
+        # logger.debug("UpdatePatientLocationView.create() called")
+        # logger.debug(f"User: {request.user.id} ({request.user.username})")
+        # logger.debug(f"Request data: {request.data}")
         
         try:
             # Check if user is authenticated
@@ -1832,12 +1797,9 @@ class CurrentPatientLocationView(generics.RetrieveAPIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             
-
-
 class SearchNearbyDoctorsView(generics.ListAPIView):
     """Find NearBy doctors using bounding box filtering +
     Haversine distance calculation"""
-    
     
     serializer_class = DoctorLocationSerializer
     permission_classes = [IsAuthenticated]
@@ -1862,7 +1824,7 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
             dlat = lat2 - lat1
             a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlng/2)**2
             c = 2 * asin(sqrt(a))
-            r = 6371  # Earth's radius in km
+            r = 6371  
             return c * r
         except (ValueError, TypeError) as e:
             logger.error(f"Error in distance calculation: {str(e)}")
@@ -2008,9 +1970,6 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                 'count': 0,
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-            
-
-logger = logging.getLogger(__name__)
 
 
 class PaymentInitiationView(APIView):
@@ -2452,7 +2411,6 @@ class PaymentStatusView(APIView):
                 'message': 'Failed to get payment status'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-    
 
 class PatientReviewCreateView(APIView):
     """Patient submits a new review"""
@@ -2532,8 +2490,6 @@ class PatientReviewCreateView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             
-
-    
 class DoctorReviewsListView(APIView):
     """List all approved reviews for a specific doctor"""
     
@@ -2600,7 +2556,6 @@ class DoctorReviewsListView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             
-
 class PatientReviewDeleteView(APIView):
     """Delete a review (only if still pending)"""
     permission_classes = [IsAuthenticated]
@@ -2643,16 +2598,18 @@ class PatientReviewDeleteView(APIView):
                 'message': 'Failed to delete review'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
+            
 class Wallet(APIView):
+    """Showing the Patient wallet  """
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
         try:
-            # Fix: Use patient_profile instead of Patient
+            
             wallet = request.user.patient_profile.wallet
             result = PatientWalletSerializer(wallet)
             return Response({
-                'success': True,  # Add success field for consistency
+                'success': True,  
                 'data': result.data
             })
         except Exception as e:
@@ -2662,16 +2619,15 @@ class Wallet(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class Transaction(APIView):
+    """Showing the Patient Transaction details"""
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
         try:
-            
             transaction = request.user.patient_profile.transactions.all()
-            
             serializer = PatientTransactionSerializer(transaction, many=True)
-            
             return Response({
                 'success': True,
                 'data': serializer.data
@@ -2684,7 +2640,6 @@ class Transaction(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
             
-
 @method_decorator(csrf_exempt, name='dispatch')
 class GoogleLoginView(APIView):
     """Google Authentication with Cookie Support"""

@@ -1768,7 +1768,7 @@ class DoctorLocationDeleteView(generics.DestroyAPIView):
                 
                 logger.info(f"Successfully soft deleted location {instance.id}")
                 
-                # If this was the current location, set another location as current if available
+                
                 if was_current:
                     logger.debug(f"Deleted location was current, finding replacement")
                     
