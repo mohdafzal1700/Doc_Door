@@ -47,7 +47,7 @@ urlpatterns = [
     path('verify-payment/', views.PaymentVerificationView.as_view(), name='payment-verification'),
     path('cancel/', views.SubscriptionCancellationView.as_view(), name='subscription-cancel'),
      
-    path('subscription/history/', views.SubscriptionHistoryView.as_view(), name='subscription-history'),
+    # path('subscription/history/', views.SubscriptionHistoryView.as_view(), name='subscription-history'),
     path('subscription/current/', views.CurrentSubscriptionView.as_view(), name='current-subscription'),
     
     path('invoice/subscription/<int:subscription_id>/', SubscriptionInvoiceView.as_view(), name='subscription-invoice'),

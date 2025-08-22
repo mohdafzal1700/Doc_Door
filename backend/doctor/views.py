@@ -8,18 +8,10 @@ from django.shortcuts import render, get_object_or_404
 from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Count, Sum, Avg
+from django.http import HttpResponse
+from django.conf import settings
 
-
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.enums import TA_CENTER
-from reportlab.lib import colors
-from reportlab.lib.units import inch
-
-from django_filters.rest_framework import DjangoFilterBackend
-from rest_framework.filters import SearchFilter, OrderingFilter
 # DRF imports
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -32,33 +24,41 @@ from rest_framework.exceptions import (
     AuthenticationFailed, NotFound, ValidationError
 )
 from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework.filters import SearchFilter, OrderingFilter
 
-from django.conf import settings
+# Third-party imports
+from django_filters.rest_framework import DjangoFilterBackend
 import razorpay
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib import colors
+from reportlab.lib.units import inch
 
 # App-specific imports
 from .models import (
     Doctor, DoctorEducation, DoctorCertification, DoctorProof,
-    Schedules, Service, DoctorLocation, Appointment,SubscriptionPlan,SubscriptionUpgrade,
-    DoctorSubscription
+    Schedules, Service, DoctorLocation, Appointment,
+    SubscriptionPlan, SubscriptionUpgrade, DoctorSubscription
 )
 from .serializers import (
+    DoctorDashboardSerializer, DashboardDataService,
     DoctorProfileSerializer, DoctorEducationSerializer,
     DoctorCertificationSerializer, DoctorProofSerializer,
     VerificationStatusSerializer, SchedulesSerializer,
     ServiceSerializer, DoctorLocationSerializer,
-    DoctorLocationUpdateSerializer,SubscriptionActivationSerializer,SubscriptionUpdateSerializer,
-    PaymentVerificationSerializer,CurrentSubscriptionSerializer,SubscriptionHistorySerializer
+    DoctorLocationUpdateSerializer, SubscriptionActivationSerializer,
+    SubscriptionUpdateSerializer, PaymentVerificationSerializer,
+    CurrentSubscriptionSerializer, SubscriptionHistorySerializer,
+    DoctorReportPDFService
 )
-
 from adminside.serializers import SubscriptionPlanSerializer
 from doctor.serializers import CustomDoctorTokenObtainPairSerializer
 from patients.serializers import AppointmentSerializer
 
-import logging
-
+# Logger setup
 logger = logging.getLogger(__name__)
-
 
 
 class DoctorLoginView(TokenObtainPairView):
@@ -72,10 +72,8 @@ class DoctorLoginView(TokenObtainPairView):
         try:
             logger.info(f"Doctor login attempt with data: {request.data.keys()}")
                         
-            # Call parent post method which will handle validation through serializer
             response = super().post(request, *args, **kwargs)
                         
-            # If successful, set cookies and modify response
             if response.status_code == 200:
                 try:
                     token_data = response.data
@@ -85,7 +83,6 @@ class DoctorLoginView(TokenObtainPairView):
                     
                     logger.info("Doctor tokens generated successfully")
                     
-                    # Create new response with cookies
                     res = Response(status=status.HTTP_200_OK)
                     
                     res.data = {
@@ -109,20 +106,20 @@ class DoctorLoginView(TokenObtainPairView):
                         key="access_token",
                         value=access_token,
                         httponly=True,
-                        secure=False,  # Set to True in production
+                        secure=False,  
                         samesite="Lax",
                         path='/',
-                        max_age=3600  # 1 hour
+                        max_age=3600 
                     )
 
                     res.set_cookie(
                         key="refresh_token",
                         value=refresh_token,
                         httponly=True,
-                        secure=False,  # Set to True in production
+                        secure=False,  
                         samesite="Lax",
                         path='/',
-                        max_age=86400  # 24 hours
+                        max_age=86400 
                     )
                     
                     logger.info(f"Doctor login successful for: {user_data.get('email')}")
@@ -136,7 +133,6 @@ class DoctorLoginView(TokenObtainPairView):
                         status=status.HTTP_500_INTERNAL_SERVER_ERROR
                     )
             else:
-                # Return the error from serializer validation
                 logger.warning(f"Doctor authentication failed: {response.data}")
                 return Response(
                     {'success': False, 'error': response.data.get('detail', 'Authentication failed')},
@@ -157,8 +153,6 @@ class DoctorLoginView(TokenObtainPairView):
             )
             
             
-            
-
 class DoctorProfileView(APIView):
     """Handle doctor profile operations"""
     permission_classes = [IsAuthenticated]
@@ -167,7 +161,7 @@ class DoctorProfileView(APIView):
     def get(self, request):
         """Get doctor profile data"""
         try:
-            # Check if user has doctor role
+            
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
                 return Response({
                     'success': False,
@@ -192,7 +186,7 @@ class DoctorProfileView(APIView):
     def patch(self, request):
         """Update doctor profile data"""
         try:
-            # Check if user has doctor role
+            
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
                 return Response({
                     'success': False,
@@ -228,6 +222,7 @@ class DoctorProfileView(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class DoctorEducationView(APIView):
     """Handle doctor education operations"""
     permission_classes = [IsAuthenticated]
@@ -236,17 +231,15 @@ class DoctorEducationView(APIView):
     def get(self, request):
         """Get doctor education list"""
         try:
-            # Check if user has doctor role
+            
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
                 return Response({
                     'success': False,
                     'message': 'Access denied. User is not a doctor.',
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            # Get or create doctor profile
-            doctor, created = Doctor.objects.get_or_create(user=request.user)
             
-            # Get all education records for this doctor
+            doctor, created = Doctor.objects.get_or_create(user=request.user)
             education_records = DoctorEducation.objects.filter(doctor=doctor)
             serializer = DoctorEducationSerializer(education_records, many=True)
             
@@ -267,23 +260,20 @@ class DoctorEducationView(APIView):
     def post(self, request):
         """Create new education record"""
         try:
-            # Check if user has doctor role
+        
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
                 return Response({
                     'success': False,
                     'message': 'Access denied. User is not a doctor.',
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            # Get or create doctor profile
             doctor, created = Doctor.objects.get_or_create(user=request.user)
             
             serializer = DoctorEducationSerializer(data=request.data)
             
             if serializer.is_valid():
-                # Save with the doctor instance
-                education_record = serializer.save(doctor=doctor)
                 
-                # Return the created record
+                education_record = serializer.save(doctor=doctor)
                 response_serializer = DoctorEducationSerializer(education_record)
                 
                 return Response({
@@ -309,14 +299,12 @@ class DoctorEducationView(APIView):
     def patch(self, request):
         """Update education record"""
         try:
-            # Check if user has doctor role
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
                 return Response({
                     'success': False,
                     'message': 'Access denied. User is not a doctor.',
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            # Get education record ID from request data
             education_id = request.data.get('id')
             if not education_id:
                 return Response({
@@ -2896,43 +2884,43 @@ class CurrentSubscriptionView(APIView):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class SubscriptionHistoryView(APIView):
-    """Get subscription history for doctor"""
-    permission_classes = [IsAuthenticated]
+# class SubscriptionHistoryView(APIView):
+#     """Get subscription history for doctor"""
+#     permission_classes = [IsAuthenticated]
     
-    def get(self, request):
-        """Get subscription history"""
-        try:
-            if not hasattr(request.user, 'role') or request.user.role != 'doctor':
-                return Response({
-                    'success': False,
-                    'message': 'Only doctors can check subscription history.'
-                }, status=status.HTTP_403_FORBIDDEN)
+#     def get(self, request):
+#         """Get subscription history"""
+#         try:
+#             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
+#                 return Response({
+#                     'success': False,
+#                     'message': 'Only doctors can check subscription history.'
+#                 }, status=status.HTTP_403_FORBIDDEN)
             
-            doctor, created = Doctor.objects.get_or_create(user=request.user)
+#             doctor, created = Doctor.objects.get_or_create(user=request.user)
             
-            # Get all subscriptions for this doctor
-            subscriptions = DoctorSubscription.objects.filter(
-                doctor=doctor
-            ).order_by('-start_date')
+#             # Get all subscriptions for this doctor
+#             subscriptions = DoctorSubscription.objects.filter(
+#                 doctor=doctor
+#             ).order_by('-start_date')
             
-            serializer = SubscriptionHistorySerializer(subscriptions, many=True)
+#             serializer = SubscriptionHistorySerializer(subscriptions, many=True)
             
-            return Response({
-                'success': True,
-                'data': {
-                    'total_subscriptions': subscriptions.count(),
-                    'subscriptions': serializer.data
-                }
-            }, status=status.HTTP_200_OK)
+#             return Response({
+#                 'success': True,
+#                 'data': {
+#                     'total_subscriptions': subscriptions.count(),
+#                     'subscriptions': serializer.data
+#                 }
+#             }, status=status.HTTP_200_OK)
             
-        except Exception as e:
-            logger.error(f"Error in subscription history: {str(e)}")
-            return Response({
-                'success': False,
-                'message': 'Failed to fetch subscription history',
-                'error': str(e) if settings.DEBUG else 'Internal server error'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+#         except Exception as e:
+#             logger.error(f"Error in subscription history: {str(e)}")
+#             return Response({
+#                 'success': False,
+#                 'message': 'Failed to fetch subscription history',
+#                 'error': str(e) if settings.DEBUG else 'Internal server error'
+#             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class SubscriptionUpdateView(APIView):
@@ -3138,28 +3126,6 @@ class SubscriptionInvoiceView(APIView):
         return invoice_data
     
     
-from django.db.models import Count, Sum, Avg, Q
-from django.utils import timezone
-from datetime import datetime, timedelta
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-import logging
-from .serializers import (
-    DoctorDashboardSerializer, 
-    DashboardDataService
-)
-import logging
-from django.utils import timezone
-from datetime import timedelta, datetime
-from django.db.models import Sum, Avg, Count
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
-
-logger = logging.getLogger(__name__)
 
 class DoctorDashboardView(APIView):
     """
@@ -3303,30 +3269,7 @@ class DoctorDashboardView(APIView):
                 'message': f'Failed to load dashboard data: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-# views.py (Add this to your existing views file)
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import status
-from django.http import HttpResponse
-from django.utils import timezone
-import logging
-from .serializers import DoctorReportPDFService
 
-logger = logging.getLogger(__name__)
-# views.py (Add this to your existing views file)
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from rest_framework import status
-from django.http import HttpResponse
-from django.utils import timezone
-import logging
-
-# Import your PDF service class
-from .serializers import DoctorReportPDFService
-
-logger = logging.getLogger(__name__)
 
 class DoctorReportDownloadView(APIView):
     """

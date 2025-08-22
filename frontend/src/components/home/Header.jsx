@@ -1,6 +1,6 @@
 "use client"
 import { useState } from "react"
-import { Home, Search, Video, Info, User, Menu, X, LogOut } from "lucide-react"
+import { Home, Search, Video, Info, User, Menu, X, LogOut,MessageSquare } from "lucide-react"
 import { useNavigate, useLocation } from "react-router-dom"
 import HeaderLogo from "../ui/HeaderLogo"
 import ThemeToggle from "../ui/ThemeToggle"
@@ -14,7 +14,8 @@ const ROUTES = {
   CONSULTATION: "/consultation",
   ABOUT: "/about",  
   LOGIN: "/login",
-  PATIENT_PORTAL: "/patientportal"
+  PATIENT_PORTAL: "/patientportal",
+  MESSAGES: "/chat",
 }
 
 const Header = () => {
@@ -28,7 +29,7 @@ const Header = () => {
   const navItems = [
     { name: "Home", path: ROUTES.HOME, icon: Home },
     { name: "Find Doctor", path: ROUTES.FIND_DOCTOR, icon: Search },
-    
+    { name: "Messages", path: ROUTES.MESSAGES, icon: MessageSquare },
     { name: "About Us", path: ROUTES.ABOUT, icon: Info },
   ]
 
@@ -79,7 +80,7 @@ const Header = () => {
 
   return (
     <header className="bg-white dark:bg-gray-900 shadow-sm border-b border-gray-100 dark:border-gray-800 transition-colors duration-300 sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="max-w-7xl mx-auto ">
         <div className="flex justify-between items-center h-16">
           {/* Logo Section */}
           <div className="flex items-center cursor-pointer" onClick={() => {
