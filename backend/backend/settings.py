@@ -330,6 +330,15 @@ CACHES = {
     }
 }
 
+CELERY_BROKER_URL = 'redis://127.0.0.1:6379/2'  
+CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/3' 
+
+# Celery Task Settings
+CELERY_ACCEPT_CONTENT = ['application/json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,

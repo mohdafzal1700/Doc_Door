@@ -1,8 +1,7 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { connectNotificationSocket,markNotificationAsRead, 
-  markAllNotificationsAsRead,
-  closeNotificationSocket  } from '../../service/websocket'
-  
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
+import { connectNotificationSocket, markNotificationAsRead, markAllNotificationsAsRead, closeNotificationSocket } from '../../service/websocket'
+import { useToast } from '../ui/Toast'
+
 const NotificationContext = createContext()
 
 export const NotificationProvider = ({ children }) => {
@@ -10,6 +9,24 @@ export const NotificationProvider = ({ children }) => {
   const [unreadCount, setUnreadCount] = useState(0)
   const [isConnected, setIsConnected] = useState(false)
   const [socket, setSocket] = useState(null)
+  
+  // Track recent messages to prevent duplicates
+  const recentMessages = useRef(new Map()) // message -> timestamp
+  
+  // Get toast functions
+  const toast = useToast()
+
+  // Clean up old messages from duplicate detection
+  const cleanupOldMessages = useCallback(() => {
+    const now = Date.now()
+    const fiveMinutesAgo = now - (5 * 60 * 1000)
+    
+    for (const [message, timestamp] of recentMessages.current.entries()) {
+      if (timestamp < fiveMinutesAgo) {
+        recentMessages.current.delete(message)
+      }
+    }
+  }, [])
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -19,11 +36,10 @@ export const NotificationProvider = ({ children }) => {
         if (notificationSocket) {
           setSocket(notificationSocket)
           setIsConnected(true)
-          
+
           // Listen for notification events
           const handleNotification = (event) => {
             const { data } = event.detail
-            
             switch (data.type) {
               case 'notification':
                 // New notification received
@@ -35,22 +51,44 @@ export const NotificationProvider = ({ children }) => {
                   is_read: false
                 }
                 
+                const now = Date.now()
+                const messageKey = newNotification.message.trim()
+                const recentTimestamp = recentMessages.current.get(messageKey)
+                
+                // Check if same message was received in last 2 seconds
+                if (recentTimestamp && (now - recentTimestamp) < 2000) {
+                  console.log('Duplicate message ignored:', messageKey)
+                  return // Skip duplicate message
+                }
+                
+                // Record this message
+                recentMessages.current.set(messageKey, now)
+                
+                // Update state
                 setNotifications(prev => [newNotification, ...prev])
                 setUnreadCount(prev => prev + 1)
-                break
                 
+                // Show toast (clear previous ones first)
+                toast.removeAll()
+                toast.info(
+                  newNotification.message,
+                  "🔔 New Notification",
+                  {
+                    duration: 6000
+                  }
+                )
+                break
+
               case 'unread_notifications':
-                // Initial unread notifications on connect
                 setNotifications(data.notifications || [])
                 setUnreadCount(data.count || 0)
                 break
-                
+
               case 'mark_read_response':
                 if (data.success) {
-                  // Update local state when mark as read succeeds
-                  setNotifications(prev => 
-                    prev.map(notif => 
-                      notif.id === data.notification_id 
+                  setNotifications(prev =>
+                    prev.map(notif =>
+                      notif.id === data.notification_id
                         ? { ...notif, is_read: true }
                         : notif
                     )
@@ -58,26 +96,23 @@ export const NotificationProvider = ({ children }) => {
                   setUnreadCount(prev => Math.max(0, prev - 1))
                 }
                 break
-                
+
               case 'mark_all_read_response':
                 if (data.success) {
-                  // Mark all notifications as read in local state
-                  setNotifications(prev => 
+                  setNotifications(prev =>
                     prev.map(notif => ({ ...notif, is_read: true }))
                   )
                   setUnreadCount(0)
                 }
                 break
-                
+
               default:
                 console.log('Unknown notification type:', data.type)
             }
           }
-          
-          // Add event listener for notifications
+
           window.addEventListener('notification_received', handleNotification)
-          
-          // Cleanup function
+
           return () => {
             window.removeEventListener('notification_received', handleNotification)
           }
@@ -85,29 +120,35 @@ export const NotificationProvider = ({ children }) => {
       } catch (error) {
         console.error('Failed to initialize notification socket:', error)
         setIsConnected(false)
+        toast.error(
+          'Failed to connect to notification service',
+          '⚠️ Connection Error'
+        )
       }
     }
-    
+
     initializeSocket()
-    
-    // Cleanup on unmount
+
     return () => {
       closeNotificationSocket()
       setSocket(null)
       setIsConnected(false)
     }
-  }, [])
+  }, [toast, cleanupOldMessages])
 
-  // Mark single notification as read
+  // Cleanup old messages periodically
+  useEffect(() => {
+    const cleanupInterval = setInterval(cleanupOldMessages, 60000) // Every minute
+    return () => clearInterval(cleanupInterval)
+  }, [cleanupOldMessages])
+
   const markAsRead = useCallback(async (notificationId) => {
     try {
       const result = await markNotificationAsRead(notificationId)
-      
       if (result.success) {
-        // Optimistically update UI (will be confirmed by WebSocket response)
-        setNotifications(prev => 
-          prev.map(notif => 
-            notif.id === notificationId 
+        setNotifications(prev =>
+          prev.map(notif =>
+            notif.id === notificationId
               ? { ...notif, is_read: true }
               : notif
           )
@@ -124,17 +165,19 @@ export const NotificationProvider = ({ children }) => {
     }
   }, [])
 
-  // Mark all notifications as read
   const markAllAsRead = useCallback(async () => {
     try {
       const result = await markAllNotificationsAsRead()
-      
       if (result.success) {
-        // Optimistically update UI (will be confirmed by WebSocket response)
-        setNotifications(prev => 
+        setNotifications(prev =>
           prev.map(notif => ({ ...notif, is_read: true }))
         )
         setUnreadCount(0)
+        
+        toast.success(
+          'All notifications have been marked as read',
+          '✅ Updated'
+        )
         return true
       } else {
         console.error('Failed to mark all notifications as read:', result.error)
@@ -144,19 +187,17 @@ export const NotificationProvider = ({ children }) => {
       console.error('Error marking all notifications as read:', error)
       return false
     }
-  }, [])
+  }, [toast])
 
-  // Get unread notifications
   const getUnreadNotifications = useCallback(() => {
     return notifications.filter(notif => !notif.is_read)
   }, [notifications])
 
-  // Remove notification from list (optional feature)
   const removeNotification = useCallback((notificationId) => {
-    setNotifications(prev => 
+    setNotifications(prev =>
       prev.filter(notif => notif.id !== notificationId)
     )
-    // If removing an unread notification, update count
+    
     const notification = notifications.find(n => n.id === notificationId)
     if (notification && !notification.is_read) {
       setUnreadCount(prev => Math.max(0, prev - 1))
@@ -164,17 +205,12 @@ export const NotificationProvider = ({ children }) => {
   }, [notifications])
 
   const contextValue = {
-    // State
     notifications,
     unreadCount,
     isConnected,
-    
-    // Actions
     markAsRead,
     markAllAsRead,
     removeNotification,
-    
-    // Getters
     getUnreadNotifications
   }
 
@@ -185,14 +221,10 @@ export const NotificationProvider = ({ children }) => {
   )
 }
 
-// Custom hook to use notifications
 export const useNotifications = () => {
   const context = useContext(NotificationContext)
-  
   if (!context) {
     throw new Error('useNotifications must be used within a NotificationProvider')
   }
-  
   return context
 }
-

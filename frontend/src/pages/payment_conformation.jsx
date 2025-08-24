@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { CreditCard, Calendar, Clock, MapPin, User, Building, FileText, ArrowLeft, Check, AlertCircle, Loader2, Shield, Info, Wallet, RefreshCw } from 'lucide-react';
+import { CreditCard, Calendar, Clock, MapPin, User, Building, FileText, ArrowLeft, Check, AlertCircle, Loader2, Shield, Info, Wallet, RefreshCw, ClockIcon } from 'lucide-react';
 import Button from '../components/ui/Button';
+import Header from '../components/home/Header';
 import { initiatePayment, verifyPayment, getWallet } from '../endpoints/APIs';
 
 const PaymentPage = () => {
@@ -24,7 +25,6 @@ const PaymentPage = () => {
       setError('Invalid appointment data. Please book an appointment first.');
       return;
     }
-
     // Load Razorpay script and fetch wallet balance
     loadRazorpayScript();
     fetchWalletBalance();
@@ -35,10 +35,9 @@ const PaymentPage = () => {
     try {
       setWalletLoading(true);
       setError(null); // Clear any existing errors
-      
       const response = await getWallet();
       console.log('Wallet response:', response);
-      
+
       // Handle different response structures
       if (response?.data?.success && response.data.data) {
         setWalletBalance(response.data.data.balance || 0);
@@ -51,10 +50,8 @@ const PaymentPage = () => {
       }
     } catch (err) {
       console.error('Failed to fetch wallet balance:', err);
-      
       // Extract meaningful error message
       let errorMessage = 'Failed to load wallet data';
-      
       if (err.response?.data?.message) {
         errorMessage = err.response.data.message;
       } else if (err.response?.data?.error) {
@@ -62,12 +59,11 @@ const PaymentPage = () => {
       } else if (err.message) {
         errorMessage = err.message;
       }
-      
+
       // Don't show wallet errors as main errors unless wallet payment is selected
       if (selectedMethod === 'wallet') {
         setError(`Wallet Error: ${errorMessage}`);
       }
-      
       setWalletBalance(0);
     } finally {
       setWalletLoading(false);
@@ -88,12 +84,24 @@ const PaymentPage = () => {
         resolve(true);
         return;
       }
-
       const script = document.createElement('script');
       script.src = 'https://checkout.razorpay.com/v1/checkout.js';
       script.onload = () => resolve(true);
       script.onerror = () => resolve(false);
       document.body.appendChild(script);
+    });
+  };
+
+  // Handle Pay Later button click
+  const handlePayLater = () => {
+    navigate('/patient/myAppointments', {
+      state: {
+        appointmentId,
+        paymentPending: true,
+        appointmentData,
+        message: 'Appointment booked successfully! Payment can be completed later.',
+        paymentMethod: 'pending'
+      }
     });
   };
 
@@ -110,7 +118,6 @@ const PaymentPage = () => {
           setLoading(false);
           return;
         }
-        
         if (walletBalance < appointmentData.totalAmount) {
           setError(`Insufficient wallet balance. Available: ₹${walletBalance}, Required: ₹${appointmentData.totalAmount}`);
           setLoading(false);
@@ -158,10 +165,8 @@ const PaymentPage = () => {
 
     } catch (err) {
       console.error('Error initiating payment:', err);
-      
       // Extract meaningful error message
       let errorMessage = 'Failed to initiate payment. Please try again.';
-      
       if (err.response?.data?.message) {
         errorMessage = err.response.data.message;
       } else if (err.response?.data?.error) {
@@ -177,7 +182,6 @@ const PaymentPage = () => {
           data: err.response.data,
           headers: err.response.headers
         });
-
         // Show more specific error for validation issues
         if (err.response.data?.field_errors) {
           const fieldErrors = Object.entries(err.response.data.field_errors)
@@ -197,7 +201,7 @@ const PaymentPage = () => {
   const handleWalletPaymentSuccess = (paymentData) => {
     setPaymentProcessing(true);
     console.log('Wallet payment successful:', paymentData);
-
+    
     // Navigate to success page after delay
     setTimeout(() => {
       navigate('/patient/myAppointments', {
@@ -283,7 +287,6 @@ const PaymentPage = () => {
 
       if (verifyResponse?.data?.success) {
         console.log('Payment verified successfully');
-        
         // Navigate to success page
         setTimeout(() => {
           navigate('/patient/myAppointments', {
@@ -346,17 +349,20 @@ const PaymentPage = () => {
   // Error state
   if (!appointmentId || !appointmentData) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
-          <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
-          <h3 className="text-xl font-bold text-gray-900 mb-2">Invalid Request</h3>
-          <p className="text-gray-600 mb-6">{error || 'No appointment data found.'}</p>
-          <Button
-            onClick={() => navigate('/patient/findDoctor')}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            Book New Appointment
-          </Button>
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+        <Header />
+        <div className="max-w-md mx-auto px-4 sm:px-6 lg:px-8 py-16">
+          <div className="bg-white rounded-xl shadow-sm p-8 text-center">
+            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Invalid Request</h3>
+            <p className="text-gray-600 mb-6">{error || 'No appointment data found.'}</p>
+            <Button
+              onClick={() => navigate('/patient/findDoctor')}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Book New Appointment
+            </Button>
+          </div>
         </div>
       </div>
     );
@@ -365,19 +371,22 @@ const PaymentPage = () => {
   // Payment processing state
   if (paymentProcessing) {
     return (
-      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white flex items-center justify-center">
-        <div className="max-w-md w-full bg-white rounded-lg shadow-lg p-8 text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
-            <Check className="w-8 h-8 text-green-600" />
+      <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
+        <Header />
+        <div className="max-w-md mx-auto px-4 sm:px-6 lg:px-8 py-16">
+          <div className="bg-white rounded-xl shadow-sm p-8 text-center">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+              <Check className="w-8 h-8 text-green-600" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Payment Successful!</h3>
+            <p className="text-gray-600 mb-4">
+              {selectedMethod === 'wallet'
+                ? 'Processing wallet payment and confirming your appointment...'
+                : 'Verifying payment and confirming your appointment...'
+              }
+            </p>
+            <Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-600" />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">Payment Successful!</h3>
-          <p className="text-gray-600 mb-4">
-            {selectedMethod === 'wallet' 
-              ? 'Processing wallet payment and confirming your appointment...' 
-              : 'Verifying payment and confirming your appointment...'
-            }
-          </p>
-          <Loader2 className="w-6 h-6 animate-spin mx-auto text-blue-600" />
         </div>
       </div>
     );
@@ -385,62 +394,54 @@ const PaymentPage = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-white">
-      {/* Header */}
-      <div className="bg-white shadow-sm">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center">
-            <Button
-              variant="ghost"
-              onClick={() => navigate(-1)}
-              className="mr-4"
-            >
-              <ArrowLeft className="w-4 h-4 mr-2" />
-              Back
-            </Button>
-            <h1 className="text-2xl font-bold text-gray-900">Complete Payment</h1>
-          </div>
+      <Header />
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Page Header */}
+        <div className="mb-8">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center text-blue-600 hover:text-blue-800 font-medium mb-4 transition-colors"
+          >
+            <ArrowLeft className="w-5 h-5 mr-2" />
+            Back
+          </button>
+          <h1 className="text-3xl font-bold text-gray-900">Complete Payment</h1>
+          <p className="text-gray-600 mt-2">Secure payment for your upcoming appointment</p>
         </div>
-      </div>
 
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Appointment Details */}
-          <div className="lg:col-span-2">
-            <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+          <div className="lg:col-span-2 space-y-6">
+            <div className="bg-white rounded-xl shadow-sm p-6">
               <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
-                <FileText className="w-5 h-5 mr-2" />
+                <FileText className="w-5 h-5 mr-2 text-blue-600" />
                 Appointment Details
               </h2>
-
               <div className="space-y-4">
                 <div className="flex items-start">
-                  <User className="w-5 h-5 text-gray-400 mr-3 mt-0.5" />
+                  <User className="w-5 h-5 text-gray-500 mr-3 mt-0.5 flex-shrink-0" />
                   <div>
                     <p className="font-medium text-gray-900">Dr. {appointmentData.doctorName}</p>
                     <p className="text-sm text-gray-600">{appointmentData.clinicName}</p>
                   </div>
                 </div>
-
                 <div className="flex items-center">
-                  <Calendar className="w-5 h-5 text-gray-400 mr-3" />
+                  <Calendar className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
                   <span className="text-gray-900">{formatDate(appointmentData.appointmentDate)}</span>
                 </div>
-
                 <div className="flex items-center">
-                  <Clock className="w-5 h-5 text-gray-400 mr-3" />
+                  <Clock className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
                   <span className="text-gray-900">{formatTime(appointmentData.slotTime)}</span>
                 </div>
-
                 <div className="flex items-center">
-                  <MapPin className="w-5 h-5 text-gray-400 mr-3" />
+                  <MapPin className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
                   <span className="text-gray-900 capitalize">
                     {appointmentData.consultationMode} Consultation
                   </span>
                 </div>
-
                 {appointmentData.serviceName && (
                   <div className="flex items-center">
-                    <Building className="w-5 h-5 text-gray-400 mr-3" />
+                    <Building className="w-5 h-5 text-gray-500 mr-3 flex-shrink-0" />
                     <span className="text-gray-900">{appointmentData.serviceName}</span>
                   </div>
                 )}
@@ -448,21 +449,29 @@ const PaymentPage = () => {
             </div>
 
             {/* Patient Information */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
+            <div className="bg-white rounded-xl shadow-sm p-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Patient Information</h3>
-              <div className="space-y-2">
-                <p><span className="font-medium">Name:</span> {appointmentData.patientInfo?.name || 'N/A'}</p>
-                <p><span className="font-medium">Email:</span> {appointmentData.patientInfo?.email || 'N/A'}</p>
-                <p><span className="font-medium">Phone:</span> {appointmentData.patientInfo?.phone || 'N/A'}</p>
+              <div className="space-y-3">
+                <div className="flex justify-between">
+                  <span className="font-medium text-gray-700">Name:</span>
+                  <span className="text-gray-900">{appointmentData.patientInfo?.name || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-medium text-gray-700">Email:</span>
+                  <span className="text-gray-900">{appointmentData.patientInfo?.email || 'N/A'}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="font-medium text-gray-700">Phone:</span>
+                  <span className="text-gray-900">{appointmentData.patientInfo?.phone || 'N/A'}</span>
+                </div>
               </div>
             </div>
           </div>
 
           {/* Payment Summary & Methods */}
           <div className="lg:col-span-1">
-            <div className="bg-white rounded-lg shadow-sm p-6 sticky top-4">
+            <div className="bg-white rounded-xl shadow-sm p-6 sticky top-6">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Payment Summary</h3>
-
               <div className="space-y-3 mb-6">
                 <div className="flex justify-between text-gray-600">
                   <span>Consultation Fee</span>
@@ -482,9 +491,9 @@ const PaymentPage = () => {
                 <div className="space-y-3">
                   {/* Wallet Option */}
                   <div
-                    className={`border rounded-lg p-3 cursor-pointer transition-colors ${
+                    className={`border rounded-lg p-4 cursor-pointer transition-all ${
                       selectedMethod === 'wallet'
-                        ? 'border-blue-500 bg-blue-50'
+                        ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                     onClick={() => setSelectedMethod('wallet')}
@@ -498,14 +507,14 @@ const PaymentPage = () => {
                             value="wallet"
                             checked={selectedMethod === 'wallet'}
                             onChange={() => setSelectedMethod('wallet')}
-                            className="w-4 h-4 text-blue-600"
+                            className="w-4 h-4 text-blue-600 focus:ring-blue-500"
                           />
                         </div>
                         <Wallet className="w-5 h-5 text-gray-600 mr-2" />
                         <div>
                           <p className="font-medium text-gray-900">Wallet</p>
                           <p className="text-sm text-gray-600">
-                            {walletLoading ? 'Loading...' : `Balance: ${formatAmount(walletBalance)}`}
+                            {walletLoading ? 'Loading balance...' : `Balance: ${formatAmount(walletBalance)}`}
                           </p>
                         </div>
                       </div>
@@ -520,6 +529,7 @@ const PaymentPage = () => {
                           }}
                           disabled={refreshing}
                           className="text-gray-400 hover:text-gray-600 transition-colors"
+                          aria-label="Refresh wallet balance"
                         >
                           <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
                         </button>
@@ -529,9 +539,9 @@ const PaymentPage = () => {
 
                   {/* Razorpay Option */}
                   <div
-                    className={`border rounded-lg p-3 cursor-pointer transition-colors ${
+                    className={`border rounded-lg p-4 cursor-pointer transition-all ${
                       selectedMethod === 'razorpay'
-                        ? 'border-blue-500 bg-blue-50'
+                        ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-100'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                     onClick={() => setSelectedMethod('razorpay')}
@@ -544,7 +554,7 @@ const PaymentPage = () => {
                           value="razorpay"
                           checked={selectedMethod === 'razorpay'}
                           onChange={() => setSelectedMethod('razorpay')}
-                          className="w-4 h-4 text-blue-600"
+                          className="w-4 h-4 text-blue-600 focus:ring-blue-500"
                         />
                       </div>
                       <CreditCard className="w-5 h-5 text-gray-600 mr-2" />
@@ -559,29 +569,33 @@ const PaymentPage = () => {
 
               {/* Error Display */}
               {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-center gap-3">
-                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
                   <div className="flex-1">
                     <p className="text-red-800 font-medium">Error</p>
                     <p className="text-red-600 text-sm">{error}</p>
                   </div>
                   <button
                     onClick={() => setError(null)}
-                    className="text-red-600 hover:text-red-800 transition-colors"
+                    className="text-red-600 hover:text-red-800 transition-colors flex-shrink-0"
+                    aria-label="Dismiss error"
                   >
-                    <RefreshCw className="w-4 h-4" />
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
                   </button>
                 </div>
               )}
 
+              {/* Payment Button */}
               <Button
                 onClick={handlePayment}
                 disabled={
-                  loading || 
+                  loading ||
                   walletLoading ||
                   (selectedMethod === 'wallet' && walletBalance < appointmentData.totalAmount)
                 }
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-lg font-medium flex items-center justify-center"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 text-base font-medium flex items-center justify-center rounded-lg transition-colors shadow-md hover:shadow-lg mb-3"
               >
                 {loading ? (
                   <>
@@ -600,23 +614,31 @@ const PaymentPage = () => {
                 )}
               </Button>
 
+              {/* Pay Later Button */}
+              <Button
+                onClick={handlePayLater}
+                variant="outline"
+                className="w-full border-2 border-gray-300 text-gray-700 hover:bg-gray-50 py-3 text-base font-medium flex items-center justify-center rounded-lg transition-colors"
+              >
+                <ClockIcon className="h-5 w-5 mr-2" />
+                Pay Later
+              </Button>
+
               {/* Security Notice */}
-              <div className="mt-4 p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center text-sm text-gray-600">
-                  <Shield className="w-4 h-4 mr-2" />
-                  <span>
-                    {selectedMethod === 'wallet' ? 'Secured Wallet Payment' : 'Secured by Razorpay'}
-                  </span>
-                </div>
+              <div className="mt-4 p-3 bg-gray-50 rounded-lg flex items-center">
+                <Shield className="w-4 h-4 text-gray-600 mr-2" />
+                <span className="text-xs text-gray-600">
+                  {selectedMethod === 'wallet' ? 'Secured Wallet Payment' : 'Secured by Razorpay'}
+                </span>
               </div>
 
               {/* Payment Info */}
-              <div className="mt-4 p-3 bg-blue-50 rounded-lg">
+              <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
                 <div className="flex items-start">
-                  <Info className="w-4 h-4 text-blue-600 mr-2 mt-0.5" />
-                  <div className="text-sm text-blue-800">
+                  <Info className="w-4 h-4 text-blue-600 mr-2 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-blue-800">
                     <p className="font-medium mb-1">Payment Information</p>
-                    <p>Your appointment is confirmed. Complete payment to activate all features.</p>
+                    <p>Your appointment will be confirmed immediately after successful payment. You can also pay later from your appointments page.</p>
                   </div>
                 </div>
               </div>

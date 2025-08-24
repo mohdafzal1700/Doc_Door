@@ -803,42 +803,27 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     def get_can_cancel(self, obj):
         """Check if appointment can be cancelled - Fixed version"""
-        
-        # 1. Check status first
+
         if obj.status in ['cancelled', 'completed']:
             return False
         
-        
-        
-        # 3. Check if date and time exist
         if not obj.appointment_date or not obj.slot_time:
             return False
         
-        # 4. Calculate time difference
         try:
-            from datetime import datetime
-            from django.utils import timezone as django_timezone
-            
-            # Combine date and time
             appointment_datetime = datetime.combine(obj.appointment_date, obj.slot_time)
             
-            # Make timezone aware if needed
             if django_timezone.is_naive(appointment_datetime):
                 appointment_datetime = django_timezone.make_aware(appointment_datetime)
             
-            # Get current time
             current_time = django_timezone.now()
             
-            # Calculate difference in hours
             time_diff = appointment_datetime - current_time
             hours_until_appointment = time_diff.total_seconds() / 3600
             
-            # Allow cancellation if more than 24 hours away
-            # For testing, you can reduce this to 1 hour: hours_until_appointment > 1
             return hours_until_appointment > 24
             
         except Exception as e:
-            # Log the error for debugging
             logger.error(f"Error in get_can_cancel: {e}")
             return False
 
@@ -846,79 +831,35 @@ class AppointmentSerializer(serializers.ModelSerializer):
         """Same logic as cancel"""
         return self.get_can_cancel(obj)
 
-    # Alternative versions for different business rules:
-
-    def get_can_cancel_flexible(self, obj):
-        """More flexible cancellation policy"""
-        # Allow cancel for pending/confirmed appointments
-        if obj.status in ['pending', 'confirmed']:
-            # Check if appointment is in the future
-            if obj.appointment_date and obj.slot_time:
-                appointment_datetime = datetime.combine(obj.appointment_date, obj.slot_time)
-                if django_timezone.is_naive(appointment_datetime):
-                    appointment_datetime = django_timezone.make_aware(appointment_datetime)
-                
-                # Allow cancellation if appointment is in the future
-                return appointment_datetime > django_timezone.now()
-            
-            # If no date/time, allow cancellation based on status
-            return True
-        
-        return False
-
-    def get_can_cancel_business_hours(self, obj):
-        """Only allow cancellation during business hours"""
-        if obj.status not in ['pending', 'confirmed']:
-            return False
-        
-        current_time = django_timezone.now()
-        current_hour = current_time.hour
-        
-        # Allow cancellation only during business hours (9 AM - 5 PM)
-        if 9 <= current_hour <= 17:
-            return self.get_can_cancel(obj)
-        
-        return False
-
     def to_internal_value(self, data):
         """Override to handle string inputs for slot_time and doctor UUID"""
         data = data.copy()
         
-        # Handle different slot_time property names
         if 'startTime' in data and 'slot_time' not in data:
             data['slot_time'] = data['startTime']
         
-        # Handle slot_time conversion - support both 12-hour and 24-hour formats
         if 'slot_time' in data and isinstance(data['slot_time'], str):
             slot_time_str = data['slot_time'].strip()
             
-            # Check if it's 12-hour format (contains AM/PM)
             if 'AM' in slot_time_str.upper() or 'PM' in slot_time_str.upper():
                 try:
-                    # Convert 12-hour to 24-hour format
                     time_obj = datetime.strptime(slot_time_str, '%I:%M %p').time()
                     data['slot_time'] = time_obj.strftime('%H:%M')
                 except ValueError:
                     try:
-                        # Try without space before AM/PM
                         time_obj = datetime.strptime(slot_time_str, '%I:%M%p').time()
                         data['slot_time'] = time_obj.strftime('%H:%M')
                     except ValueError:
-                        # Let the field validation handle the error
                         pass
             else:
-                # It's already in 24-hour format, just ensure proper formatting
                 try:
-                    # Try to parse time string like "09:00" or "09:00:00"
                     time_obj = datetime.strptime(slot_time_str, '%H:%M').time()
                     data['slot_time'] = time_obj.strftime('%H:%M')
                 except ValueError:
                     try:
-                        # Try with seconds
                         time_obj = datetime.strptime(slot_time_str, '%H:%M:%S').time()
                         data['slot_time'] = time_obj.strftime('%H:%M')
                     except ValueError:
-                        # Let the field validation handle the error
                         pass
         
         return super().to_internal_value(data)
@@ -931,7 +872,6 @@ class AppointmentSerializer(serializers.ModelSerializer):
         if value < date.today():
             raise serializers.ValidationError("Appointment date cannot be in the past.")
         
-        # Check if it's too far in the future (6 months)
         max_date = date.today() + django_timezone.timedelta(days=180)
         if value > max_date:
             raise serializers.ValidationError("Appointment date cannot be more than 6 months in the future.")
@@ -944,7 +884,6 @@ class AppointmentSerializer(serializers.ModelSerializer):
             try:
                 
                 doctor_uuid = uuid.UUID(value)
-                
                 user = User.objects.filter(
                     id=doctor_uuid,
                     role='doctor',
@@ -954,15 +893,11 @@ class AppointmentSerializer(serializers.ModelSerializer):
                 
                 if not user:
                     raise serializers.ValidationError(f"Doctor with ID {value} does not exist or is not approved.")
-                
-                
                 return user.doctor_profile
                 
             except ValueError:
-                
                 try:
                     doctor_id = int(value)
-                    
                     user = User.objects.filter(
                         id=doctor_id,
                         role='doctor',
@@ -972,14 +907,10 @@ class AppointmentSerializer(serializers.ModelSerializer):
                     
                     if not user:
                         raise serializers.ValidationError(f"Doctor with ID {doctor_id} does not exist or is not approved.")
-                    
-                    
                     return user.doctor_profile
-                    
                 except ValueError:
                     raise serializers.ValidationError("Invalid doctor ID format.")
         elif isinstance(value, int):
-            
             user = User.objects.filter(
                 id=value,
                 role='doctor',
@@ -989,7 +920,6 @@ class AppointmentSerializer(serializers.ModelSerializer):
             
             if not user:
                 raise serializers.ValidationError(f"Doctor with ID {value} does not exist or is not approved.")
-            
             
             return user.doctor_profile
         
@@ -1043,19 +973,16 @@ class AppointmentSerializer(serializers.ModelSerializer):
             return None
             
         if isinstance(value, str):
-            # Check if it's a direct address string (not a UUID)
+            
             try:
-                # Try to parse as UUID first
                 address_uuid = uuid.UUID(value)
                 try:
                     return Address.objects.get(id=address_uuid)
                 except Address.DoesNotExist:
                     raise serializers.ValidationError(f"Address with ID {value} does not exist.")
             except ValueError:
-                # If it's not a valid UUID, treat as direct address string
                 if not value.isdigit():
                     return value
-                # If it's numeric, try as integer ID
                 try:
                     address_id = int(value)
                     return Address.objects.get(id=address_id)
@@ -1089,6 +1016,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
         doctor = data.get('doctor')
         mode = data.get('mode')
         address = data.get('address')
+        schedule = data.get('schedule')
 
         # Validate datetime combination
         if appointment_date and slot_time:
@@ -1108,95 +1036,113 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
         # Check for double booking
         if doctor and appointment_date and slot_time:
-            existing = Appointment.objects.filter(
+            # Check existing appointments for this exact slot
+            existing_appointments = Appointment.objects.filter(
                 doctor=doctor,
                 appointment_date=appointment_date,
                 slot_time=slot_time,
-                status__in=['pending', 'confirmed']
+                status__in=['pending', 'confirmed', 'completed'],
+                is_slot_booked=True
             ).exclude(id=self.instance.id if self.instance else None)
             
-            if existing.exists():
-                raise serializers.ValidationError({
-                    'slot_time': 'This time slot is already booked.'
-                })
-
+            # Get the schedule to check max patients per slot
+            if schedule:
+                max_patients = schedule.max_patients_per_slot
+                if existing_appointments.count() >= max_patients:
+                    raise serializers.ValidationError({
+                        'slot_time': f'This time slot is fully booked. Maximum {max_patients} patients allowed per slot.'
+                    })
+            else:
+                # Default check if no schedule provided
+                if existing_appointments.exists():
+                    raise serializers.ValidationError({
+                        'slot_time': 'This time slot is already booked.'
+                    })
+        
         return data
 
     def create(self, validated_data):
         """Create appointment with proper handling"""
-        # Handle address field for offline appointments
         address_data = validated_data.pop('address', None)
         
-        # Create the appointment first
         appointment = Appointment.objects.create(**validated_data)
-        
-        # Handle address assignment
         if address_data:
             if isinstance(address_data, str):
-                # Check if it's a UUID string or direct address
                 try:
                     uuid.UUID(address_data)                   
                     try:
                         address_obj = Address.objects.get(id=address_data)
                         appointment.address = address_obj
                     except Address.DoesNotExist:
-                        # Fallback: store as notes
                         appointment.notes = f"Address: {address_data}" if not appointment.notes else f"{appointment.notes}\nAddress: {address_data}"
                 except ValueError:
-                    # It's a direct address string
                     appointment.notes = f"Address: {address_data}" if not appointment.notes else f"{appointment.notes}\nAddress: {address_data}"
             else:
-                # It's an Address object
                 appointment.address = address_data
             
             appointment.save()
-    
+            
+        if hasattr(appointment, 'schedule') and appointment.schedule:
+            appointment.schedule.update_booked_slots()
+        
         return appointment
 
     def update(self, instance, validated_data):
-        """Update appointment with proper handling"""
-        # Handle address field for offline appointments
+        """Update appointment with proper handling and manage slot booking status"""
+        
+        old_status = instance.status
+        old_slot_time = instance.slot_time
+        old_date = instance.appointment_date
+    
         address_data = validated_data.pop('address', None)
         
-        # Update other fields
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         
-        # Handle address assignment
         if address_data:
             if isinstance(address_data, str):
-                
                 try:
-                    uuid.UUID(address_data)  # Test if it's a valid UUID
+                    uuid.UUID(address_data)
                     try:
                         address_obj = Address.objects.get(id=address_data)
                         instance.address = address_obj
                     except Address.DoesNotExist:
-                        # Remove old address from notes if present
                         if instance.notes:
                             notes_lines = instance.notes.split('\n')
                             notes_lines = [line for line in notes_lines if not line.startswith('Address:')]
                             instance.notes = '\n'.join(notes_lines)
-                            instance.notes += f"\nAddress: {address_data}"
-                        else:
-                            instance.notes = f"Address: {address_data}"
+                        instance.notes += f"\nAddress: {address_data}" if instance.notes else f"Address: {address_data}"
                         instance.address = None
                 except ValueError:
-                    # It's a direct address string
+                    
                     if instance.notes:
                         notes_lines = instance.notes.split('\n')
                         notes_lines = [line for line in notes_lines if not line.startswith('Address:')]
                         instance.notes = '\n'.join(notes_lines)
-                        instance.notes += f"\nAddress: {address_data}"
-                    else:
-                        instance.notes = f"Address: {address_data}"
+                    instance.notes += f"\nAddress: {address_data}" if instance.notes else f"Address: {address_data}"
                     instance.address = None
             else:
-                # It's an Address object
                 instance.address = address_data
         
+        if 'status' in validated_data:
+            new_status = validated_data['status']
+            
+            if old_status in ['pending', 'confirmed'] and new_status == 'cancelled':
+                instance.is_slot_booked = False
+            
+            elif old_status == 'cancelled' and new_status in ['pending', 'confirmed']:
+                instance.is_slot_booked = True
+        
+        # Set status to pending after any update (as requested)
+        instance.status = 'pending'
+        
+        
         instance.save()
-        return instance
+        if hasattr(instance, 'schedule') and instance.schedule:
+            instance.schedule.update_booked_slots()
+        
+        return instance 
+    
 class BookingDoctorDetailSerializer(serializers.ModelSerializer):
     """Doctor details for booking page"""
     
@@ -1410,8 +1356,6 @@ class ScheduleDetailSerializer(serializers.ModelSerializer):
                     current_slot_start = current_slot_end
                     continue
             
-            # Calculate remaining slots for this time slot
-            # For simplicity, we'll distribute booked slots evenly
             total_time_slots = len(self._get_all_slots(obj))
             if total_time_slots > 0:
                 avg_booked_per_slot = obj.booked_slots / total_time_slots
@@ -1436,31 +1380,75 @@ class ScheduleDetailSerializer(serializers.ModelSerializer):
         
         return slots
     
-    def _get_all_slots(self, obj):
-        """Helper method to get all possible slots (used for calculation)"""
+    def get_time_slots(self, obj):
+        """Generate individual time slots with accurate booking status"""
         slots = []
         slot_duration_minutes = int(obj.slot_duration.total_seconds() / 60)
+        
+        # Get all booked appointments for this schedule date and doctor
+        booked_appointments = Appointment.objects.filter(
+            doctor=obj.doctor,
+            appointment_date=obj.date,
+            status__in=['pending', 'confirmed', 'completed'],
+            is_slot_booked=True
+        ).values_list('slot_time', flat=True)
+        
+        # Convert to set for faster lookup
+        booked_times = set(booked_appointments)
+        
         start_datetime = datetime.combine(obj.date, obj.start_time)
         end_datetime = datetime.combine(obj.date, obj.end_time)
+        
         current_slot_start = start_datetime
+        slot_id = 1
         
         while current_slot_start < end_datetime:
             current_slot_end = current_slot_start + timedelta(minutes=slot_duration_minutes)
+            
             if current_slot_end > end_datetime:
                 break
+                
+            # Check break time conflict
+            if self._is_break_time(obj, current_slot_start, current_slot_end):
+                current_slot_start = current_slot_end
+                continue
             
-            # Check break time
-            if obj.break_start_time and obj.break_end_time:
-                break_start = datetime.combine(obj.date, obj.break_start_time)
-                break_end = datetime.combine(obj.date, obj.break_end_time)
-                if (current_slot_start < break_end and current_slot_end > break_start):
-                    current_slot_start = current_slot_end
-                    continue
+            # Check if this specific slot time is booked
+            slot_time = current_slot_start.time()
+            is_booked = slot_time in booked_times
             
-            slots.append(current_slot_start)
+            # Calculate remaining slots for this specific time
+            booked_count = len([t for t in booked_times if t == slot_time])
+            remaining_slots = max(0, obj.max_patients_per_slot - booked_count)
+            
+            slot_data = {
+                'id': f"{obj.id}_{slot_id}",
+                'startTime': current_slot_start.strftime('%I:%M %p'),
+                'endTime': current_slot_end.strftime('%I:%M %p'),
+                'remainingSlots': remaining_slots,
+                'maxSlots': obj.max_patients_per_slot,
+                'schedule_id': obj.id,
+                'is_available': remaining_slots > 0 and obj.is_active,
+                'is_booked': is_booked,
+                'slot_time_24h': slot_time.strftime('%H:%M')  # For easy comparison
+            }
+            
+            slots.append(slot_data)
             current_slot_start = current_slot_end
-        
+            slot_id += 1
+            
         return slots
+    
+    def _is_break_time(self, obj, slot_start, slot_end):
+        """Check if slot conflicts with break time"""
+        if not (obj.break_start_time and obj.break_end_time):
+            return False
+            
+        break_start = datetime.combine(obj.date, obj.break_start_time)
+        break_end = datetime.combine(obj.date, obj.break_end_time)
+        
+        return slot_start < break_end and slot_end > break_start
+
 
 class PaymentSerializer(serializers.ModelSerializer):
     """Payment serializer"""
@@ -1469,8 +1457,6 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = Payment
         fields = ['id', 'appointment', 'amount', 'method', 'status', 'paid_at', 'remarks']
         
-          
-
 
 class DoctorLocationSerializer(serializers.ModelSerializer):
     """Serializer for doctor locations with distance"""

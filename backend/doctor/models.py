@@ -542,6 +542,8 @@ class DoctorCertification(models.Model):
         super().save(*args, **kwargs)
         # Update doctor's certification completion status
         self.doctor.check_certification_completion()
+        
+        
 class DoctorProof(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     doctor = models.OneToOneField(Doctor, on_delete=models.CASCADE, related_name='proof')
@@ -561,9 +563,6 @@ class DoctorProof(models.Model):
         self.doctor.check_license_completion()
         
         
-        
-
-
 class Service(models.Model):
     PLAN_CHOICES = [
     ('basic', 'Basic Service'),
@@ -655,9 +654,6 @@ class Schedules(models.Model):
         if self.booked_slots > self.total_slots:
             errors['booked_slots'] = "Booked slots cannot exceed total slots."
         
-        # Validate service mode matches schedule mode
-        # if self.service and self.service.service_mode != self.mode:
-        #     errors['mode'] = f"Schedule mode must match service mode: {self.service.service_mode}"
         
         # Validate max patients per slot
         if self.max_patients_per_slot <= 0:
@@ -666,9 +662,7 @@ class Schedules(models.Model):
         if errors:
             raise ValidationError(errors)
         
-        
     
-
     def save(self, *args, **kwargs):
         """Override save to run validation and calculate total slots"""
         self.full_clean()
@@ -744,6 +738,32 @@ class Schedules(models.Model):
         
         return not (self.break_start_time <= booking_time <= self.break_end_time)
     
+    def get_booked_appointments_count(self):
+        """Get actual count of booked appointments for this schedule"""
+        return Appointment.objects.filter(
+            doctor=self.doctor,
+            appointment_date=self.date,
+            status__in=['pending', 'confirmed', 'completed'],
+            is_slot_booked=True
+        ).count()
+    
+    def update_booked_slots(self):
+        """Update booked_slots field with actual count"""
+        self.booked_slots = self.get_booked_appointments_count()
+        self.save(update_fields=['booked_slots'])
+    
+    def get_available_slots_by_time(self, slot_time):
+        """Get available slots for a specific time"""
+        booked_count = Appointment.objects.filter(
+            doctor=self.doctor,
+            appointment_date=self.date,
+            slot_time=slot_time,
+            status__in=['pending', 'confirmed', 'completed'],
+            is_slot_booked=True
+        ).count()
+        
+        return max(0, self.max_patients_per_slot - booked_count)
+    
 
 class DoctorLocation(models.Model):
     doctor = models.ForeignKey('Doctor', on_delete=models.CASCADE)
@@ -790,8 +810,6 @@ class PatientLocation(models.Model):
         return f"{self.patient.user.username} - {self.address}"
     
     
-
-    
 class Medical_Record(models.Model):
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -820,7 +838,7 @@ class Appointment(models.Model):
     appointment_date = models.DateField()  
     slot_time = models.TimeField()  
     mode = models.CharField(max_length=20, choices=[('online', 'Online'), ('offline', 'Offline')])
-    
+    is_slot_booked = models.BooleanField(default=True, help_text="Whether this appointment occupies a slot")
     address = models.ForeignKey('Address', on_delete=models.SET_NULL, null=True, blank=True, related_name='appointments')
 
     STATUS_CHOICES = [
@@ -844,6 +862,10 @@ class Appointment(models.Model):
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        unique_together = [['doctor', 'appointment_date', 'slot_time', 'status']]
+        
 
     def save(self, *args, **kwargs):
         # Auto-calculate total_fee
@@ -856,6 +878,11 @@ class Appointment(models.Model):
             # If no service, just use doctor's consultation fee
             self.total_fee = Decimal(str(self.doctor.consultation_fee or 0))
         
+        if self.status in ['cancelled']:
+            self.is_slot_booked = False
+        elif self.status in ['pending', 'confirmed', 'completed']:
+            self.is_slot_booked = True
+            
         super().save(*args, **kwargs)
         
         
@@ -881,8 +908,6 @@ class Appointment(models.Model):
 
     def __str__(self):
         return f"Appointment: {self.patient.user.email} with {self.doctor.user.email} on {self.appointment_date} at {self.slot_time}"
-
-
 
 
 class Payment(models.Model):

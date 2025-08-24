@@ -325,7 +325,7 @@ class RegisterUserView(generics.CreateAPIView):
 
 
 class EmailOTPVerifyView(generics.GenericAPIView):
-    """Verify Emil OTP"""
+    """Verify Email OTP"""
     
     serializer_class = EmailOTPVerifySerializer
 
