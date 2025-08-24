@@ -8,6 +8,7 @@ from .models import Conversation, Message, Notification
 from django.utils import timezone
 import logging
 import traceback
+from .utils import create_and_send_notification
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -150,14 +151,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 await self.handle_chat_message(data)
             elif message_type in ['typing', 'typing_indicator']:
                 await self.handle_typing(data)
-            elif message_type == 'mark_as_read':
-                await self.handle_mark_as_read(data)
             elif message_type == 'connection_test':
                 await self.handle_connection_test(data)
             elif message_type == 'edit_message':
                 await self.handle_edit_message(data)
-            # elif message_type == 'mark_messages_read':  
-            #     await self.handle_mark_messages_read(data)
             elif message_type == 'delete_message':
                 await self.handle_delete_message(data)
             elif message_type == 'file_uploaded':
@@ -177,221 +174,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
             }))
 
     
-
-    # async def handle_mark_messages_read(self, data):
-    #     """
-    #     Mark all unread messages from sender_id to current user as read
-    #     Performance-optimized with single database query
-    #     """
-        
-        
-    #     try:
-    #         # Step 1: Extract and validate data
-    #         conversation_id = data.get('conversation_id')
-    #         sender_id = data.get('sender_id')
-            
-    #         # Validation
-    #         if not conversation_id:
-    #             await self.send(text_data=safe_json_dumps({
-    #                 'type': 'error',
-    #                 'message': 'conversation_id is required'
-    #             }))
-    #             return
-                
-    #         if not sender_id:
-    #             await self.send(text_data=safe_json_dumps({
-    #                 'type': 'error',
-    #                 'message': 'sender_id is required'
-    #             }))
-    #             return
-            
-    #         # Validate UUID formats
-    #         try:
-    #             conversation_uuid = uuid.UUID(str(conversation_id))
-    #             sender_uuid = uuid.UUID(str(sender_id))
-    #         except ValueError as ve:
-    #             await self.send(text_data=safe_json_dumps({
-    #                 'type': 'error',
-    #                 'message': f'Invalid UUID format: {ve}'
-    #             }))
-    #             return
-            
-    #         # Step 2: Mark messages as read (bulk update)
-    #         read_result = await self.mark_messages_as_read_bulk(
-    #             conversation_uuid, 
-    #             sender_uuid
-    #         )
-            
-    #         if read_result is None:
-    #             await self.send(text_data=safe_json_dumps({
-    #                 'type': 'error',
-    #                 'message': 'Failed to mark messages as read - unauthorized or conversation not found'
-    #             }))
-    #             return
-            
-    #         messages_marked_count = read_result['count']
-    #         print(f"  Marked {messages_marked_count} messages as read")
-            
-    #         # Step 3: Send confirmation back to current user
-    #         confirmation_data = {
-    #             'type': 'messages_marked_read',
-    #             'conversation_id': str(conversation_uuid),
-    #             'sender_id': str(sender_uuid),
-    #             'messages_marked_count': messages_marked_count,
-    #             'timestamp': timezone.now().isoformat()
-    #         }
-            
-    #         await self.send(text_data=safe_json_dumps(confirmation_data))
-            
-    #         # Step 4: Notify the sender that their messages were read
-    #         if messages_marked_count > 0:
-    #             read_notification = {
-    #                 'type': 'messages_read_by_recipient',
-    #                 'conversation_id': str(conversation_uuid),
-    #                 'reader_id': str(self.user.id),
-    #                 'reader_username': self.user.username,
-    #                 'messages_count': messages_marked_count,
-    #                 'timestamp': timezone.now().isoformat()
-    #             }
-                
-    #             # Broadcast to conversation group
-    #             await self.channel_layer.group_send(
-    #                 self.conversation_group_name,
-    #                 {
-    #                     'type': 'messages_read_notification',
-    #                     'notification_data': read_notification
-    #                 }
-    #             )
-            
-    #         # Step 5: Get updated unread count for badge
-    #         unread_count = await self.get_user_total_unread_count()
-    #         await self.send(text_data=safe_json_dumps({
-    #             'type': 'unread_count_update',
-    #             'total_unread': unread_count,
-    #             'timestamp': timezone.now().isoformat()
-    #         }))
-            
-    #         logger.info(f"Successfully marked {messages_marked_count} messages as read for user {self.user.username}")
-    #         print(f"MARK MESSAGES AS READ COMPLETED SUCCESSFULLY")
-            
-    #     except Exception as e:
-    #         print(f" MARK MESSAGES AS READ FAILED")
-    #         print(f" Error: {e}")
-    #         print(f" Traceback: {traceback.format_exc()}")
-    #         logger.error(f"Error marking messages as read: {e}")
-    #         await self.send(text_data=safe_json_dumps({
-    #             'type': 'error',
-    #             'message': 'Failed to mark messages as read'
-    #         }))
-
-    # @database_sync_to_async
-    # def mark_messages_as_read_bulk(self, conversation_id, sender_id):
-    #     """
-    #     Mark all unread messages from sender to current user as read
-    #     Uses a single optimized database query for maximum performance
-    #     """
-        
-        
-    #     try:
-    #         # Step 1: Verify conversation access
-    #         conversation = Conversation.objects.get(id=conversation_id)
-    #         if not conversation.participants.filter(id=self.user.id).exists():
-    #             print(f"    User not authorized for conversation")
-    #             return None
-            
-    #         # Step 2: Single bulk update query - HIGHLY EFFICIENT
-    #         # Only update messages that are currently unread to avoid unnecessary writes
-    #         now = timezone.now()
-            
-    #         updated_count = Message.objects.filter(
-    #             conversation_id=conversation_id,
-    #             sender_id=sender_id,
-    #             receiver_id=self.user.id,
-    #             is_read=False  # Only unread messages
-    #         ).update(
-    #             is_read=True,
-    #             read_at=now,
-    #             status='seen',  # Auto-update status
-    #             updated_at=now
-    #         )
-            
-    #         print(f"   ✅ Bulk updated {updated_count} messages")
-            
-    #         return {
-    #             'count': updated_count,
-    #             'timestamp': now
-    #         }
-            
-    #     except Conversation.DoesNotExist:
-    #         print(f"   Conversation not found")
-    #         return None
-    #     except Exception as e:
-    #         print(f"    Error in bulk update: {e}")
-    #         logger.error(f"Error in bulk mark as read: {e}")
-    #         return None
-
-    # @database_sync_to_async
-    # def get_user_total_unread_count(self):
-    #     """
-    #     Get total unread message count for current user across all conversations
-    #     Optimized query for badge count
-    #     """
-    #     try:
-    #         # Count all unread messages where current user is receiver
-    #         unread_count = Message.objects.filter(
-    #             receiver_id=self.user.id,
-    #             is_read=False,
-    #             is_deleted=False
-    #         ).count()
-            
-    #         return unread_count
-            
-    #     except Exception as e:
-    #         logger.error(f"Error getting unread count: {e}")
-    #         return 0
-
-    # @database_sync_to_async
-    # def get_conversation_unread_count(self, conversation_id, sender_id):
-    #     """
-    #     Get unread count for specific conversation from specific sender
-    #     Useful for conversation-level badges
-    #     """
-    #     try:
-    #         unread_count = Message.objects.filter(
-    #             conversation_id=conversation_id,
-    #             sender_id=sender_id,
-    #             receiver_id=self.user.id,
-    #             is_read=False,
-    #             is_deleted=False
-    #         ).count()
-            
-    #         return unread_count
-            
-    #     except Exception as e:
-    #         logger.error(f"Error getting conversation unread count: {e}")
-    #         return 0
-
-
-    # async def messages_read_notification(self, event):
-    #     """
-    #     Handle messages read notification events from channel layer
-    #     This notifies the sender that their messages were read
-    #     """
-    #     try:
-    #         notification_data = event['notification_data']
-            
-    #         # Only send to sender, not to the reader
-    #         reader_id = notification_data['reader_id']
-    #         current_user_id = str(self.user.id)
-            
-    #         if reader_id != current_user_id:
-    #             await self.send(text_data=safe_json_dumps(notification_data))
-                
-    #     except Exception as e:
-    #         logger.error(f"Error sending messages read notification: {e}")
-
-
-
     async def handle_connection_test(self, data):
         """Handle connection test messages with detailed debugging"""
         print(f"\n HANDLING CONNECTION TEST")
@@ -417,8 +199,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def handle_chat_message(self, data):
         """Process chat messages with enhanced debugging"""
         try:
-            # Step 1: Extract and analyze data
-            print(f" EXTRACTING AND ANALYZING MESSAGE DATA")
+        
             message_content = data.get('message', '').strip()
             receiver_id = data.get('receiver_id')
             temp_id = data.get('temp_id')
@@ -499,10 +280,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         'message': message_data
                     }
                 )
+            
             except Exception as broadcast_error:
                 raise
 
-            # await self.create_message_notification(message)
+            await self.send_message_notifications(message)
             logger.info(f"Message successfully created and sent by {self.user.username}")
 
         except Exception as e:
@@ -512,6 +294,50 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'message': 'Failed to send message',
                 'temp_id': data.get('temp_id')
             }))
+            
+            
+    async def send_message_notifications(self, message):
+        """Send notification to the message receiver (one-on-one chat)"""
+        try:
+        
+            # Create notification message
+            notification_message = f"New message from {message.sender.username}: {message.content[:50]}{'...' if len(message.content) > 50 else ''}"
+            
+            # Send notification to the receiver only
+            notification = await self.create_notification_async(
+                user_id=str(message.receiver.id),
+                message=notification_message,
+                notification_type='message',
+                related_object_id=str(message.id),
+                sender_id=str(message.sender.id)
+            )
+            
+            if notification:
+                logger.info(f"Message notification sent to {message.receiver.username} for message {message.id}")
+            else:
+                logger.error(f"Failed to send notification for message {message.id}")
+            
+        except Exception as e:
+            logger.error(f"Error in send_message_notifications: {e}")
+        
+        
+    @database_sync_to_async
+    def create_notification_async(self, user_id, message, notification_type='message', related_object_id=None, sender_id=None):
+        """Async wrapper for create_and_send_notification"""
+        try:
+            # Call your sync notification function
+            notification = create_and_send_notification(
+                user_id=user_id,
+                message=message,
+                notification_type=notification_type,
+                related_object_id=related_object_id,
+                sender_id=sender_id
+            )
+            return notification
+        except Exception as e:
+            logger.error(f"Error creating notification: {e}")
+            return None
+        
 
     async def notify_user_status(self, status):
         """Notify other users about status change with detailed debugging"""
@@ -530,6 +356,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"Error notifying user status: {e}")
 
+
     # Database operations with extensive debugging
     @database_sync_to_async
     def can_access_conversation(self):
@@ -546,6 +373,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"Error checking conversation access: {e}")
             return False
+
 
     async def handle_file_uploaded(self, data):
         """Handle file upload notification from API"""
@@ -569,6 +397,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
         except Exception as e:
             logger.error(f"Error handling file upload: {e}")
+
 
     @database_sync_to_async
     def get_file_message(self, message_id):
@@ -604,6 +433,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             logger.error(f"Error getting file message: {e}")
             return None
 
+
     # Add this WebSocket event handler
     async def file_message(self, event):
         """Send file message to WebSocket"""
@@ -617,6 +447,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.send(text_data=json_response)
         except Exception as e:
             logger.error(f"Error sending file message: {e}")
+
 
     @database_sync_to_async
     def create_message(self, content, receiver_id):
@@ -668,6 +499,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"Error sending chat message: {e}")
 
+
     async def user_status_changed(self, event):
         """Send user status change with debugging"""
         try:
@@ -686,11 +518,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             logger.error(f"Error sending user status change: {e}")
 
+
     # Handler methods with debugging
     async def handle_typing(self, data):
         """Handle typing indicators with debugging"""
-        print(f"\n HANDLING TYPING INDICATOR")
-        print(f"   Data: {data}")
         try:
             is_typing = data.get('is_typing', False)
             print(f"    Is typing: {is_typing}")
@@ -702,33 +533,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'username': self.user.username,
                 'is_typing': is_typing,
             }
-
-            print(f"    Broadcasting typing indicator...")
             await self.channel_layer.group_send(
                 self.conversation_group_name,
                 typing_data
             )
-            print(f"  Typing indicator broadcasted")
+            
         except Exception as e:
-            print(f"  Typing indicator failed: {e}")
-            print(f"  Traceback: {traceback.format_exc()}")
             logger.error(f"Error handling typing indicator: {e}")
 
     
-
     async def handle_edit_message(self, data):
         """Handle message editing with proper confirmation"""
-     
         try:
-            # Step 1: Extract and validate data
             message_id = data.get('message_id')
             new_content = data.get('content', '').strip()
-            print(f"    Message ID: {message_id}")
-            print(f"    New content: '{new_content}' (length: {len(new_content)})")
 
-            # Step 2: Validation
             if not message_id:
-                print(f"    Message ID is missing")
                 await self.send(text_data=safe_json_dumps({
                     'type': 'error',
                     'message': 'message_id is required'
@@ -736,27 +556,19 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 return
 
             if not new_content:
-                print(f"    Content is empty")
                 await self.send(text_data=safe_json_dumps({
                     'type': 'error',
                     'message': 'Content cannot be empty'
                 }))
                 return
 
-            # Step 3: Update message in database AND get formatted data
             message_data = await self.update_message_with_data(message_id, new_content)
             if not message_data:
-                print(f"    Failed to update message in database")
                 await self.send(text_data=safe_json_dumps({
                     'type': 'error',
                     'message': 'Failed to update message - not found or unauthorized'
                 }))
                 return
-
-            print(f"   ✅ Message updated successfully")
-
-            # Step 4: Broadcast to group (includes sender)
-            print(f"   📡 Broadcasting edit to group")
             await self.channel_layer.group_send(
                 self.conversation_group_name,
                 {
@@ -764,14 +576,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     'message': message_data
                 }
             )
-
             logger.info(f"Message {message_id} edited successfully by {self.user.username}")
-            print(f" MESSAGE EDIT COMPLETED SUCCESSFULLY")
-
+            
         except Exception as e:
-            print(f" MESSAGE EDIT FAILED")
-            print(f" Error: {e}")
-            print(f" Traceback: {traceback.format_exc()}")
             logger.error(f"Error handling edit message: {e}")
             await self.send(text_data=safe_json_dumps({
                 'type': 'error',
@@ -780,36 +587,24 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def handle_delete_message(self, data):
         """Handle message deletion with proper confirmation"""
-        print(f"\n HANDLING MESSAGE DELETE")
-        print(f"   Data: {data}")
         try:
-            # Step 1: Extract and validate data
             message_id = data.get('message_id')
-            print(f"   🆔 Message ID: {message_id}")
-
-            # Step 2: Validation
+            
             if not message_id:
-                print(f"    Message ID is missing")
                 await self.send(text_data=safe_json_dumps({
                     'type': 'error',
                     'message': 'message_id is required'
                 }))
                 return
 
-            # Step 3: Delete message from database
             deleted_message_data = await self.delete_message_with_data(message_id)
             if not deleted_message_data:
-                print(f"    Failed to delete message from database")
                 await self.send(text_data=safe_json_dumps({
                     'type': 'error',
                     'message': 'Failed to delete message - not found or unauthorized'
                 }))
                 return
 
-            print(f"    Message deleted successfully")
-
-            # Step 4: Broadcast to group (includes sender)
-            print(f"   📡 Broadcasting delete to group")
             await self.channel_layer.group_send(
                 self.conversation_group_name,
                 {
@@ -820,19 +615,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     'conversation_id': deleted_message_data.get('conversation_id')
                 }
             )
-
             logger.info(f"Message {message_id} deleted successfully by {self.user.username}")
-            print(f" MESSAGE DELETE COMPLETED SUCCESSFULLY")
-
+            
         except Exception as e:
-            print(f" MESSAGE DELETE FAILED")
-            print(f" Error: {e}")
-            print(f" Traceback: {traceback.format_exc()}")
             logger.error(f"Error handling delete message: {e}")
             await self.send(text_data=safe_json_dumps({
                 'type': 'error',
                 'message': 'Failed to delete message'
             }))
+
 
     async def message_edited(self, event):
         """Handle message_edited events from channel layer"""
@@ -844,6 +635,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'timestamp': event.get('timestamp')
         }))
 
+
     async def message_deleted(self, event):
         """Handle message_deleted events from channel layer"""
         await self.send(text_data=json.dumps({
@@ -853,12 +645,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
             'timestamp': event.get('deleted_at')  
         }))
 
+
     @database_sync_to_async
     def update_message_with_data(self, message_id, new_content):
         """Update message content and return formatted data"""
-        print(f"\n UPDATING MESSAGE WITH DATA")
-        print(f"    Message ID: {message_id}")
-        print(f"   New content: '{new_content}'")
         try:
             # Get the message with related fields prefetched
             message = Message.objects.select_related(
@@ -868,15 +658,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 sender=self.user, 
                 conversation=self.conversation_id
             )
-            print(f"    Message found and authorized")
-
-        
             message.content = new_content
             if hasattr(message, 'updated_at'):
                 message.updated_at = timezone.now()
             message.save()
-            print(f"    Message updated in database")
-
             
             message_data = {
                 'id': str(message.id),
@@ -897,37 +682,32 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'edited_at': message.updated_at.isoformat() if hasattr(message, 'updated_at') else timezone.now().isoformat(),
                 'is_read': getattr(message, 'is_read', False),
             }
-            print(f"    Message data formatted")
             return message_data
 
         except Message.DoesNotExist:
-            print(f"   Message not found or unauthorized")
             logger.error(f"Message {message_id} not found or user {self.user.id} not authorized")
             return None
         except Exception as e:
-            print(f"    Error updating message: {e}")
             logger.error(f"Error updating message: {e}")
             return None
+
 
     @database_sync_to_async
     def delete_message_with_data(self, message_id):
         """Delete message and return delete data with enhanced debugging"""
-        
         try:
             
             actual_message_id = message_id
             if message_id.startswith('file_') and '_' in message_id:
                 actual_message_id = message_id.split('_')[-1]
-                print(f"    Extracted UUID: {actual_message_id}")
 
-            # First, let's see what messages exist for this user in this conversation
             user_messages = Message.objects.filter(
                 sender=self.user,
                 conversation=self.conversation_id
             ).values_list('id', 'content', 'created_at')
-            print(f"   📋 User's messages in conversation:")
-            for msg_id, content, created_at in user_messages:
-                print(f"      - {msg_id}: '{content[:50]}...' at {created_at}")
+            
+            # for msg_id, content, created_at in user_messages:
+            #     print(f"      - {msg_id}: '{content[:50]}...' at {created_at}")
 
             # Now try to find the specific message
             try:
@@ -936,25 +716,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     sender=self.user,
                     conversation=self.conversation_id
                 )
-                print(f"    Message found and authorized")
+                
             except Message.DoesNotExist:
-                print(f"    Message not found with exact match, checking alternatives...")
-                # Check if message exists but with different sender
+                logger.error(f"    Message not found with exact match, checking alternatives...")
+
                 try:
                     msg_different_sender = Message.objects.get(id=actual_message_id)
-                    print(f"     Message exists but sender is: {msg_different_sender.sender.id} (not {self.user.id})")
                 except Message.DoesNotExist:
-                    print(f"    Message doesn't exist in database at all")
-                # Check if message exists but in different conversation
+                    logger.error(f"    Message doesn't exist in database at all")
                 try:
                     msg_different_conv = Message.objects.filter(id=actual_message_id).first()
                     if msg_different_conv:
-                        print(f"     Message exists but in conversation: {msg_different_conv.conversation.id} (not {self.conversation_id})")
+                        logger.error(f"     Message exists but in conversation: {msg_different_conv.conversation.id} (not {self.conversation_id})")
                 except Exception as e:
-                    print(f"    Error checking different conversation: {e}")
+                    logger.error(f"    Error checking different conversation: {e}")
                 raise Message.DoesNotExist("Message not found after detailed search")
 
-            # Prepare delete data before deletion
             delete_data = {
                 'message_id': message_id,  # Return original ID
                 'conversation_id': str(message.conversation.id),
@@ -962,7 +739,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 'deleted_at': timezone.now().isoformat()
             }
 
-            # Delete the message
             message.delete()
             return delete_data
 
@@ -973,13 +749,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
             logger.error(f"Error deleting message: {e}")
             return None
 
-    # async def create_message_notification(self, message):
-    #     """Create notification for new message with debugging"""
-    #     try:
-    #         # Create notification logic here
-    #         logger.info(f"    Notification creation logic would go here")
-    #     except Exception as e:
-    #         logger.error(f"Error creating notification: {e}")
 
     async def typing_indicator(self, event):
         """Send typing indicator to WebSocket with debugging"""
