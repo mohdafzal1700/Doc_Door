@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  # Redis service for Celery and Channels
+  redis:
+    image: redis:7-alpine
+    container_name: newdoc_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Daphne - Main ASGI server (handles both HTTP and WebSocket)
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: newdoc_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"  # Main backend port (HTTP + WebSocket)
+    environment:
+      - DEBUG=1
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    depends_on:
+      - redis
+
+  # Celery Worker
+  celery_worker:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: newdoc_celery_worker
+    restart: unless-stopped
+    environment:
+      - DEBUG=1
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - backend
+    command: celery -A backend worker --loglevel=info
+
+  # Celery Beat (for scheduled tasks)
+  celery_beat:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: newdoc_celery_beat
+    restart: unless-stopped
+    environment:
+      - DEBUG=1
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - redis
+      - backend
+    command: celery -A backend beat --loglevel=info
+
+  # React + Vite Frontend
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: newdoc_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"  # Vite default port
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_WS_URL=ws://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true
+
+volumes:
+  redis_data:
+  static_volume:
+  media_volume:
