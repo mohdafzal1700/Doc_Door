@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // Change this to match your DRF backend route for chat APIs
-const BASE_URL = 'http://localhost:8000/api/chat/';
+const BASE_URL = `${import.meta.env.VITE_API_URL}/chat/`;
 
 const chatAxios = axios.create({
     baseURL: BASE_URL,
@@ -14,7 +14,7 @@ const chatAxios = axios.create({
 // Token refresh function specifically for chat
 export const refreshChatToken = () => {
     return axios.post(
-        "http://localhost:8000/api/auth/token/refresh/", 
+        `${import.meta.env.VITE_API_URL}/auth/token/refresh/`, 
         {}, 
         { withCredentials: true }
     );
