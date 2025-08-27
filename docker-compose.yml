@@ -1,96 +1,63 @@
-version: '3.8'
-
+version: '3.9'
 services:
-  # Redis service for Celery and Channels
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: docdata
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: afsal
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+  
   redis:
-    image: redis:7-alpine
-    container_name: newdoc_redis
-    restart: unless-stopped
+    image: redis:7
     ports:
       - "6379:6379"
-    volumes:
-      - redis_data:/data
-
-  # Daphne - Main ASGI server (handles both HTTP and WebSocket)
+  
   backend:
-    build: 
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: newdoc_backend
-    restart: unless-stopped
+    build: ./backend
+    volumes:
+      - ./backend:/app
     ports:
-      - "8000:8000"  # Main backend port (HTTP + WebSocket)
-    environment:
-      - DEBUG=1
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    volumes:
-      - ./backend:/app
-      - static_volume:/app/staticfiles
-      - media_volume:/app/media
+      - "8000:8000"
+    env_file:
+      - ./backend/.env
     depends_on:
+      - db
       - redis
-
-  # Celery Worker
-  celery_worker:
-    build: 
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: newdoc_celery_worker
-    restart: unless-stopped
     environment:
-      - DEBUG=1
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    volumes:
-      - ./backend:/app
-    depends_on:
-      - redis
-      - backend
+      DB_HOST: db
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+  
+  # frontend:
+  #   build: ./frontend
+  #   volumes:
+  #     - ./frontend:/app
+  #     - /app/node_modules
+  #   ports:
+  #     - "5173:5173"
+  #   depends_on:
+  #     - backend
+  
+  celery:
+    build: ./backend
     command: celery -A backend worker --loglevel=info
-
-  # Celery Beat (for scheduled tasks)
-  celery_beat:
-    build: 
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: newdoc_celery_beat
-    restart: unless-stopped
-    environment:
-      - DEBUG=1
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     volumes:
       - ./backend:/app
+    env_file:
+      - ./backend/.env
     depends_on:
+      - backend
       - redis
-      - backend
-    command: celery -A backend beat --loglevel=info
-
-  # React + Vite Frontend
-  frontend:
-    build: 
-      context: ./frontend
-      dockerfile: Dockerfile
-    container_name: newdoc_frontend
-    restart: unless-stopped
-    ports:
-      - "5173:5173"  # Vite default port
     environment:
-      - VITE_API_URL=http://localhost:8000
-      - VITE_WS_URL=ws://localhost:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
-    stdin_open: true
-    tty: true
+      DB_HOST: db
+      DB_PORT: 5432
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
 
 volumes:
-  redis_data:
-  static_volume:
-  media_volume:
+  postgres_data:

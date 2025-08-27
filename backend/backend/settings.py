@@ -116,7 +116,7 @@ DATABASES = {
         'NAME': 'docdata',
         'USER': 'postgres',
         'PASSWORD': 'afsal',
-        'HOST': 'localhost',
+        'HOST': 'db',
         'PORT': '5432',
     }
 }
@@ -297,7 +297,7 @@ cloudinary.config(
 RAZORPAY_KEY_ID = config("RAZORPAY_API_KEY")
 RAZORPAY_KEY_SECRET = config("RAZORPAY_SECRET_KEY") 
 
-REDIS_URL = 'redis://127.0.0.1:6379/0'  # Using database 0 for general operations
+REDIS_URL = 'redis://redis:6379/0'  # Using database 0 for general operations
 
 ASGI_APPLICATION = 'backend.asgi.application'
 
@@ -314,7 +314,7 @@ CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
+            "hosts": [('redis', 6379)], 
         },
     },
 }
@@ -323,15 +323,15 @@ CHANNEL_LAYERS = {
 CACHES = {
     'default': {
         'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',
+        'LOCATION': 'redis://redis:6379/1',
         'OPTIONS': {
             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
         }
     }
 }
 
-CELERY_BROKER_URL = 'redis://127.0.0.1:6379/2'  
-CELERY_RESULT_BACKEND = 'redis://127.0.0.1:6379/3' 
+CELERY_BROKER_URL = 'redis://redis:6379/2'     
+CELERY_RESULT_BACKEND = 'redis://redis:6379/3' 
 
 # Celery Task Settings
 CELERY_ACCEPT_CONTENT = ['application/json']
