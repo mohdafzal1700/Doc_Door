@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // Change this to match your DRF backend route for admin APIs
-const BASE_URL = `${import.meta.env.VITE_API_URL}/admins/`;
+const BASE_URL = 'https://api.docdoor.muhammedafsal.online/api/admins/';
 
 const adminAxios = axios.create({
     baseURL: BASE_URL,
@@ -18,7 +18,7 @@ adminAxios.interceptors.response.use(
             originalRequest._retry = true;
             try {
                 await axios.post(
-                    `${import.meta.env.VITE_API_URL}/admins/token/refresh/`, // Admin token refresh endpoint
+                    'https://api.docdoor.muhammedafsal.online/api/admins/token/refresh/', // Admin token refresh endpoint
                     {},
                     { withCredentials: true }
                 );

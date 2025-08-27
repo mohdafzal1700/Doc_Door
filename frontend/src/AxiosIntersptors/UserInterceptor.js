@@ -1,7 +1,7 @@
 // AxiosInterceptors/UserInterceptor.js - IMPROVED VERSION
 import axios from "axios";
 
-const BASE_URL = `${import.meta.env.VITE_API_URL}/auth/`;
+const BASE_URL = 'https://api.docdoor.muhammedafsal.online/api/auth/';
 
 // Create axios instance
 const axiosInstance = axios.create({
@@ -70,7 +70,7 @@ axiosInstance.interceptors.response.use(
             
             // Check if we've exceeded max refresh attempts
             if (refreshAttempts >= MAX_REFRESH_ATTEMPTS) {
-                console.error(' Max refresh attempts exceeded, logging out');
+                console.error('❌ Max refresh attempts exceeded, logging out');
                 await handleLogout();
                 return Promise.reject(error);
             }
