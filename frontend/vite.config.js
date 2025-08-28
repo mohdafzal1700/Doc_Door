@@ -12,5 +12,21 @@ export default defineConfig({
     watch: {
       usePolling: true  // Needed for hot reload in Docker on some systems
     }
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['react', 'react-dom'],
+          router: ['react-router-dom']
+        }
+      }
+    }
+  },
+  preview: {
+    port: 5173,
+    host: true
   }
-}) 
+})
