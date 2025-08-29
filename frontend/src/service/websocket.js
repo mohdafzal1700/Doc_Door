@@ -1,8 +1,6 @@
-// websocketService.js - Clean version with dedicated connect functions
 import { getStoredUserData, isUserAuthenticated, getValidAccessToken } from "../utils/auth"
 
-// Base URLs for WebSocket connections
-const CHAT_URL = "ws://localhost:8000/ws/chat/"
+const CHAT_URL = "wss://docdoor.muhammedafsal.online/ws/chat/"
 
 // WebSocket instances
 const chatSockets = new Map()
@@ -11,7 +9,7 @@ const reconnectAttempts = new Map()
 const maxReconnectAttempts = 5
 const connectionStates = new Map()
 
-// Get JWT token
+
 const getJWTToken = () => {
   try {
     const token = getValidAccessToken()
@@ -22,11 +20,10 @@ const getJWTToken = () => {
   }
 }
 
-// Connect to chat WebSocket
 export const connectChatSocket = async (conversationId, currentUserId = null) => {
   const socketKey = `${conversationId}_${currentUserId || 'anonymous'}`
   
-  // Validate inputs
+
   if (!conversationId || typeof conversationId !== 'string') {
     console.error('Invalid conversation ID provided')
     return null
@@ -37,7 +34,7 @@ export const connectChatSocket = async (conversationId, currentUserId = null) =>
     return null
   }
 
-  // Check for existing connection
+  
   const existingSocket = chatSockets.get(socketKey)
   if (existingSocket && existingSocket.readyState === WebSocket.OPEN) {
     console.log('Reusing existing WebSocket connection')
@@ -51,7 +48,7 @@ export const connectChatSocket = async (conversationId, currentUserId = null) =>
     chatSockets.delete(socketKey)
   }
 
-  // Check if already connecting
+  
   const currentState = connectionStates.get(socketKey)
   if (currentState === 'connecting') {
     console.log('Already connecting, waiting...')
@@ -161,7 +158,7 @@ export const connectChatSocket = async (conversationId, currentUserId = null) =>
       }
     }
 
-    // Connection timeout
+    
     const timeoutId = setTimeout(() => {
       if (chatSocket.readyState === WebSocket.CONNECTING) {
         console.error('Chat WebSocket connection timeout')
@@ -188,11 +185,11 @@ export const connectChatSocket = async (conversationId, currentUserId = null) =>
 
 
 
-// Legacy functions for backward compatibility
+
 export const getChatSocket = connectChatSocket
 
 
-// Helper function to ensure socket connection
+
 const ensureSocketConnection = async (conversationId, currentUserId = null) => {
   const socketKey = `${conversationId}_${currentUserId || 'anonymous'}`
   let socket = chatSockets.get(socketKey)
@@ -204,7 +201,7 @@ const ensureSocketConnection = async (conversationId, currentUserId = null) => {
   return socket
 }
 
-// Send chat message
+
 export const sendChatMessage = async (conversationId, messageData, currentUserId = null) => {
   const socketKey = `${conversationId}_${currentUserId || 'anonymous'}`
   const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
@@ -255,7 +252,7 @@ export const sendChatMessage = async (conversationId, messageData, currentUserId
   }
 }
 
-// Send typing indicator
+
 export const sendTyping = async (conversationId, isTyping = true, currentUserId = null) => {
   const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
   
@@ -281,7 +278,7 @@ export const sendTyping = async (conversationId, isTyping = true, currentUserId 
 }
 
 
-// Edit message
+
 export const editChatMessage = async (conversationId, messageId, newContent, currentUserId = null) => {
   const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
   
@@ -310,7 +307,7 @@ export const editChatMessage = async (conversationId, messageId, newContent, cur
   }
 }
 
-// Delete message
+
 export const deleteChatMessage = async (conversationId, messageId, currentUserId = null) => {
   const chatSocket = await ensureSocketConnection(conversationId, currentUserId)
   
@@ -340,7 +337,6 @@ export const deleteChatMessage = async (conversationId, messageId, currentUserId
 
 
 
-// Typing convenience functions
 export const sendTypingStart = async (conversationId, currentUserId = null) => {
   return await sendTyping(conversationId, true, currentUserId)
 }
@@ -349,7 +345,7 @@ export const sendTypingStop = async (conversationId, currentUserId = null) => {
   return await sendTyping(conversationId, false, currentUserId)
 }
 
-// Get connection status
+
 export const getConnectionStatus = (conversationId = null, currentUserId = null) => {
   if (conversationId) {
     const socketKey = `${conversationId}_${currentUserId || 'anonymous'}`
@@ -385,7 +381,7 @@ export const getConnectionStatus = (conversationId = null, currentUserId = null)
   return status
 }
 
-// Close specific chat socket
+
 export const closeChatSocket = (conversationId = null, currentUserId = null) => {
   if (conversationId) {
     const socketKey = `${conversationId}_${currentUserId || 'anonymous'}`
@@ -415,14 +411,13 @@ export const closeChatSocket = (conversationId = null, currentUserId = null) => 
 }
 
 
-// Close all sockets
 export const closeAllSockets = () => {
   closeChatSocket()
   closeNotificationSocket()
 }
 
 
-const NOTIFICATION_URL = "ws://localhost:8000/ws/notifications/"
+const NOTIFICATION_URL = "wss://docdoor.muhammedafsal.online/ws/notifications/"
 
 export const connectNotificationSocket = async () => {
     if (!isUserAuthenticated()) {
@@ -430,12 +425,12 @@ export const connectNotificationSocket = async () => {
         return null
     }
 
-    // Reuse existing connection
+  
     if (notificationSocketInstance && notificationSocketInstance.readyState === WebSocket.OPEN) {
         return notificationSocketInstance
     }
 
-    // Close old connection if exists
+    
     if (notificationSocketInstance) {
         notificationSocketInstance.close()
         notificationSocketInstance = null
@@ -458,7 +453,7 @@ export const connectNotificationSocket = async () => {
             console.log('Notification WebSocket disconnected')
             notificationSocketInstance = null
             
-            // Auto-reconnect unless manually closed or auth error
+            
             if (event.code !== 1000 && ![4000, 4001, 4003, 4004].includes(event.code)) {
                 setTimeout(() => connectNotificationSocket(), 3000)
             }
