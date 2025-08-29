@@ -240,6 +240,7 @@ export default function NotificationSystem({ currentUser, conversations = [], on
     }
   }
 
+  
   const handleNotificationRead = (notificationId) => {
     setNotifications(prev => 
       prev.map(notif => 
