@@ -6,7 +6,7 @@ const BASE_URL = 'https://api.docdoor.muhammedafsal.online/api/auth/';
 // Create axios instance
 const axiosInstance = axios.create({
     baseURL: BASE_URL,
-    withCredentials: true, // CRITICAL: This sends cookies automatically
+    withCredentials: true, 
     timeout: 10000,
 });
 

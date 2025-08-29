@@ -1,4 +1,4 @@
-// Updated Login.jsx with Google OAuth integration - FIXED USER DATA EXTRACTION
+// Complete Login.jsx with Fixed Google Auth Role Handling
 "use client"
 import { useFormik } from "formik"
 import * as Yup from "yup"
@@ -16,7 +16,6 @@ import { login, googleLogin } from "../endpoints/APIs.js"
 import { doctorLogin } from "../endpoints/Doc.js"
 import { setAuthData } from "../utils/auth.js"
 import { useToast } from "../components/ui/Toast"
-import SimpleGoogleTest from "../components/ui/simp.jsx"
 
 const Login = () => {
   const navigate = useNavigate()
@@ -33,10 +32,10 @@ const Login = () => {
       script.async = true
       script.defer = true
       script.onload = () => {
-        console.log("✅ Google Sign-In script loaded")
+        console.log("Google Sign-In script loaded")
       }
       script.onerror = () => {
-        console.error("❌ Failed to load Google Sign-In script")
+        console.error("Failed to load Google Sign-In script")
       }
       document.head.appendChild(script)
     }
@@ -58,16 +57,17 @@ const Login = () => {
       try {
         console.log("Starting login process:", values)
         let response;
+
         // Choose the appropriate login function based on userType
         if (values.userType === "doctor") {
-          console.log("🩺 Calling doctor login...")
+          console.log("Calling doctor login...")
           response = await doctorLogin(values)
         } else {
-          console.log("🏥 Calling patient login...")
+          console.log("Calling patient login...")
           response = await login(values)
         }
 
-        console.log("📡 Login response:", response.data)
+        console.log("Login response:", response.data)
 
         // Handle successful login
         if (response.data.success || response.status === 200) {
@@ -81,10 +81,10 @@ const Login = () => {
             refresh: response.data.refresh || response.data.refresh_token
           };
 
-          console.log("👤 User data:", userData)
-          console.log("🔑 Tokens received:", {
-            access: tokens.access ? "✅" : "❌",
-            refresh: tokens.refresh ? "✅" : "❌"
+          console.log("User data:", userData)
+          console.log("Tokens received:", {
+            access: tokens.access ? "Yes" : "No",
+            refresh: tokens.refresh ? "Yes" : "No"
           })
 
           if (userData && tokens.access) {
@@ -96,7 +96,7 @@ const Login = () => {
             )
 
             if (authStored) {
-              console.log("✅ Auth data stored successfully")
+              console.log("Auth data stored successfully")
               // Dispatch auth state change event
               window.dispatchEvent(new Event("authStateChanged"))
 
@@ -105,24 +105,24 @@ const Login = () => {
                 if (values.userType === "doctor") {
                   handleDoctorRedirection(userData)
                 } else {
-                  console.log("🏥 Patient login - going to home...")
+                  console.log("Patient login - going to home...")
                   navigate("/home")
                 }
               }, 100)
             } else {
-              console.error("❌ Failed to store auth data")
+              console.error("Failed to store auth data")
               toast.error("Failed to save login state. Please try again.")
             }
           } else {
-            console.error("❌ No user details or tokens received")
+            console.error("No user details or tokens received")
             toast.error("Invalid response from server. Please try again.")
           }
         } else {
-          console.log("❌ Login not successful:", response.data)
+          console.log("Login not successful:", response.data)
           toast.error(response.data.message || response.data.error || "Login failed")
         }
       } catch (error) {
-        console.error("❌ Login error:", error)
+        console.error("Login error:", error)
         handleLoginError(error)
       } finally {
         setLoading(false)
@@ -130,35 +130,56 @@ const Login = () => {
     },
   })
 
-  // FIXED: Updated handleGoogleLogin function with proper user data extraction
+  // Updated handleGoogleLogin function with proper role handling
   const handleGoogleLogin = async (idToken, userType) => {
     setGoogleLoading(true)
     try {
-      console.log("🔑 Starting Google OAuth login for:", userType)
+      console.log("=== GOOGLE LOGIN DEBUG ===")
+      console.log("Selected userType:", userType)
+      console.log("ID Token received:", idToken ? "Yes" : "No")
+      console.log("About to call googleLogin API with role:", userType)
       
-      // Call your Google login API
+      // Call Google login API with correct parameters
       const response = await googleLogin(idToken, userType)
-      console.log("📡 Google login response:", response.data)
+      
+      console.log("Google login API response:", response.data)
+      console.log("Response status:", response.status)
+      console.log("User role in response:", response.data.user?.role)
 
       if (response.status === 200 && response.data) {
-        console.log("✅ Google login successful!")
+        console.log("Google login successful!")
         toast.success("Google login successful", "Welcome!")
 
-        // FIXED: Extract user data from the correct location
-        // Backend returns: { message: '...', data: { user: {...} }, access: '...', refresh: '...' }
-        // OR it might return: { message: '...', user: {...}, access: '...', refresh: '...' }
+        // Extract user data from response
         let userData;
         
-        // Try multiple possible locations for user data
-        if (response.data.data && response.data.data.user) {
-          userData = response.data.data.user;
-          console.log("👤 Found user data in data.user:", userData);
-        } else if (response.data.user) {
+        if (response.data.user) {
           userData = response.data.user;
-          console.log("👤 Found user data in user:", userData);
+          console.log("Found user data in response.data.user")
+        } else if (response.data.data && response.data.data.user) {
+          userData = response.data.data.user;
+          console.log("Found user data in response.data.data.user")
         } else if (response.data.data) {
           userData = response.data.data;
-          console.log("👤 Found user data in data:", userData);
+          console.log("Found user data in response.data.data")
+        }
+
+        console.log("Extracted user data:", userData)
+        console.log("User role from backend:", userData?.role)
+
+        // Validate that the user role matches what we expected
+        if (userData && userData.role) {
+          if (userType === "doctor" && userData.role !== "doctor") {
+            console.error("Role mismatch! Expected doctor but got:", userData.role)
+            toast.error("Account is not registered as a doctor")
+            return;
+          }
+          
+          if (userType === "patient" && userData.role !== "patient") {
+            console.error("Role mismatch! Expected patient but got:", userData.role)
+            toast.error("Account is registered as a doctor. Please select doctor login.")
+            return;
+          }
         }
 
         const tokens = {
@@ -166,18 +187,17 @@ const Login = () => {
           refresh: response.data.refresh
         }
 
-        console.log("👤 Final Google user data:", userData)
-        console.log("🔑 Google tokens received:", {
-          access: tokens.access ? "✅" : "❌",
-          refresh: tokens.refresh ? "✅" : "❌"
+        console.log("Google tokens received:", {
+          access: tokens.access ? "Yes" : "No",
+          refresh: tokens.refresh ? "Yes" : "No"
         })
 
         if (userData && tokens.access) {
-          // Store auth data with improved function
+          // Store auth data
           const authStored = setAuthData(userData, tokens, userType)
 
           if (authStored) {
-            console.log("✅ Google auth data stored successfully")
+            console.log("Google auth data stored successfully")
             
             // Dispatch auth state change event
             window.dispatchEvent(new Event("authStateChanged"))
@@ -185,33 +205,40 @@ const Login = () => {
             // Small delay to ensure cookies are set
             await new Promise(resolve => setTimeout(resolve, 200))
 
-            // Navigate based on user type
+            // Navigate based on user type - use the SELECTED userType, not the response
+            console.log("Navigating based on selected userType:", userType)
             if (userType === "doctor") {
-              console.log("🩺 Google doctor login - checking verification...")
+              console.log("Google doctor login - checking verification...")
               handleDoctorRedirection(userData)
             } else {
-              console.log("🏥 Google patient login - going to home...")
+              console.log("Google patient login - going to home...")
               navigate("/home")
             }
           } else {
-            console.error("❌ Failed to store Google auth data")
+            console.error("Failed to store Google auth data")
             toast.error("Failed to save login state. Please try again.")
           }
         } else {
-          console.error("❌ No user details or tokens received from Google")
-          console.error("Available response data keys:", Object.keys(response.data))
+          console.error("No user details or tokens received from Google")
+          console.error("Available response data keys:", Object.keys(response.data || {}))
           toast.error("Invalid response from server. Please try again.")
         }
       } else {
-        console.log("❌ Google login not successful:", response.data)
+        console.log("Google login not successful:", response.data)
         toast.error(response.data.error || "Google login failed")
       }
     } catch (error) {
-      console.error("❌ Google login error:", error)
+      console.error("Google login error:", error)
+      console.error("Error response:", error.response?.data)
       
       // More specific error handling
       if (error.response?.status === 400) {
-        toast.error("Invalid Google token. Please try again.")
+        const errorData = error.response.data
+        if (errorData.error && errorData.error.includes('Already registered as')) {
+          toast.error(errorData.error)
+        } else {
+          toast.error("Invalid Google token. Please try again.")
+        }
       } else if (error.response?.status === 500) {
         toast.error("Server error. Please try again later.")
       } else {
@@ -223,11 +250,11 @@ const Login = () => {
   }
 
   const handleDoctorRedirection = (userData) => {
-    console.log("Doctor login - checking verification status from login response...")
-    console.log("Full user data received:", userData);
+    console.log("Doctor login - checking verification status...")
+    console.log("User data for verification check:", userData);
     
     const verificationStatus = getDoctorVerificationStatus(userData);
-    console.log("Verification status:", verificationStatus);
+    console.log("Determined verification status:", verificationStatus);
     
     switch(verificationStatus) {
       case 'verified':
@@ -237,22 +264,22 @@ const Login = () => {
         break;
       case 'pending_approval':
       case 'under_review':
-        console.log("Doctor verification pending - going to pre-verification view...")
+        console.log("Doctor verification pending - going to verification view...")
         navigate("/doctor/verification")
         break;
       case 'rejected':
-        console.log("Doctor verification rejected - going to pre-verification view...")
+        console.log("Doctor verification rejected - going to verification view...")
         navigate("/doctor/verification")
         break;
       case 'incomplete':
       default:
-        console.log("Doctor verification incomplete - going to pre-verification view...")
+        console.log("Doctor verification incomplete - going to verification setup...")
         navigate("/doctor/verification")
     }
   }
 
   const getDoctorVerificationStatus = (userData) => {
-    console.log("📋 Checking verification status from login data:", userData)
+    console.log("Checking verification status from user data:", userData)
     
     const doctorProfile = userData.doctor_profile || userData.profile;
     
@@ -269,7 +296,7 @@ const Login = () => {
         is_license_done = false
       } = doctorProfile;
       
-      console.log("📊 Profile completion status:", {
+      console.log("Profile completion status:", {
         is_profile_setup_done,
         is_education_done,
         is_certification_done,
@@ -291,13 +318,13 @@ const Login = () => {
     }
     
     if (userData.verification_status) {
-      console.log('Found User-level verification:', userData.verification_status)
+      console.log('Found user-level verification:', userData.verification_status)
       return userData.verification_status
     }
     
     if (userData.is_active === true && userData.role === 'doctor') {
       if (!doctorProfile) {
-        console.log("User is_active but no doctor_profile - status: incomplete");
+        console.log("User is active but no doctor_profile - status: incomplete");
         return 'incomplete';
       }
     }
@@ -307,7 +334,7 @@ const Login = () => {
   }
 
   const handleLoginError = (error) => {
-    console.error("📡 Error response:", error?.response?.data)
+    console.error("Error response:", error?.response?.data)
     
     let errorMessage = "Something went wrong. Please try again.";
     
@@ -355,7 +382,10 @@ const Login = () => {
         <form onSubmit={formik.handleSubmit}>
           <UserTypeToggle
             value={formik.values.userType}
-            onChange={(value) => formik.setFieldValue("userType", value)}
+            onChange={(value) => {
+              console.log("UserType changed to:", value)
+              formik.setFieldValue("userType", value)
+            }}
           />
 
           <Input
