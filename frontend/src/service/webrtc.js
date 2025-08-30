@@ -66,7 +66,7 @@ class VideoCallService {
       throw new Error("User not authenticated");
     }
 
-    const wsUrl = `ws://localhost:8000/ws/video_call/${userId}/`;
+    const wsUrl = `wss://api.docdoor.muhammedafsal.online/ws/video_call/${userId}/`;
 
     return new Promise((resolve, reject) => {
       try {

@@ -5,8 +5,19 @@ import videoCallService from '../service/webrtc';
 // WebRTC Configuration
 const rtcConfiguration = {
   iceServers: [
+    
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+
+    
+    {
+      urls: [
+        'stun:turn.muhammedafsal.online:3478', 
+        'turn:turn.muhammedafsal.online:3478'  
+      ],
+      username: 'webrtcuser',
+      credential: 'strongpassword'
+    }
   ]
 };
 
