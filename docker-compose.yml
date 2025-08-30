@@ -1,4 +1,5 @@
 version: '3.9'
+
 services:
   db:
     image: postgres:16
@@ -10,16 +11,25 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-  
+      - ./backups:/backups
+    restart: unless-stopped
+
   redis:
     image: redis:7
     ports:
       - "6379:6379"
-  
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
   backend:
     build: ./backend
+    # Use Daphne for ASGI (WebSocket + HTTP support)
+    command: daphne -b 0.0.0.0 -p 8000 backend.asgi:application
     volumes:
       - ./backend:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
     ports:
       - "8000:8000"
     env_file:
@@ -32,17 +42,8 @@ services:
       DB_PORT: 5432
       REDIS_HOST: redis
       REDIS_PORT: 6379
-  
-  # frontend:
-  #   build: ./frontend
-  #   volumes:
-  #     - ./frontend:/app
-  #     - /app/node_modules
-  #   ports:
-  #     - "5173:5173"
-  #   depends_on:
-  #     - backend
-  
+    restart: unless-stopped
+
   celery:
     build: ./backend
     command: celery -A backend worker --loglevel=info
@@ -58,6 +59,24 @@ services:
       DB_PORT: 5432
       REDIS_HOST: redis
       REDIS_PORT: 6379
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+      - static_volume:/var/www/staticfiles
+      - media_volume:/var/www/media
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - backend
+    restart: unless-stopped
 
 volumes:
   postgres_data:
+  redis_data:
+  static_volume:
+  media_volume:

@@ -33,7 +33,13 @@ SECRET_KEY = 'django-insecure-(*u5%f$pd)!4(m41yg3r#v%xr(3d2b5p(jet_+suuak-dcx9pr
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost', '*']
+ALLOWED_HOSTS = [
+    '127.0.0.1',
+    'localhost',
+    'api.docdoor.muhammedafsal.online',
+    '13.210.204.167',
+    '*'
+]
 
 
 # Application definition
@@ -45,26 +51,26 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
-    
+
+
     # Third party apps
     'rest_framework',
     'rest_framework_simplejwt',
     'corsheaders',
-    
+
     'channels',
-    
+
     # Your apps
     'adminside',
     'patients',
     'doctor',
     'chat',
     'videocall',
-    
+
     'cloudinary_storage',
     'cloudinary',
     'rest_framework_simplejwt.token_blacklist',
-    
+
 ]
 
 MIDDLEWARE = [
@@ -76,7 +82,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    
+
     'doctor.middleware.subscription_middleware.SubscriptionMiddleware',
 ]
 
@@ -103,7 +109,7 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-FILE_UPLOAD_MAX_MEMORY_SIZE = 5242880 
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5242880
 
 
 # Database
@@ -191,7 +197,7 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
-    
+
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'VERIFYING_KEY': None,
@@ -199,39 +205,32 @@ SIMPLE_JWT = {
     'ISSUER': None,
     'JWK_URL': None,
     'LEEWAY': 0,
-    
+
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
     'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
-    
+
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
     'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
-    
+
     'JTI_CLAIM': 'jti',
-    
+
     'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
     'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
 
-# CORS settings for development
+# CORS settings
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
+    "https://docdoor.muhammedafsal.online",
+    "https://www.docdoor.muhammedafsal.online",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
-
-CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  # React dev server
-    "http://127.0.0.1:3000",
-    "http://localhost:5173",  # Vite dev server
     "http://127.0.0.1:5173",
 ]
 
@@ -295,13 +294,14 @@ cloudinary.config(
 
 # # Make
 RAZORPAY_KEY_ID = config("RAZORPAY_API_KEY")
-RAZORPAY_KEY_SECRET = config("RAZORPAY_SECRET_KEY") 
+RAZORPAY_KEY_SECRET = config("RAZORPAY_SECRET_KEY")
 
 REDIS_URL = 'redis://redis:6379/0'  # Using database 0 for general operations
 
 ASGI_APPLICATION = 'backend.asgi.application'
 
 
+# # Channel Layers - In-memory for fallback
 # CHANNEL_LAYERS = {
 #     'default': {
 #         'BACKEND': 'channels.layers.InMemoryChannelLayer',  # No Redis needed
@@ -309,12 +309,12 @@ ASGI_APPLICATION = 'backend.asgi.application'
 # }
 
 
-
+# Channel Layers - Redis configuration
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
         'CONFIG': {
-            "hosts": [('redis', 6379)], 
+            "hosts": [(os.getenv('REDIS_HOST', 'redis'), int(os.getenv('REDIS_PORT', 6379)))],
         },
     },
 }
@@ -330,8 +330,8 @@ CACHES = {
     }
 }
 
-CELERY_BROKER_URL = 'redis://redis:6379/2'     
-CELERY_RESULT_BACKEND = 'redis://redis:6379/3' 
+CELERY_BROKER_URL = 'redis://redis:6379/2'
+CELERY_RESULT_BACKEND = 'redis://redis:6379/3'
 
 # Celery Task Settings
 CELERY_ACCEPT_CONTENT = ['application/json']
@@ -360,18 +360,28 @@ LOGGING = {
 }
 
 
+# WebRTC STUN/TURN Configuration - Updated
 WEBRTC_CONFIG = {
     'iceServers': [
-        {'urls': 'stun:stun.l.google.com:19302'},
-        {'urls': 'stun:stun1.l.google.com:19302'},
-        # Add TURN server if needed
-        # {
-        #     'urls': 'turn:your-turn-server.com:3478',
-        #     'username': 'your-username',
-        #     'credential': 'your-password'
-        # }
+        {
+            'urls': 'stun:stun.l.google.com:19302'
+        },
+        {
+            'urls': 'stun:stun1.l.google.com:19302'
+        },
+        {
+            'urls': f'turn:turn.{os.getenv("DOMAIN", "docdoor.muhammedafsal.online")}:3478',
+            'username': os.getenv('TURN_USERNAME', 'turnuser'),
+            'credential': os.getenv('TURN_PASSWORD', 'turnpassword')
+        },
+        {
+            'urls': f'turns:turn.{os.getenv("DOMAIN", "docdoor.muhammedafsal.online")}:5349',
+            'username': os.getenv('TURN_USERNAME', 'turnuser'),
+            'credential': os.getenv('TURN_PASSWORD', 'turnpassword')
+        }
     ]
 }
 
 
 GOOGLE_OAUTH2_CLIENT_ID = config("GOOGLE_OAUTH2_CLIENT_ID")
+STATIC_ROOT = "/app/staticfiles/"
