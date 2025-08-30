@@ -109,22 +109,18 @@ const processQueuedIceCandidates = useCallback(async () => {
   }, []);
 
   // Get user media
-  const getUserMedia = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: true
-      });
-      localStreamRef.current = stream;
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
-      return stream;
-    } catch (error) {
-      console.error('❌ Error accessing media devices:', error);
-      throw error;
-    }
-  }, []);
+ const getUserMedia = useCallback(async () => {
+  const timeout = new Promise((_, reject) => 
+    setTimeout(() => reject(new Error('Media timeout')), 8000)
+  );
+  
+  const mediaPromise = navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: true
+  });
+  
+  return Promise.race([mediaPromise, timeout]);
+}, []);
 
   // Cleanup resources
   const cleanup = useCallback(() => {
