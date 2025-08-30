@@ -287,114 +287,114 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
     # WebSocket event handlers
 
     async def incoming_call(self, event):
-	    """Handle incoming call messages sent via channel layer"""
-	    print(f"📞 Sending incoming call notification to user {self.user_id}")
-	    try:
-	        await self.send(text_data=json.dumps({
-	            'type': 'incoming_call',
-	            'caller_id': event['caller_id'],
-	            'caller_name': event['caller_name'],
-	            'call_id': event['call_id'],
-	            'room_name': event['room_name'],
-	            'appointment_id': event.get('appointment_id')
-	        }))
-	        print(f"✅ Incoming call notification sent to user {self.user_id}")
-	    except Exception as e:
-	        print(f"❌ Error sending incoming call notification: {e}")
+        """Handle incoming call messages sent via channel layer"""
+        print(f"📞 Sending incoming call notification to user {self.user_id}")
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'incoming_call',
+                'caller_id': event['caller_id'],
+                'caller_name': event['caller_name'],
+                'call_id': event['call_id'],
+                'room_name': event['room_name'],
+                'appointment_id': event.get('appointment_id')
+            }))
+            print(f"✅ Incoming call notification sent to user {self.user_id}")
+        except Exception as e:
+            print(f"❌ Error sending incoming call notification: {e}")
 
     async def call_accepted(self, event):
-	    """Handle call accepted messages"""
-	    print(f"✅ Sending call accepted notification to user {self.user_id}")
-	    try:
-	        await self.send(text_data=json.dumps({
-	            'type': 'call_accepted',
-	            'call_id': event['call_id'],
-	            'room_name': event['room_name'],
-	            'accepter_id': event['accepter_id']
-	        }))
-	        print(f"✅ Call accepted notification sent to user {self.user_id}")
-	    except Exception as e:
-	        print(f"❌ Error sending call accepted notification: {e}")
+        """Handle call accepted messages"""
+        print(f"✅ Sending call accepted notification to user {self.user_id}")
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'call_accepted',
+                'call_id': event['call_id'],
+                'room_name': event['room_name'],
+                'accepter_id': event['accepter_id']
+            }))
+            print(f"✅ Call accepted notification sent to user {self.user_id}")
+        except Exception as e:
+            print(f"❌ Error sending call accepted notification: {e}")
 
     async def call_rejected(self, event):
-	    """Handle call rejected messages"""
-	    print(f"❌ Sending call rejected notification to user {self.user_id}")
-	    try:
-	        await self.send(text_data=json.dumps({
-	            'type': 'call_rejected',
-	            'call_id': event['call_id'],
-	            'room_name': event['room_name'],
-	            'rejector_id': event['rejector_id']
-	        }))
-	        print(f"✅ Call rejected notification sent to user {self.user_id}")
-	    except Exception as e:
-	        print(f"❌ Error sending call rejected notification: {e}")
-     
+        """Handle call rejected messages"""
+        print(f"❌ Sending call rejected notification to user {self.user_id}")
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'call_rejected',
+                'call_id': event['call_id'],
+                'room_name': event['room_name'],
+                'rejector_id': event['rejector_id']
+            }))
+            print(f"✅ Call rejected notification sent to user {self.user_id}")
+        except Exception as e:
+            print(f"❌ Error sending call rejected notification: {e}")
+    
 
     async def call_ended(self, event):
-	    """Handle call ended messages"""
-	    print(f"🔚 Sending call ended notification to user {self.user_id}")
-	    try:
-	        await self.send(text_data=json.dumps({
-	            'type': 'call_ended',
-	            'call_id': event['call_id'],
-	            'room_name': event['room_name'],
-	            'ended_by': event['ended_by']
-	        }))
-	        print(f"✅ Call ended notification sent to user {self.user_id}")
-	    except Exception as e:
-	        print(f"❌ Error sending call ended notification: {e}")
+        """Handle call ended messages"""
+        print(f"🔚 Sending call ended notification to user {self.user_id}")
+        try:
+            await self.send(text_data=json.dumps({
+                'type': 'call_ended',
+                'call_id': event['call_id'],
+                'room_name': event['room_name'],
+                'ended_by': event['ended_by']
+            }))
+            print(f"✅ Call ended notification sent to user {self.user_id}")
+        except Exception as e:
+            print(f"❌ Error sending call ended notification: {e}")
 
 
     async def webrtc_offer(self, event):
-	    """Handle WebRTC offer messages"""
-	    # Don't send offer back to the sender
-	    if event['sender_id'] != self.user_id:
-	        print(f"📤 Forwarding WebRTC offer to user {self.user_id} from {event['sender_id']}")
-	        try:
-	            await self.send(text_data=json.dumps({
-	                'type': 'webrtc_offer',
-	                'offer': event['offer'],
-	                'room_name': event['room_name'],
-	                'sender_id': event['sender_id']
-	            }))
-	            print(f"✅ WebRTC offer forwarded to user {self.user_id}")
-	        except Exception as e:
-	            print(f"❌ Error forwarding WebRTC offer: {e}")
+        """Handle WebRTC offer messages"""
+        # Don't send offer back to the sender
+        if event['sender_id'] != self.user_id:
+            print(f"📤 Forwarding WebRTC offer to user {self.user_id} from {event['sender_id']}")
+            try:
+                await self.send(text_data=json.dumps({
+                    'type': 'webrtc_offer',
+                    'offer': event['offer'],
+                    'room_name': event['room_name'],
+                    'sender_id': event['sender_id']
+                }))
+                print(f"✅ WebRTC offer forwarded to user {self.user_id}")
+            except Exception as e:
+                print(f"❌ Error forwarding WebRTC offer: {e}")
 
 
     async def webrtc_answer(self, event):
-	    """Handle WebRTC answer messages"""
-	    # Don't send answer back to the sender
-	    if event['sender_id'] != self.user_id:
-	        print(f"📥 Forwarding WebRTC answer to user {self.user_id} from {event['sender_id']}")
-	        try:
-	            await self.send(text_data=json.dumps({
-	                'type': 'webrtc_answer',
-	                'answer': event['answer'],
-	                'room_name': event['room_name'],
-	                'sender_id': event['sender_id']
-	            }))
-	            print(f"✅ WebRTC answer forwarded to user {self.user_id}")
-	        except Exception as e:
-	            print(f"❌ Error forwarding WebRTC answer: {e}")
+        """Handle WebRTC answer messages"""
+        # Don't send answer back to the sender
+        if event['sender_id'] != self.user_id:
+            print(f"📥 Forwarding WebRTC answer to user {self.user_id} from {event['sender_id']}")
+            try:
+                await self.send(text_data=json.dumps({
+                    'type': 'webrtc_answer',
+                    'answer': event['answer'],
+                    'room_name': event['room_name'],
+                    'sender_id': event['sender_id']
+                }))
+                print(f"✅ WebRTC answer forwarded to user {self.user_id}")
+            except Exception as e:
+                print(f"❌ Error forwarding WebRTC answer: {e}")
 
 
     async def webrtc_ice_candidate(self, event):
-	    """Handle WebRTC ICE candidate messages"""
-	    # Don't send ICE candidate back to the sender
-	    if event['sender_id'] != self.user_id:
-	        print(f"🧊 Forwarding ICE candidate to user {self.user_id} from {event['sender_id']}")
-	        try:
-	            await self.send(text_data=json.dumps({
-	                'type': 'ice_candidate',
-	                'candidate': event['candidate'],
-	                'room_name': event['room_name'],
-	                'sender_id': event['sender_id']
-	            }))
-	            print(f"✅ ICE candidate forwarded to user {self.user_id}")
-	        except Exception as e:
-	            print(f"❌ Error forwarding ICE candidate: {e}")
+        """Handle WebRTC ICE candidate messages"""
+        # Don't send ICE candidate back to the sender
+        if event['sender_id'] != self.user_id:
+            print(f"🧊 Forwarding ICE candidate to user {self.user_id} from {event['sender_id']}")
+            try:
+                await self.send(text_data=json.dumps({
+                    'type': 'ice_candidate',
+                    'candidate': event['candidate'],
+                    'room_name': event['room_name'],
+                    'sender_id': event['sender_id']
+                }))
+                print(f"✅ ICE candidate forwarded to user {self.user_id}")
+            except Exception as e:
+                print(f"❌ Error forwarding ICE candidate: {e}")
 
 
     # Database operations remain the same...
@@ -422,39 +422,39 @@ class VideoCallConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def check_user_exists(self, user_id):
-	    """Check if a user exists"""
-	    try:
-	        print(f"🔍 DEBUG - Checking if user exists: {user_id} (type: {type(user_id)})")
-	        
-	        # Try to find the user
-	        user_exists = User.objects.filter(id=user_id).exists()
-	        print(f"🔍 DEBUG - User exists result: {user_exists}")
-	        
-	        # If not found, try alternative lookups
-	        if not user_exists:
-	            print(f"🔍 DEBUG - Trying alternative lookups...")
-	            
-	            # Try by username (if user_id is actually a username)
-	            user_by_username = User.objects.filter(username=user_id).exists()
-	            print(f"🔍 DEBUG - User by username: {user_by_username}")
-	            
-	            # Try by email (if user_id is actually an email)
-	            user_by_email = User.objects.filter(email=user_id).exists()
-	            print(f"🔍 DEBUG - User by email: {user_by_email}")
-	            
-	            # List all users for debugging
-	            all_users = User.objects.all()
-	            print(f"🔍 DEBUG - All users in database:")
-	            for user in all_users:
-	                print(f"   - ID: {user.id} (type: {type(user.id)}), Username: {user.username}, Email: {user.email}")
-	        
-	        return user_exists
-	        
-	    except Exception as e:
-	        print(f"❌ Error checking user existence: {e}")
-	        import traceback
-	        traceback.print_exc()
-	        return False
+        """Check if a user exists"""
+        try:
+            print(f"🔍 DEBUG - Checking if user exists: {user_id} (type: {type(user_id)})")
+            
+            # Try to find the user
+            user_exists = User.objects.filter(id=user_id).exists()
+            print(f"🔍 DEBUG - User exists result: {user_exists}")
+            
+            # If not found, try alternative lookups
+            if not user_exists:
+                print(f"🔍 DEBUG - Trying alternative lookups...")
+                
+                # Try by username (if user_id is actually a username)
+                user_by_username = User.objects.filter(username=user_id).exists()
+                print(f"🔍 DEBUG - User by username: {user_by_username}")
+                
+                # Try by email (if user_id is actually an email)
+                user_by_email = User.objects.filter(email=user_id).exists()
+                print(f"🔍 DEBUG - User by email: {user_by_email}")
+                
+                # List all users for debugging
+                all_users = User.objects.all()
+                print(f"🔍 DEBUG - All users in database:")
+                for user in all_users:
+                    print(f"   - ID: {user.id} (type: {type(user.id)}), Username: {user.username}, Email: {user.email}")
+            
+            return user_exists
+            
+        except Exception as e:
+            print(f"❌ Error checking user existence: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     
 
