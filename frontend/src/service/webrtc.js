@@ -1,642 +1,478 @@
-import json
-import uuid
-from channels.generic.websocket import AsyncWebsocketConsumer
-from channels.db import database_sync_to_async
-from django.contrib.auth import get_user_model
-from .models import CallRecord, ActiveCall
-from datetime import datetime, timedelta
-from django.utils import timezone
-from doctor.models import Appointment
-User = get_user_model()
+    // services/VideoCallService.js - One-on-One Call Service
+    import { getStoredUserData, isUserAuthenticated, getValidAccessToken } from "../utils/auth"
 
-class VideoCallConsumer(AsyncWebsocketConsumer):
-    async def connect(self):
-        self.user_id = self.scope['url_route']['kwargs']['user_id']
-        self.user_group_name = f'user_{self.user_id}'
+    class VideoCallService {
+      constructor() {
+        this.socket = null;
+        this.userId = null;
+        this.connected = false; // Fixed: use consistent property name
+        this.messageHandlers = new Map();
+        this.reconnectAttempts = 0;
+        this.maxReconnectAttempts = 5;
+        this.reconnectInterval = 3000;
+        this.messageQueue = []; // Queue messages while disconnected
+        this.currentCall = null; // Store current call info
+        this.roomName = null; // Store current room name
+      }
+
+      // Fixed: Consistent isConnected method
+      isConnected() {
+        return this.connected && 
+              this.socket && 
+              this.socket.readyState === WebSocket.OPEN;
+      }
+
+      // Get JWT token
+      getJWTToken() {
+        try {
+          const token = getValidAccessToken();
+          return token || null;
+        } catch (error) {
+          console.error('Error during token retrieval:', error);
+          return null;
+        }
+      }
+
+      // Get current user data
+      getCurrentUser() {
+        try {
+          return getStoredUserData();
+        } catch (error) {
+          console.error('Error getting user data:', error);
+          return null;
+        }
+      }
+
+      async connect(userId) {
+        // Close existing connection if different user or if connection exists
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          if (this.userId === userId) {
+            console.log('Already connected for the same user');
+            return Promise.resolve();
+          }
+          this.disconnect();
+        }
+
+        this.userId = userId;
+        const token = this.getJWTToken();
         
-        await self.channel_layer.group_add(
-            self.user_group_name,
-            self.channel_name
-        )
-        await self.accept()
-        print(f"✅ User {self.user_id} connected")
+        if (!token) {
+          console.error("Cannot connect: token not found");
+          throw new Error("Authentication token not found");
+        }
 
-    async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(
-            self.user_group_name,
-            self.channel_name
-        )
-        await self.cleanup_active_calls()
-        print(f"🔌 User {self.user_id} disconnected")
+        if (!isUserAuthenticated()) {
+          console.error("Cannot connect: user not authenticated");
+          throw new Error("User not authenticated");
+        }
 
-    async def receive(self, text_data):
-        try:
-            data = json.loads(text_data)
-            message_type = data.get('type')
-            print(f"📨 Received message: {message_type} from user {self.user_id}")
-            print(f"📨 Message data: {data}")
+        const wsUrl = `wss://api.docdoor.muhammedafsal.online/ws/video_call/${userId}/`;
 
-            if message_type == 'call_initiate':
-                await self.initiate_call(data)
-            elif message_type == 'call_accept':
-                await self.accept_call(data)
-            elif message_type == 'call_reject':
-                await self.reject_call(data)
-            elif message_type == 'call_end':
-                await self.end_call(data)
-            elif message_type == 'offer':
-                await self.handle_offer(data)
-            elif message_type == 'answer':
-                await self.handle_answer(data)
-            elif message_type == 'ice_candidate':
-                await self.handle_ice_candidate(data)
-            else:
-                print(f"❓ Unknown message type: {message_type}")
+        return new Promise((resolve, reject) => {
+          try {
+            this.socket = new WebSocket(wsUrl);
+            this.setupEventListeners(resolve, reject);
+            console.log(`🔌 Connecting to video call service for user: ${userId}`);
+          } catch (error) {
+            console.error('VideoCall WebSocket connection error:', error);
+            reject(error);
+          }
+        });
+      }
 
-        except json.JSONDecodeError as e:
-            print(f"❌ Invalid JSON received: {e}")
-        except Exception as e:
-            print(f"❌ Error processing message: {e}")
-            import traceback
-            traceback.print_exc()
+      setupEventListeners(connectResolve = null, connectReject = null) {
+        if (!this.socket) return;
 
-    async def initiate_call(self, data):
-        caller_id = self.user_id
-        callee_id = data.get('callee_id')
-        appointment_id = data.get('appointment_id')
-        print(f"🎯 CALL INITIATION: {caller_id} calling {callee_id} for appointment {appointment_id}")
-        print(f"🔍 Appointment ID: {appointment_id}")
-        if not callee_id:
-            print("❌ No callee_id provided")
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'message': 'No recipient specified'
-            }))
-            return
+        // Connection timeout
+        const connectionTimeout = setTimeout(() => {
+          if (this.socket && this.socket.readyState === WebSocket.CONNECTING) {
+            this.socket.close();
+            const error = new Error('Connection timeout');
+            console.error('❌ VideoCall connection timeout');
+            if (connectReject) connectReject(error);
+          }
+        }, 10000);
 
-        if not appointment_id:
-            print("❌ No appointment_id provided")
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'message': 'Appointment ID required for call'
-            }))
-            return
+        this.socket.onopen = () => {
+          clearTimeout(connectionTimeout);
+          console.log('✅ VideoCall WebSocket connected');
+          this.connected = true; // Fixed: use consistent property
+          this.reconnectAttempts = 0;
 
-        try:
-            # Validate appointment
-            appointment_validation = await self.validate_appointment_call(caller_id, callee_id, appointment_id)
-            # Check if validation returned None or invalid response
-            if not appointment_validation or not isinstance(appointment_validation, dict):
-                print(f"❌ Appointment validation returned invalid response: {appointment_validation}")
-                await self.send(text_data=json.dumps({
-                    'type': 'error',
-                    'message': 'Error validating appointment'
-                }))
-                return
+          // Send queued messages
+          while (this.messageQueue.length > 0) {
+            const message = this.messageQueue.shift();
+            this.socket.send(JSON.stringify(message));
+          }
 
-            # Check if callee exists
-            callee_exists = await self.check_user_exists(callee_id)
-            if not callee_exists:
-                print(f"❌ Callee {callee_id} does not exist")
-                await self.send(text_data=json.dumps({
-                    'type': 'error',
-                    'message': 'User not found'
-                }))
-                return
+          this.triggerHandler('connection', { status: 'connected' });
+          if (connectResolve) connectResolve();
+        };
 
-            # Create call record - FIXED: Pass appointment_id as third parameter
-            call_record = await self.create_call_record(caller_id, callee_id, appointment_id)
-            print(f"✅ Call record created: {call_record.id}")
+        this.socket.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            console.log('📨 VideoCall message received:', data);
+            this.handleMessage(data);
+          } catch (error) {
+            console.error('❌ Error parsing VideoCall WebSocket message:', error);
+          }
+        };
 
-            room_name = f"call_{call_record.id}_{uuid.uuid4().hex[:8]}"
+        this.socket.onclose = async (event) => {
+          clearTimeout(connectionTimeout);
+          console.log('🔌 VideoCall WebSocket disconnected:', event.code, event.reason);
+          this.connected = false; // Fixed: use consistent property
+          this.triggerHandler('connection', { status: 'disconnected' });
+          this.triggerHandler('disconnect', { code: event.code, reason: event.reason });
 
-            # Add caller to room
-            await self.channel_layer.group_add(room_name, self.channel_name)
-            print(f"✅ Caller {caller_id} added to room {room_name}")
-
-            # Get caller name
-            caller_name = await self.get_user_name(caller_id)
-
-            # Send to callee
-            callee_group = f'user_{callee_id}'
-            print(f"📞 Sending incoming call to group: {callee_group}")
-            print(f"🔍 Appointment ID: {appointment_id}")
-            await self.channel_layer.group_send(
-                callee_group,
-                {
-                    'type': 'incoming_call',
-                    'caller_id': caller_id,
-                    'caller_name': caller_name,
-                    'call_id': call_record.id,
-                    'room_name': room_name,
-                    'appointment_id': appointment_id
+          // Auto-reconnect logic (only if not a clean disconnect)
+          if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+            setTimeout(async () => {
+              this.reconnectAttempts++;
+              console.log(`🔄 Reconnecting... Attempt ${this.reconnectAttempts}`);
+              
+              const token = this.getJWTToken();
+              if (token && this.userId && isUserAuthenticated()) {
+                try {
+                  await this.connect(this.userId);
+                } catch (error) {
+                  console.error('❌ Reconnection failed:', error);
                 }
-            )
+              }
+            }, this.reconnectInterval);
+          }
 
-            # Confirm to caller
-            await self.send(text_data=json.dumps({
-                'type': 'call_initiated',
-                'call_id': call_record.id,
-                'room_name': room_name,
-                'status': 'calling',
-                'appointment_id': appointment_id
-            }))
-            print(f"📞 Call initiated successfully: {caller_id} → {callee_id}")
+          // If initial connection failed
+          if (this.socket && this.socket.readyState === WebSocket.CONNECTING && connectReject) {
+            connectReject(new Error(`Connection failed: ${event.code} ${event.reason}`));
+          }
+        };
 
-        except Exception as e:
-            print(f"❌ Call initiation failed: {e}")
-            import traceback
-            traceback.print_exc()
-            await self.send(text_data=json.dumps({
-                'type': 'error',
-                'message': 'Failed to initiate call'
-            }))
-            
-    async def accept_call(self, data):
-        call_id = data.get('call_id')
-        room_name = data.get('room_name')
-        print(f"✅ ACCEPTING CALL: {call_id} in room {room_name} by user {self.user_id}")
+        this.socket.onerror = (error) => {
+          clearTimeout(connectionTimeout);
+          console.error('❌ VideoCall WebSocket error:', error);
+          this.triggerHandler('error', { error });
+          
+          // If initial connection failed
+          if (connectReject) {
+            connectReject(error);
+          }
+        };
+      }
 
-        try:
-            await self.update_call_status(call_id, 'answered')
-            print(f"✅ Call status updated to answered")
-
-            # Add callee to room
-            await self.channel_layer.group_add(room_name, self.channel_name)
-            print(f"✅ Callee {self.user_id} added to room {room_name}")
-
-            # ✅ FIXED: Include room_name in the call_accepted event
-            await self.channel_layer.group_send(
-                room_name,
-                {
-                    'type': 'call_accepted',
-                    'call_id': call_id,
-                    'room_name': room_name,  # ✅ Added room_name
-                    'accepter_id': self.user_id
-                }
-            )
-            print(f"✅ Call accepted notification sent to room {room_name}")
-
-        except Exception as e:
-            print(f"❌ Call acceptance failed: {e}")
-            import traceback
-            traceback.print_exc()
-
-    async def reject_call(self, data):
-        call_id = data.get('call_id')
-        room_name = data.get('room_name')
+      handleMessage(data) {
+        const { type } = data;
         
-        try:
-            await self.update_call_status(call_id, 'rejected')
-            
-            # ✅ FIXED: Include room_name in call_rejected event
-            await self.channel_layer.group_send(
-                room_name,
-                {
-                    'type': 'call_rejected',
-                    'call_id': call_id,
-                    'room_name': room_name,  # ✅ Added room_name
-                    'rejector_id': self.user_id
-                }
-            )
-            await self.cleanup_call(call_id)
-            print(f"❌ Call rejected: {call_id}")
-            
-        except Exception as e:
-            print(f"❌ Call rejection failed: {e}")
+        switch (type) {
+          case 'incoming_call':
+            this.currentCall = {
+              callId: data.call_id,
+              callerId: data.caller_id,
+              callerName: data.caller_name,
+              roomName: data.room_name,
+              status: 'incoming'
+            };
+            this.triggerHandler('incoming_call', data);
+            break;
 
-    async def end_call(self, data):
-        call_id = data.get('call_id')
-        room_name = data.get('room_name')
+          case 'call_initiated':
+            this.currentCall = {
+              callId: data.call_id,
+              roomName: data.room_name,
+              status: data.status || 'initiated'
+            };
+            this.roomName = data.room_name;
+            this.triggerHandler('call_initiated', data);
+            break;
+
+          case 'call_accepted':
+            if (this.currentCall) {
+              this.currentCall.status = 'accepted';
+            }
+            this.triggerHandler('call_accepted', data);
+            break;
+
+          case 'call_rejected':
+            if (this.currentCall) {
+              this.currentCall.status = 'rejected';
+            }
+            this.triggerHandler('call_rejected', data);
+            break;
+
+          case 'call_ended':
+            if (this.currentCall) {
+              this.currentCall.status = 'ended';
+            }
+            this.triggerHandler('call_ended', data);
+            break;
+
+          case 'offer':
+          case 'webrtc_offer':
+            this.triggerHandler('webrtc_offer', data);
+            break;
+
+          case 'answer':
+          case 'webrtc_answer':
+            this.triggerHandler('webrtc_answer', data);
+            break;
+
+          case 'ice_candidate':
+            this.triggerHandler('ice_candidate', data);
+            break;
+
+          default:
+            console.log('❓ Unknown VideoCall message type:', type, data);
+            this.triggerHandler('unknown_message', data);
+        }
+      }
+
+      // Register event handlers
+      on(event, handler) {
+        if (!this.messageHandlers.has(event)) {
+          this.messageHandlers.set(event, []);
+        }
+        this.messageHandlers.get(event).push(handler);
+      }
+
+      // Remove event handlers
+      off(event, handler) {
+        if (this.messageHandlers.has(event)) {
+          const handlers = this.messageHandlers.get(event);
+          const index = handlers.indexOf(handler);
+          if (index > -1) {
+            handlers.splice(index, 1);
+          }
+        }
+      }
+
+      // Remove all handlers for an event
+      removeAllHandlers(event) {
+        if (this.messageHandlers.has(event)) {
+          this.messageHandlers.delete(event);
+        }
+      }
+
+      // Fixed: Add removeAllListeners alias for compatibility
+      removeAllListeners(event) {
+        this.removeAllHandlers(event);
+      }
+
+      // Trigger event handlers
+      triggerHandler(event, data) {
+        if (this.messageHandlers.has(event)) {
+          this.messageHandlers.get(event).forEach(handler => {
+            try {
+              handler(data);
+            } catch (error) {
+              console.error(`❌ Error in ${event} handler:`, error);
+            }
+          });
+        }
+      }
+
+      // Fixed: Add emit alias for compatibility
+      emit(event, data) {
+        this.triggerHandler(event, data);
+      }
+
+      // Send messages
+      send(data) {
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+          try {
+            this.socket.send(JSON.stringify(data));
+            return true;
+          } catch (error) {
+            console.error('❌ Error sending message:', error);
+            return false;
+          }
+        } else {
+          // Queue message if not connected
+          this.messageQueue.push(data);
+          console.warn('⚠️ VideoCall WebSocket is not connected, message queued');
+          return false;
+        }
+      }
+
+      // Call management methods
+      initiateCall(calleeId, appointmentId) {
+      console.log(`📞 Initiating call to user: ${calleeId} for appointment: ${appointmentId}`);
+      
+      if (!appointmentId) {
+        console.error('❌ appointmentId is required for call initiation');
+        return false;
+      }
+      
+      return this.send({
+        type: 'call_initiate',
+        callee_id: calleeId,
+        appointment_id: appointmentId  // <- ADD THIS LINE
+      });
+    }
+
+      acceptCall(callId, roomName) {
+        console.log(`✅ Accepting call: ${callId}`);
+        this.roomName = roomName;
+        return this.send({
+          type: 'call_accept',
+          call_id: callId,
+          room_name: roomName
+        });
+      }
+
+      rejectCall(callId, roomName) {
+        console.log(`❌ Rejecting call: ${callId}`);
+        return this.send({
+          type: 'call_reject',
+          call_id: callId,
+          room_name: roomName
+        });
+      }
+
+      endCall(callId, roomName) {
+        console.log(`🔚 Ending call: ${callId}`);
+        return this.send({
+          type: 'call_end',
+          call_id: callId,
+          room_name: roomName || this.roomName
+        });
+      }
+
+      // WebRTC signaling methods
+      sendOffer(offer, roomName) {
+      if (!roomName) {
+        console.error('❌ Room name is required to send offer');
+        return;
+      }
+      
+      const message = {
+        type: 'offer',
+        offer: offer,
+        room_name: roomName
+      };
+      
+      console.log('📤 Sending WebRTC offer to room:', roomName);
+      this.send(message);
+    }
+
+      sendAnswer(answer, roomName) {
+      if (!roomName) {
+        console.error('❌ Room name is required to send answer');
+        return;
+      }
+      
+      const message = {
+        type: 'answer',
+        answer: answer,
+        room_name: roomName
+      };
+      
+      console.log('📤 Sending WebRTC answer to room:', roomName);
+      this.send(message);
+    }
+
+      sendICECandidate(candidate, roomName) {
+      if (!roomName) {
+        console.error('❌ Room name is required to send ICE candidate');
+        return;
+      }
+      
+      const message = {
+        type: 'ice_candidate',
+        candidate: candidate,
+        room_name: roomName
+      };
+      
+      console.log('🧊 Sending ICE candidate to room:', roomName);
+      this.send(message);
+    }
+
+      // Utility methods
+      getCurrentCall() {
+        return this.currentCall;
+      }
+
+      getCurrentRoomName() {
+        return this.roomName;
+      }
+
+      // Fixed: Complete getConnectionStatus method
+      getConnectionStatus() {
+        if (!this.socket) return 'disconnected';
         
-        try:
-            await self.end_call_record(call_id)
-            
-            # ✅ FIXED: Include room_name in call_ended event
-            await self.channel_layer.group_send(
-                room_name,
-                {
-                    'type': 'call_ended',
-                    'call_id': call_id,
-                    'room_name': room_name,  # ✅ Added room_name
-                    'ended_by': self.user_id
-                }
-            )
-            await self.cleanup_call(call_id)
-            print(f"🔚 Call ended: {call_id}")
-            
-        except Exception as e:
-            print(f"❌ Call end failed: {e}")
+        switch (this.socket.readyState) {
+          case WebSocket.CONNECTING:
+            return 'connecting';
+          case WebSocket.OPEN:
+            return 'connected';
+          case WebSocket.CLOSING:
+            return 'closing';
+          case WebSocket.CLOSED:
+            return 'disconnected';
+          default:
+            return 'unknown';
+        }
+      }
 
-    async def handle_offer(self, data):
-        room_name = data.get('room_name')
-        offer = data.get('offer')
-        print(f"📤 OFFER: Broadcasting from {self.user_id} to room {room_name}")
+      isInCall() {
+        return this.currentCall && ['calling', 'accepted', 'initiated'].includes(this.currentCall.status);
+      }
 
-        try:
-            await self.channel_layer.group_send(
-                room_name,
-                {
-                    'type': 'webrtc_offer',
-                    'offer': offer,
-                    'room_name': room_name,  # ✅ Include room_name for consistency
-                    'sender_id': self.user_id
-                }
-            )
-            print(f"✅ Offer broadcast successful")
-        except Exception as e:
-            print(f"❌ Offer handling failed: {e}")
+      // Clean up current call
+      clearCurrentCall() {
+        this.currentCall = null;
+        this.roomName = null;
+      }
 
-    async def handle_answer(self, data):
-        room_name = data.get('room_name')
-        answer = data.get('answer')
-        print(f"📥 ANSWER: Broadcasting from {self.user_id} to room {room_name}")
-
-        try:
-            await self.channel_layer.group_send(
-                room_name,
-                {
-                    'type': 'webrtc_answer',
-                    'answer': answer,
-                    'room_name': room_name,  # ✅ Include room_name for consistency
-                    'sender_id': self.user_id
-                }
-            )
-            print(f"✅ Answer broadcast successful")
-        except Exception as e:
-            print(f"❌ Answer handling failed: {e}")
-
-    async def handle_ice_candidate(self, data):
-        room_name = data.get('room_name')
-        candidate = data.get('candidate')
-
-        try:
-            await self.channel_layer.group_send(
-                room_name,
-                {
-                    'type': 'webrtc_ice_candidate',
-                    'candidate': candidate,
-                    'room_name': room_name,  
-                    'sender_id': self.user_id
-                }
-            )
-            print(f"🧊 ICE candidate sent to room: {room_name}")
-        except Exception as e:
-            print(f"❌ ICE candidate handling failed: {e}")
-
-    # WebSocket event handlers
-
-    async def incoming_call(self, event):
-        """Handle incoming call messages sent via channel layer"""
-        print(f"📞 Sending incoming call notification to user {self.user_id}")
-        try:
-            await self.send(text_data=json.dumps({
-                'type': 'incoming_call',
-                'caller_id': event['caller_id'],
-                'caller_name': event['caller_name'],
-                'call_id': event['call_id'],
-                'room_name': event['room_name'],
-                'appointment_id': event.get('appointment_id')
-            }))
-            print(f"✅ Incoming call notification sent to user {self.user_id}")
-        except Exception as e:
-            print(f"❌ Error sending incoming call notification: {e}")
-
-    async def call_accepted(self, event):
-        """Handle call accepted messages"""
-        print(f"✅ Sending call accepted notification to user {self.user_id}")
-        try:
-            await self.send(text_data=json.dumps({
-                'type': 'call_accepted',
-                'call_id': event['call_id'],
-                'room_name': event['room_name'],
-                'accepter_id': event['accepter_id']
-            }))
-            print(f"✅ Call accepted notification sent to user {self.user_id}")
-        except Exception as e:
-            print(f"❌ Error sending call accepted notification: {e}")
-
-    async def call_rejected(self, event):
-        """Handle call rejected messages"""
-        print(f"❌ Sending call rejected notification to user {self.user_id}")
-        try:
-            await self.send(text_data=json.dumps({
-                'type': 'call_rejected',
-                'call_id': event['call_id'],
-                'room_name': event['room_name'],
-                'rejector_id': event['rejector_id']
-            }))
-            print(f"✅ Call rejected notification sent to user {self.user_id}")
-        except Exception as e:
-            print(f"❌ Error sending call rejected notification: {e}")
-    
-
-    async def call_ended(self, event):
-        """Handle call ended messages"""
-        print(f"🔚 Sending call ended notification to user {self.user_id}")
-        try:
-            await self.send(text_data=json.dumps({
-                'type': 'call_ended',
-                'call_id': event['call_id'],
-                'room_name': event['room_name'],
-                'ended_by': event['ended_by']
-            }))
-            print(f"✅ Call ended notification sent to user {self.user_id}")
-        except Exception as e:
-            print(f"❌ Error sending call ended notification: {e}")
-
-
-    async def webrtc_offer(self, event):
-        """Handle WebRTC offer messages"""
-        # Don't send offer back to the sender
-        if event['sender_id'] != self.user_id:
-            print(f"📤 Forwarding WebRTC offer to user {self.user_id} from {event['sender_id']}")
-            try:
-                await self.send(text_data=json.dumps({
-                    'type': 'webrtc_offer',
-                    'offer': event['offer'],
-                    'room_name': event['room_name'],
-                    'sender_id': event['sender_id']
-                }))
-                print(f"✅ WebRTC offer forwarded to user {self.user_id}")
-            except Exception as e:
-                print(f"❌ Error forwarding WebRTC offer: {e}")
-
-
-    async def webrtc_answer(self, event):
-        """Handle WebRTC answer messages"""
-        # Don't send answer back to the sender
-        if event['sender_id'] != self.user_id:
-            print(f"📥 Forwarding WebRTC answer to user {self.user_id} from {event['sender_id']}")
-            try:
-                await self.send(text_data=json.dumps({
-                    'type': 'webrtc_answer',
-                    'answer': event['answer'],
-                    'room_name': event['room_name'],
-                    'sender_id': event['sender_id']
-                }))
-                print(f"✅ WebRTC answer forwarded to user {self.user_id}")
-            except Exception as e:
-                print(f"❌ Error forwarding WebRTC answer: {e}")
-
-
-    async def webrtc_ice_candidate(self, event):
-        """Handle WebRTC ICE candidate messages"""
-        # Don't send ICE candidate back to the sender
-        if event['sender_id'] != self.user_id:
-            print(f"🧊 Forwarding ICE candidate to user {self.user_id} from {event['sender_id']}")
-            try:
-                await self.send(text_data=json.dumps({
-                    'type': 'ice_candidate',
-                    'candidate': event['candidate'],
-                    'room_name': event['room_name'],
-                    'sender_id': event['sender_id']
-                }))
-                print(f"✅ ICE candidate forwarded to user {self.user_id}")
-            except Exception as e:
-                print(f"❌ Error forwarding ICE candidate: {e}")
-
-
-    # Database operations remain the same...
-    @database_sync_to_async
-    def create_call_record(self, caller_id, callee_id,appointment_id=None):
-        """Create a new call record in the database"""
-        try:
-            print(f"🔄 Creating call record: {caller_id} -> {callee_id}")
-            caller = User.objects.get(id=caller_id)
-            callee = User.objects.get(id=callee_id)
-            call_record = CallRecord.objects.create(
-                caller=caller,
-                callee=callee,
-                status='initiated',
-                appointment_id=appointment_id,
-            )
-            print(f"✅ Call record created with ID: {call_record.id}")
-            return call_record
-        except User.DoesNotExist as e:
-            print(f"❌ User not found: {e}")
-            raise
-        except Exception as e:
-            print(f"❌ Database error - create call record: {e}")
-            raise
-
-    @database_sync_to_async
-    def check_user_exists(self, user_id):
-        """Check if a user exists"""
-        try:
-            print(f"🔍 DEBUG - Checking if user exists: {user_id} (type: {type(user_id)})")
-            
-            # Try to find the user
-            user_exists = User.objects.filter(id=user_id).exists()
-            print(f"🔍 DEBUG - User exists result: {user_exists}")
-            
-            # If not found, try alternative lookups
-            if not user_exists:
-                print(f"🔍 DEBUG - Trying alternative lookups...")
-                
-                # Try by username (if user_id is actually a username)
-                user_by_username = User.objects.filter(username=user_id).exists()
-                print(f"🔍 DEBUG - User by username: {user_by_username}")
-                
-                # Try by email (if user_id is actually an email)
-                user_by_email = User.objects.filter(email=user_id).exists()
-                print(f"🔍 DEBUG - User by email: {user_by_email}")
-                
-                # List all users for debugging
-                all_users = User.objects.all()
-                print(f"🔍 DEBUG - All users in database:")
-                for user in all_users:
-                    print(f"   - ID: {user.id} (type: {type(user.id)}), Username: {user.username}, Email: {user.email}")
-            
-            return user_exists
-            
-        except Exception as e:
-            print(f"❌ Error checking user existence: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-
-    
-
-    @database_sync_to_async
-    def update_call_status(self, call_id, status):
-        """Update call status"""
-        try:
-            updated = CallRecord.objects.filter(id=call_id).update(status=status)
-            print(f"✅ Updated {updated} call record(s) to status: {status}")
-            return updated > 0
-        except Exception as e:
-            print(f"❌ Database error - update call status: {e}")
-            raise
-
-    @database_sync_to_async
-    def end_call_record(self, call_id):
-        """End a call record"""
-        try:
-            call_record = CallRecord.objects.get(id=call_id)
-            call_record.status = 'ended'
-            call_record.ended_at = timezone.now()
-            call_record.save()
-            print(f"✅ Call {call_id} ended successfully")
-        except CallRecord.DoesNotExist:
-            print(f"❌ Call record {call_id} not found")
-            raise
-        except Exception as e:
-            print(f"❌ Database error - end call record: {e}")
-            raise
-
-    @database_sync_to_async
-    def cleanup_call(self, call_id):
-        """Clean up active call data"""
-        try:
-            deleted = ActiveCall.objects.filter(call_record_id=call_id).delete()
-            print(f"✅ Cleaned up {deleted[0]} active call records")
-        except Exception as e:
-            print(f"❌ Database error - cleanup call: {e}")
-
-    @database_sync_to_async
-    def cleanup_active_calls(self):
-        """Clean up active calls for this connection"""
-        try:
-            deleted_caller = ActiveCall.objects.filter(caller_channel=self.channel_name).delete()
-            deleted_callee = ActiveCall.objects.filter(callee_channel=self.channel_name).delete()
-            total_deleted = deleted_caller[0] + deleted_callee[0]
-            print(f"✅ Cleaned up {total_deleted} active call records for {self.user_id}")
-        except Exception as e:
-            print(f"❌ Database error - cleanup active calls: {e}")
-
-    @database_sync_to_async
-    def get_user_name(self, user_id):
-        """Get user's display name"""
-        try:
-            user = User.objects.get(id=user_id)
-            name = user.get_full_name() or user.username
-            print(f"✅ Retrieved name for user {user_id}: {name}")
-            return name
-        except User.DoesNotExist:
-            print(f"❌ User {user_id} not found")
-            return f"User {user_id}"
-        except Exception as e:
-            print(f"❌ Database error - get user name: {e}")
-            return f"User {user_id}"
+      disconnect() {
+        console.log('🔌 Disconnecting VideoCall WebSocket');
         
-    @database_sync_to_async
-    def validate_appointment_call(self, caller_id, callee_id, appointment_id):
-        """Simple validation for appointment call with User ID comparison"""
-        try:
-            
-            
-            # Get the appointment
-            appointment = Appointment.objects.select_related('patient__user', 'doctor__user').get(id=appointment_id)
-            
-            # Get User IDs from the appointment
-            patient_user_id = appointment.patient.user.id
-            doctor_user_id = appointment.doctor.user.id
-            
-            # DEBUG: Print all the IDs for comparison
-            print(f"🔍 DEBUGGING APPOINTMENT VALIDATION:")
-            print(f"   Appointment ID: {appointment_id}")
-            print(f"   Caller ID: {caller_id} (type: {type(caller_id)})")
-            print(f"   Callee ID: {callee_id} (type: {type(callee_id)})")
-            print(f"   Patient User ID: {patient_user_id} (type: {type(patient_user_id)})")
-            print(f"   Doctor User ID: {doctor_user_id} (type: {type(doctor_user_id)})")
-            
-            # Convert to strings for comparison
-            caller_str = str(caller_id)
-            callee_str = str(callee_id)
-            patient_user_str = str(patient_user_id)
-            doctor_user_str = str(doctor_user_id)
-            
-            print(f"   String comparisons:")
-            print(f"   Caller '{caller_str}' == Patient User '{patient_user_str}': {caller_str == patient_user_str}")
-            print(f"   Caller '{caller_str}' == Doctor User '{doctor_user_str}': {caller_str == doctor_user_str}")
-            print(f"   Callee '{callee_str}' == Patient User '{patient_user_str}': {callee_str == patient_user_str}")
-            print(f"   Callee '{callee_str}' == Doctor User '{doctor_user_str}': {callee_str == doctor_user_str}")
-            
-            # Basic checks
-            if appointment.status.lower() != 'confirmed':
-                print(f"❌ Appointment status is '{appointment.status}', not 'confirmed'")
-                return {'valid': False, 'reason': 'Appointment must be confirmed'}
-                
-            if appointment.mode != 'online':
-                print(f"❌ Appointment mode is '{appointment.mode}', not 'online'")
-                return {'valid': False, 'reason': 'Only online appointments support video calls'}
-            
-            # Check if users are part of this appointment (using User IDs)
-            caller_is_patient = caller_str == patient_user_str
-            caller_is_doctor = caller_str == doctor_user_str
-            callee_is_patient = callee_str == patient_user_str
-            callee_is_doctor = callee_str == doctor_user_str
-            
-            user_is_part_of_appointment = (caller_is_patient or caller_is_doctor or callee_is_patient or callee_is_doctor)
-            
-            print(f"   User participation check: {user_is_part_of_appointment}")
-            print(f"   - Caller is patient: {caller_is_patient}")
-            print(f"   - Caller is doctor: {caller_is_doctor}")
-            print(f"   - Callee is patient: {callee_is_patient}")
-            print(f"   - Callee is doctor: {callee_is_doctor}")
-            
-            if not user_is_part_of_appointment:
-                print(f"❌ Neither caller nor callee is part of appointment {appointment_id}")
-                return {'valid': False, 'reason': 'You are not part of this appointment'}
-            
-            # If we reach here, validation passed
-            print(f"✅ Appointment validation passed!")
-            return {'valid': True, 'reason': 'Call is allowed'}
-            
-            # Uncomment the time check code below if you want to enable it:
-            
-            # # Time check - Allow calls for the entire appointment duration
-            # from datetime import datetime, timedelta
-            # from django.utils import timezone
-            
-            # # Parse appointment time
-            # appointment_date = appointment.appointment_date
-            
-            # # Handle slot_time whether it's a time object or string
-            # if hasattr(appointment.slot_time, 'hour'):
-            #     # It's already a time object
-            #     appointment_time = appointment.slot_time
-            # else:
-            #     # It's a string, parse it
-            #     time_parts = str(appointment.slot_time).split(':')
-            #     appointment_time = datetime.min.time().replace(
-            #         hour=int(time_parts[0]),
-            #         minute=int(time_parts[1])
-            #     )
-            
-            # appointment_datetime = datetime.combine(appointment_date, appointment_time)
-            # appointment_datetime = timezone.make_aware(appointment_datetime)
-            # now = timezone.now()
-            
-            # # Get appointment duration (check if appointment has duration field, otherwise default to 30 minutes)
-            # if hasattr(appointment, 'duration') and appointment.duration:
-            #     appointment_duration = appointment.duration  # in minutes
-            # else:
-            #     appointment_duration = 30  # default 30 minutes
-            
-            # # Allow calls for the entire booked slot duration
-            # start_time = appointment_datetime  # Start exactly at appointment time
-            # end_time = appointment_datetime + timedelta(minutes=appointment_duration)  # End after full duration
-            
-            # print(f"   Time check - Now: {now}, Start: {start_time}, End: {end_time}")
-            # print(f"   Appointment duration: {appointment_duration} minutes")
-            
-            # if now < start_time:
-            #     return {'valid': False, 'reason': 'Call will be available at appointment start time'}
-            # elif now > end_time:
-            #     return {'valid': False, 'reason': f'Call window has expired. You had {appointment_duration} minutes from {start_time.strftime("%H:%M")}'}
-            
-            # # Calculate remaining time for user info
-            # remaining_minutes = int((end_time - now).total_seconds() / 60)
-            # print(f"✅ Appointment validation passed! {remaining_minutes} minutes remaining in slot")
-            # return {'valid': True, 'reason': f'Call is allowed. {remaining_minutes} minutes remaining in your appointment slot'}
-            
-        except Appointment.DoesNotExist:
-            print(f"❌ Appointment {appointment_id} does not exist")
-            return {'valid': False, 'reason': 'Appointment not found'}
-        except Exception as e:
-            print(f"❌ Error validating appointment: {e}")
-            import traceback
-            traceback.print_exc()
-            return {'valid': False, 'reason': 'Error validating appointment'}  
+        // End current call if active
+        if (this.isInCall()) {
+          this.endCall(this.currentCall?.callId, this.roomName);
+        }
+
+        // Close socket cleanly
+        if (this.socket) {
+          try {
+            this.socket.close(1000, 'User disconnected');
+          } catch (error) {
+            console.error('Error closing socket:', error);
+          }
+          this.socket = null;
+        }
+        
+        // Reset all state
+        this.connected = false;
+        this.userId = null;
+        this.messageQueue = [];
+        this.reconnectAttempts = 0;
+        this.clearCurrentCall();
+        
+        // Clear all handlers
+        this.messageHandlers.clear();
+      }
+
+      // Debug methods
+      getDebugInfo() {
+        return {
+          isConnected: this.isConnected(),
+          connected: this.connected,
+          userId: this.userId,
+          currentCall: this.currentCall,
+          roomName: this.roomName,
+          messageQueueLength: this.messageQueue.length,
+          socketState: this.getConnectionStatus(),
+          reconnectAttempts: this.reconnectAttempts,
+          handlersCount: Array.from(this.messageHandlers.entries()).map(([event, handlers]) => ({
+            event,
+            count: handlers.length
+          }))
+        };
+      }
+    }
+
+    // Create singleton instance
+    const videoCallService = new VideoCallService();
+
+    export default videoCallService;

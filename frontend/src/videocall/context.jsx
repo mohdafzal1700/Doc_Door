@@ -2,445 +2,374 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import videoCallService from '../service/webrtc';
 
-// WebRTC Configuration
 const rtcConfiguration = {
-  iceServers: [
-    
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-
-    
-    // {
-    //   urls: [
-    //     'stun:turn.muhammedafsal.online:3478', 
-    //     'turn:turn.muhammedafsal.online:3478'  
-    //   ],
-    //   username: 'webrtcuser',
-    //   credential: 'strongpassword'
-    // }
-  ]
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+    ]
 };
 
 const VideoCallContext = createContext();
 
 export const useVideoCall = () => {
-  const context = useContext(VideoCallContext);
-  if (!context) {
-    throw new Error('useVideoCall must be used within a VideoCallProvider');
-  }
-  return context;
+    const context = useContext(VideoCallContext);
+    if (!context) {
+        throw new Error('useVideoCall must be used within a VideoCallProvider');
+    }
+    return context;
 };
 
 export const VideoCallProvider = ({ children }) => {
-  const [isCalling, setIsCalling] = useState(false);
-  const [isReceiving, setIsReceiving] = useState(false);
-  const [currentCall, setCurrentCall] = useState(null);
-  const [incomingCall, setIncomingCall] = useState(null);
-  const [connectionStatus, setConnectionStatus] = useState('disconnected');
-  const pendingIceCandidatesRef = useRef([]);
-  const remoteDescriptionSetRef = useRef(false);
-  const isInitiator = useRef(false);
-  const peerConnectionRef = useRef(null);
-  const localStreamRef = useRef(null);
-  const remoteStreamRef = useRef(null);
-  const localVideoRef = useRef(null);
-  const remoteVideoRef = useRef(null);
-  const currentRoomRef = useRef(null); // Add room tracking
+    const [isCalling, setIsCalling] = useState(false);
+    const [isReceiving, setIsReceiving] = useState(false);
+    const [currentCall, setCurrentCall] = useState(null);
+    const [incomingCall, setIncomingCall] = useState(null);
+    const [connectionStatus, setConnectionStatus] = useState('disconnected');
 
+    const pendingIceCandidatesRef = useRef([]);
+    const remoteDescriptionSetRef = useRef(false);
+    const isInitiator = useRef(false);
+    const peerConnectionRef = useRef(null);
+    const localStreamRef = useRef(null);
+    const remoteStreamRef = useRef(null);
+    const localVideoRef = useRef(null);
+    const remoteVideoRef = useRef(null);
+    const currentRoomRef = useRef(null);
 
-  // ADD THIS ENTIRE FUNCTION:
-const processQueuedIceCandidates = useCallback(async () => {
-  const peerConnection = peerConnectionRef.current;
-  if (!peerConnection || pendingIceCandidatesRef.current.length === 0) return;
+    // FIXED: Improved media access with better error handling
+    const getUserMedia = useCallback(async () => {
+        try {
+            console.log('🎥 Requesting media access...');
+            
+            // First try with video and audio
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { width: 640, height: 480 }, 
+                    audio: true 
+                });
+            } catch (videoError) {
+                console.warn('⚠️ Video failed, trying audio only:', videoError);
+                // Fallback to audio only
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            }
 
-  console.log(`🧊 Processing ${pendingIceCandidatesRef.current.length} queued ICE candidates`);
-  
-  for (const candidateData of pendingIceCandidatesRef.current) {
-    try {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
-      console.log('✅ Queued ICE candidate added successfully');
-    } catch (error) {
-      console.error('❌ Error adding queued ICE candidate:', error);
-    }
-  }
-  
-  pendingIceCandidatesRef.current = [];
-}, []);
-
-  // Initialize WebRTC peer connection
-  const createPeerConnection = useCallback(() => {
-    pendingIceCandidatesRef.current = [];
-    remoteDescriptionSetRef.current = false;
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-    }
-
-    const peerConnection = new RTCPeerConnection(rtcConfiguration);
-
-    // Handle ICE candidates
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate && currentRoomRef.current) {
-        console.log('🧊 Sending ICE candidate for room:', currentRoomRef.current);
-        videoCallService.sendICECandidate(event.candidate, currentRoomRef.current);
-      }
-    };
-
-    // Handle remote stream
-    peerConnection.ontrack = (event) => {
-      console.log('📹 Received remote stream');
-      remoteStreamRef.current = event.streams[0];
-      if (remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = event.streams[0];
-      }
-    };
-
-    // Handle connection state changes
-    peerConnection.onconnectionstatechange = () => {
-      console.log('🔗 Connection state:', peerConnection.connectionState);
-      setConnectionStatus(peerConnection.connectionState);
-      
-      if (peerConnection.connectionState === 'connected') {
-        console.log('✅ WebRTC connection established successfully!');
-      }
-    };
-
-    peerConnectionRef.current = peerConnection;
-    return peerConnection;
-  }, []);
-
-  // Get user media
- const getUserMedia = useCallback(async () => {
-  const timeout = new Promise((_, reject) => 
-    setTimeout(() => reject(new Error('Media timeout')), 8000)
-  );
-  
-  const mediaPromise = navigator.mediaDevices.getUserMedia({
-    video: true,
-    audio: true
-  });
-  
-  return Promise.race([mediaPromise, timeout]);
-}, []);
-
-  // Cleanup resources
-  const cleanup = useCallback(() => {
-    if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach(track => track.stop());
-      localStreamRef.current = null;
-    }
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-    remoteStreamRef.current = null;
-    currentRoomRef.current = null;
-    isInitiator.current = false;
-    pendingIceCandidatesRef.current = [];
-remoteDescriptionSetRef.current = false;
-  }, []);
-
-  // Initialize video call service connection
-  useEffect(() => {
-    const initializeConnection = async () => {
-      try {
-        const userData = videoCallService.getCurrentUser();
-        if (userData?.id) {
-          await videoCallService.connect(userData.id);
-          console.log('✅ Connected to video call service');
+            localStreamRef.current = stream;
+            
+            // Set local video
+            if (localVideoRef.current) {
+                localVideoRef.current.srcObject = stream;
+            }
+            
+            console.log('✅ Media access successful');
+            return stream;
+            
+        } catch (error) {
+            console.error('❌ Media access failed:', error);
+            throw new Error('Camera/microphone access denied or unavailable');
         }
-      } catch (error) {
-        console.error('❌ Failed to connect to video call service:', error);
-      }
-    };
+    }, []);
 
-    initializeConnection();
+    const processQueuedIceCandidates = useCallback(async () => {
+        const peerConnection = peerConnectionRef.current;
+        if (!peerConnection || pendingIceCandidatesRef.current.length === 0) return;
 
-    // Event handlers
-    const handleIncomingCall = (data) => {
-      console.log('📞 Incoming call received:', data);
-      setIncomingCall({
-        callId: data.call_id,
-        roomName: data.room_name,
-        callerName: data.caller_name,
-        callerId: data.caller_id
-      });
-      setIsReceiving(true);
-    };
-
-    const handleCallInitiated = (data) => {
-      console.log('📞 Call initiated:', data);
-      isInitiator.current = true; // Only the call initiator should be true
-      currentRoomRef.current = data.room_name;
-      setCurrentCall({
-        callId: data.call_id,
-        roomName: data.room_name,
-        status: 'initiated'
-      });
-      setIsCalling(true);
-    };
-
-    const handleCallAccepted = async (data) => {
-      console.log('✅ Call accepted:', data);
-      setIsCalling(true);
-      setIsReceiving(false);
-      setIncomingCall(null);
-      currentRoomRef.current = data.room_name;
-
-      try {
-        const stream = await getUserMedia();
-        const peerConnection = createPeerConnection();
-        
-        // Add local stream tracks to connection
-        stream.getTracks().forEach(track => {
-          peerConnection.addTrack(track, stream);
-        });
-
-        // Only the initiator creates the offer
-        if (isInitiator.current) {
-          console.log('📤 Creating offer as initiator');
-          const offer = await peerConnection.createOffer();
-          await peerConnection.setLocalDescription(offer);
-          videoCallService.sendOffer(offer, data.room_name);
-        } else {
-          console.log('📥 Waiting for offer as receiver');
+        console.log(`🧊 Processing ${pendingIceCandidatesRef.current.length} queued ICE candidates`);
+        for (const candidateData of pendingIceCandidatesRef.current) {
+            try {
+                await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+            } catch (error) {
+                console.error('❌ Error adding queued ICE candidate:', error);
+            }
         }
-      } catch (error) {
-        console.error('❌ Error setting up WebRTC connection:', error);
-      }
+        pendingIceCandidatesRef.current = [];
+    }, []);
+
+    const createPeerConnection = useCallback(() => {
+        pendingIceCandidatesRef.current = [];
+        remoteDescriptionSetRef.current = false;
+
+        if (peerConnectionRef.current) {
+            peerConnectionRef.current.close();
+        }
+
+        const peerConnection = new RTCPeerConnection(rtcConfiguration);
+
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate && currentRoomRef.current) {
+                videoCallService.sendICECandidate(event.candidate, currentRoomRef.current);
+            }
+        };
+
+        peerConnection.ontrack = (event) => {
+            console.log('📹 Received remote stream');
+            remoteStreamRef.current = event.streams[0];
+            if (remoteVideoRef.current) {
+                remoteVideoRef.current.srcObject = event.streams[0];
+            }
+        };
+
+        peerConnection.onconnectionstatechange = () => {
+            setConnectionStatus(peerConnection.connectionState);
+            if (peerConnection.connectionState === 'connected') {
+                console.log('✅ WebRTC connection established!');
+            }
+        };
+
+        peerConnectionRef.current = peerConnection;
+        return peerConnection;
+    }, []);
+
+    const cleanup = useCallback(() => {
+        if (localStreamRef.current) {
+            localStreamRef.current.getTracks().forEach(track => track.stop());
+            localStreamRef.current = null;
+        }
+        if (peerConnectionRef.current) {
+            peerConnectionRef.current.close();
+            peerConnectionRef.current = null;
+        }
+        remoteStreamRef.current = null;
+        currentRoomRef.current = null;
+        isInitiator.current = false;
+        pendingIceCandidatesRef.current = [];
+        remoteDescriptionSetRef.current = false;
+    }, []);
+
+    useEffect(() => {
+        const initializeConnection = async () => {
+            try {
+                const userData = videoCallService.getCurrentUser();
+                if (userData?.id) {
+                    await videoCallService.connect(userData.id);
+                }
+            } catch (error) {
+                console.error('❌ Failed to connect to video call service:', error);
+            }
+        };
+
+        initializeConnection();
+
+        const handleIncomingCall = (data) => {
+            setIncomingCall({
+                callId: data.call_id,
+                roomName: data.room_name,
+                callerName: data.caller_name,
+                callerId: data.caller_id
+            });
+            setIsReceiving(true);
+        };
+
+        const handleCallInitiated = (data) => {
+            isInitiator.current = true;
+            currentRoomRef.current = data.room_name;
+            setCurrentCall({
+                callId: data.call_id,
+                roomName: data.room_name,
+                status: 'initiated'
+            });
+            setIsCalling(true);
+        };
+
+        // FIXED: Better error handling in call acceptance
+        const handleCallAccepted = async (data) => {
+            console.log('✅ Call accepted:', data);
+            setIsCalling(true);
+            setIsReceiving(false);
+            setIncomingCall(null);
+            currentRoomRef.current = data.room_name;
+
+            try {
+                // Get media first (with improved error handling)
+                const stream = await getUserMedia();
+                const peerConnection = createPeerConnection();
+
+                // Add tracks
+                stream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, stream);
+                });
+
+                // Only initiator creates offer
+                if (isInitiator.current) {
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+                    videoCallService.sendOffer(offer, data.room_name);
+                }
+            } catch (error) {
+                console.error('❌ Error setting up WebRTC:', error);
+                // Don't end call immediately, let user try again
+                alert('Camera/microphone access failed. Please check permissions and try again.');
+            }
+        };
+
+        const handleCallRejected = (data) => {
+            setIsCalling(false);
+            setIsReceiving(false);
+            setCurrentCall(null);
+            setIncomingCall(null);
+            cleanup();
+        };
+
+        const handleCallEnded = (data) => {
+            setIsCalling(false);
+            setIsReceiving(false);
+            setCurrentCall(null);
+            setIncomingCall(null);
+            cleanup();
+        };
+
+        const handleWebRTCOffer = async (data) => {
+            if (isInitiator.current) return; // Ignore if we're the initiator
+
+            try {
+                const stream = await getUserMedia();
+                const peerConnection = createPeerConnection();
+
+                stream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, stream);
+                });
+
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+                remoteDescriptionSetRef.current = true;
+                await processQueuedIceCandidates();
+
+                const answer = await peerConnection.createAnswer();
+                await peerConnection.setLocalDescription(answer);
+                videoCallService.sendAnswer(answer, currentRoomRef.current);
+            } catch (error) {
+                console.error('❌ Error handling offer:', error);
+            }
+        };
+
+        const handleWebRTCAnswer = async (data) => {
+            if (!isInitiator.current) return; // Only initiator handles answers
+
+            const peerConnection = peerConnectionRef.current;
+            if (!peerConnection || peerConnection.signalingState !== "have-local-offer") return;
+
+            try {
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+                remoteDescriptionSetRef.current = true;
+                await processQueuedIceCandidates();
+            } catch (error) {
+                console.error('❌ Error setting answer:', error);
+            }
+        };
+
+        const handleICECandidate = async (data) => {
+            const peerConnection = peerConnectionRef.current;
+            if (!peerConnection) return;
+
+            if (peerConnection.remoteDescription && remoteDescriptionSetRef.current) {
+                try {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (error) {
+                    console.error('❌ Error adding ICE candidate:', error);
+                }
+            } else {
+                pendingIceCandidatesRef.current.push(data.candidate);
+            }
+        };
+
+        // Register event handlers
+        videoCallService.on('incoming_call', handleIncomingCall);
+        videoCallService.on('call_initiated', handleCallInitiated);
+        videoCallService.on('call_accepted', handleCallAccepted);
+        videoCallService.on('call_rejected', handleCallRejected);
+        videoCallService.on('call_ended', handleCallEnded);
+        videoCallService.on('webrtc_offer', handleWebRTCOffer);
+        videoCallService.on('webrtc_answer', handleWebRTCAnswer);
+        videoCallService.on('ice_candidate', handleICECandidate);
+
+        return () => {
+            videoCallService.off('incoming_call', handleIncomingCall);
+            videoCallService.off('call_initiated', handleCallInitiated);
+            videoCallService.off('call_accepted', handleCallAccepted);
+            videoCallService.off('call_rejected', handleCallRejected);
+            videoCallService.off('call_ended', handleCallEnded);
+            videoCallService.off('webrtc_offer', handleWebRTCOffer);
+            videoCallService.off('webrtc_answer', handleWebRTCAnswer);
+            videoCallService.off('ice_candidate', handleICECandidate);
+            cleanup();
+            videoCallService.disconnect();
+        };
+    }, [createPeerConnection, getUserMedia, cleanup, processQueuedIceCandidates]);
+
+    const initiateCall = useCallback(async (receiverId, appointmentId) => {
+        try {
+            if (!receiverId || !appointmentId) {
+                console.error('❌ receiverId and appointmentId are required');
+                return false;
+            }
+            return videoCallService.initiateCall(receiverId, appointmentId);
+        } catch (error) {
+            console.error('❌ Failed to initiate call:', error);
+            return false;
+        }
+    }, []);
+
+    const acceptCall = useCallback(async (callId, roomName) => {
+        try {
+            isInitiator.current = false;
+            currentRoomRef.current = roomName;
+            const success = videoCallService.acceptCall(callId, roomName);
+            if (success) {
+                setCurrentCall({ callId, roomName, status: 'accepted' });
+                setIncomingCall(null);
+                setIsReceiving(false);
+                setIsCalling(true);
+            }
+        } catch (error) {
+            console.error('❌ Failed to accept call:', error);
+        }
+    }, []);
+
+    const rejectCall = useCallback(async (callId, roomName) => {
+        try {
+            videoCallService.rejectCall(callId, roomName);
+            setIncomingCall(null);
+            setIsReceiving(false);
+        } catch (error) {
+            console.error('❌ Failed to reject call:', error);
+        }
+    }, []);
+
+    const endCall = useCallback(async () => {
+        try {
+            if (currentCall) {
+                videoCallService.endCall(currentCall.callId, currentCall.roomName);
+            }
+            cleanup();
+            setCurrentCall(null);
+            setIsCalling(false);
+            setIsReceiving(false);
+        } catch (error) {
+            console.error('❌ Failed to end call:', error);
+        }
+    }, [currentCall, cleanup]);
+
+    const contextValue = {
+        // State
+        isCalling,
+        isReceiving,
+        currentCall,
+        incomingCall,
+        connectionStatus,
+        // Refs
+        localVideoRef,
+        remoteVideoRef,
+        localStream: localStreamRef.current,
+        remoteStream: remoteStreamRef.current,
+        // Actions
+        initiateCall,
+        acceptCall,
+        rejectCall,
+        endCall
     };
 
-    const handleCallRejected = (data) => {
-      console.log('❌ Call rejected:', data);
-      setIsCalling(false);
-      setIsReceiving(false);
-      setCurrentCall(null);
-      setIncomingCall(null);
-      cleanup();
-    };
-
-    const handleCallEnded = (data) => {
-      console.log('🔚 Call ended:', data);
-      setIsCalling(false);
-      setIsReceiving(false);
-      setCurrentCall(null);
-      setIncomingCall(null);
-      cleanup();
-    };
-
-    const handleWebRTCOffer = async (data) => {
-  console.log('📤 Received WebRTC offer:', data);
-  
-  if (isInitiator.current) {
-    console.warn('⚠️ Received offer but we are the initiator - ignoring');
-    return;
-  }
-
-  try {
-    const stream = await getUserMedia();
-    const peerConnection = createPeerConnection();
-    
-    stream.getTracks().forEach(track => {
-      peerConnection.addTrack(track, stream);
-    });
-
-    // Set remote description (offer)
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-    remoteDescriptionSetRef.current = true; // Mark remote description as set
-    console.log('✅ Remote description (offer) set successfully');
-    
-    // Process any queued ICE candidates
-    await processQueuedIceCandidates();
-    
-    // Create and send answer
-    const answer = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answer);
-    
-    videoCallService.sendAnswer(answer, currentRoomRef.current);
-    console.log('📥 Answer sent successfully');
-  } catch (error) {
-    console.error('❌ Error handling WebRTC offer:', error);
-  }
-};
-
-    const handleWebRTCAnswer = async (data) => {
-  console.log('📥 Received WebRTC answer:', data);
-  const peerConnection = peerConnectionRef.current;
-  
-  if (!peerConnection) {
-    console.warn('⚠️ No peer connection available.');
-    return;
-  }
-
-  if (peerConnection.signalingState !== "have-local-offer") {
-    console.warn('⚠️ Cannot set answer in state:', peerConnection.signalingState);
-    return;
-  }
-
-  if (!isInitiator.current) {
-    console.warn('⚠️ Received answer but we are not the initiator - ignoring');
-    return;
-  }
-
-  try {
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-    remoteDescriptionSetRef.current = true; // Mark remote description as set
-    console.log('✅ Remote description (answer) set successfully');
-    
-    // Process any queued ICE candidates
-    await processQueuedIceCandidates();
-  } catch (error) {
-    console.error('❌ Error setting remote description (answer):', error);
-  }
-};
-
-    const handleICECandidate = async (data) => {
-  console.log('🧊 Received ICE candidate:', data);
-  const peerConnection = peerConnectionRef.current;
-  
-  if (!peerConnection) {
-    console.warn('⚠️ No peer connection available');
-    return;
-  }
-
-  // Check if remote description is set
-  if (peerConnection.remoteDescription && remoteDescriptionSetRef.current) {
-    try {
-      await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-      console.log('✅ ICE candidate added successfully');
-    } catch (error) {
-      console.error('❌ Error adding ICE candidate:', error);
-    }
-  } else {
-    // Queue the ICE candidate for later processing
-    console.log('🧊 Queueing ICE candidate - remote description not set yet');
-    pendingIceCandidatesRef.current.push(data.candidate);
-  }
-};
-
-    // Register event handlers
-    videoCallService.on('incoming_call', handleIncomingCall);
-    videoCallService.on('call_initiated', handleCallInitiated);
-    videoCallService.on('call_accepted', handleCallAccepted);
-    videoCallService.on('call_rejected', handleCallRejected);
-    videoCallService.on('call_ended', handleCallEnded);
-    videoCallService.on('webrtc_offer', handleWebRTCOffer);
-    videoCallService.on('webrtc_answer', handleWebRTCAnswer);
-    videoCallService.on('ice_candidate', handleICECandidate);
-
-    // Cleanup on unmount
-    return () => {
-      videoCallService.off('incoming_call', handleIncomingCall);
-      videoCallService.off('call_initiated', handleCallInitiated);
-      videoCallService.off('call_accepted', handleCallAccepted);
-      videoCallService.off('call_rejected', handleCallRejected);
-      videoCallService.off('call_ended', handleCallEnded);
-      videoCallService.off('webrtc_offer', handleWebRTCOffer);
-      videoCallService.off('webrtc_answer', handleWebRTCAnswer);
-      videoCallService.off('ice_candidate', handleICECandidate);
-      cleanup();
-      videoCallService.disconnect();
-    };
-  }, [createPeerConnection, getUserMedia, cleanup]);
-
-  // Action methods
-  const initiateCall = useCallback(async (receiverId, appointmentId) => {
-  try {
-    console.log('📞 Initiating call to:', receiverId, 'for appointment:', appointmentId);
-    
-    if (!receiverId) {
-      console.error('❌ receiverId is required');
-      return false;
-    }
-    
-    if (!appointmentId) {
-      console.error('❌ appointmentId is required');
-      return false;
-    }
-    
-    // Pass both receiverId and appointmentId to the service
-    const success = videoCallService.initiateCall(receiverId, appointmentId);
-    if (success) {
-      setIsCalling(true);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('❌ Failed to initiate call:', error);
-    setIsCalling(false);
-    return false;
-  }
-}, []);
-
-  const acceptCall = useCallback(async (callId, roomName) => {
-    try {
-      console.log('✅ Accepting call:', callId);
-      isInitiator.current = false; // Receiver is not the initiator
-      currentRoomRef.current = roomName;
-      
-      const success = videoCallService.acceptCall(callId, roomName);
-      if (success) {
-        setCurrentCall({
-          callId,
-          roomName,
-          status: 'accepted'
-        });
-        setIncomingCall(null);
-        setIsReceiving(false);
-        setIsCalling(true);
-      }
-    } catch (error) {
-      console.error('❌ Failed to accept call:', error);
-    }
-  }, []);
-
-  const rejectCall = useCallback(async (callId, roomName) => {
-    try {
-      console.log('❌ Rejecting call:', callId);
-      videoCallService.rejectCall(callId, roomName);
-      setIncomingCall(null);
-      setIsReceiving(false);
-    } catch (error) {
-      console.error('❌ Failed to reject call:', error);
-    }
-  }, []);
-
-  const endCall = useCallback(async () => {
-    try {
-      if (currentCall) {
-        console.log('🔚 Ending call:', currentCall.callId);
-        videoCallService.endCall(currentCall.callId, currentCall.roomName);
-      }
-      cleanup();
-      setCurrentCall(null);
-      setIsCalling(false);
-      setIsReceiving(false);
-    } catch (error) {
-      console.error('❌ Failed to end call:', error);
-    }
-  }, [currentCall, cleanup]);
-
-  const contextValue = {
-    // State
-    isCalling,
-    isReceiving,
-    currentCall,
-    incomingCall,
-    connectionStatus,
-    // Refs
-    localVideoRef,
-    remoteVideoRef,
-    localStream: localStreamRef.current,
-    remoteStream: remoteStreamRef.current,
-    // Actions
-    initiateCall,
-    acceptCall,
-    rejectCall,
-    endCall
-  };
-
-  return (
-    <VideoCallContext.Provider value={contextValue}>
-      {children}
-    </VideoCallContext.Provider>
-  );
+    return (
+        <VideoCallContext.Provider value={contextValue}>
+            {children}
+        </VideoCallContext.Provider>
+    );
 };
