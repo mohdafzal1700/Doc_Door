@@ -5,8 +5,11 @@ import videoCallService from '../service/webrtc';
 // WebRTC Configuration
 const rtcConfiguration = {
   iceServers: [
+    
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+
+    
     // {
     //   urls: [
     //     'stun:turn.muhammedafsal.online:3478', 
@@ -42,71 +45,27 @@ export const VideoCallProvider = ({ children }) => {
   const remoteStreamRef = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
-  const currentRoomRef = useRef(null);
+  const currentRoomRef = useRef(null); // Add room tracking
 
-  // Helper function to check if peer connection is ready
-  const ensurePeerConnectionReady = useCallback(() => {
-    const peerConnection = peerConnectionRef.current;
-    if (!peerConnection) {
-      console.warn('⚠️ No peer connection available');
-      return false;
-    }
-    
-    if (!remoteDescriptionSetRef.current) {
-      console.warn('⚠️ Remote description not set yet');
-      return false;
-    }
-    
-    if (peerConnection.signalingState === 'closed') {
-      console.warn('⚠️ Peer connection is closed');
-      return false;
-    }
-    
-    return true;
-  }, []);
 
-  // Process queued ICE candidates
-  const processQueuedIceCandidates = useCallback(async () => {
-    const peerConnection = peerConnectionRef.current;
-    if (!peerConnection || pendingIceCandidatesRef.current.length === 0) return;
+  // ADD THIS ENTIRE FUNCTION:
+const processQueuedIceCandidates = useCallback(async () => {
+  const peerConnection = peerConnectionRef.current;
+  if (!peerConnection || pendingIceCandidatesRef.current.length === 0) return;
 
-    console.log(`🧊 Processing ${pendingIceCandidatesRef.current.length} queued ICE candidates`);
-    
-    // Create a copy of pending candidates and clear the original array
-    const candidatesToProcess = [...pendingIceCandidatesRef.current];
-    pendingIceCandidatesRef.current = [];
-    
-    for (const candidateData of candidatesToProcess) {
-      try {
-        // Double-check peer connection state before adding
-        if (peerConnection.remoteDescription && remoteDescriptionSetRef.current) {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
-          console.log('✅ Queued ICE candidate added successfully');
-        } else {
-          // Re-queue if still not ready
-          console.log('🧊 Re-queueing ICE candidate - not ready yet');
-          pendingIceCandidatesRef.current.push(candidateData);
-        }
-      } catch (error) {
-        console.error('❌ Error adding queued ICE candidate:', error);
-        // Don't re-queue if there's a permanent error
-        if (error.name === 'InvalidStateError') {
-          console.log('🧊 Re-queueing failed ICE candidate');
-          pendingIceCandidatesRef.current.push(candidateData);
-        }
-      }
+  console.log(`🧊 Processing ${pendingIceCandidatesRef.current.length} queued ICE candidates`);
+  
+  for (const candidateData of pendingIceCandidatesRef.current) {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(candidateData));
+      console.log('✅ Queued ICE candidate added successfully');
+    } catch (error) {
+      console.error('❌ Error adding queued ICE candidate:', error);
     }
-    
-    console.log(`🧊 Finished processing candidates. ${pendingIceCandidatesRef.current.length} remaining queued.`);
-  }, []);
-
-  // Retry queued candidates (can be called with timeout if needed)
-  const retryQueuedCandidates = useCallback(() => {
-    if (pendingIceCandidatesRef.current.length > 0 && ensurePeerConnectionReady()) {
-      console.log('🔄 Retrying queued ICE candidates');
-      processQueuedIceCandidates();
-    }
-  }, [processQueuedIceCandidates, ensurePeerConnectionReady]);
+  }
+  
+  pendingIceCandidatesRef.current = [];
+}, []);
 
   // Initialize WebRTC peer connection
   const createPeerConnection = useCallback(() => {
@@ -180,8 +139,8 @@ export const VideoCallProvider = ({ children }) => {
     remoteStreamRef.current = null;
     currentRoomRef.current = null;
     isInitiator.current = false;
-    pendingIceCandidatesRef.current = []; // Clear queue
-    remoteDescriptionSetRef.current = false;
+    pendingIceCandidatesRef.current = [];
+remoteDescriptionSetRef.current = false;
   }, []);
 
   // Initialize video call service connection
@@ -273,100 +232,94 @@ export const VideoCallProvider = ({ children }) => {
     };
 
     const handleWebRTCOffer = async (data) => {
-      console.log('📤 Received WebRTC offer:', data);
-      
-      if (isInitiator.current) {
-        console.warn('⚠️ Received offer but we are the initiator - ignoring');
-        return;
-      }
+  console.log('📤 Received WebRTC offer:', data);
+  
+  if (isInitiator.current) {
+    console.warn('⚠️ Received offer but we are the initiator - ignoring');
+    return;
+  }
 
-      try {
-        const stream = await getUserMedia();
-        const peerConnection = createPeerConnection();
-        
-        stream.getTracks().forEach(track => {
-          peerConnection.addTrack(track, stream);
-        });
+  try {
+    const stream = await getUserMedia();
+    const peerConnection = createPeerConnection();
+    
+    stream.getTracks().forEach(track => {
+      peerConnection.addTrack(track, stream);
+    });
 
-        // Set remote description (offer)
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
-        remoteDescriptionSetRef.current = true; // Mark remote description as set
-        console.log('✅ Remote description (offer) set successfully');
-        
-        // Process any queued ICE candidates
-        await processQueuedIceCandidates();
-        
-        // Create and send answer
-        const answer = await peerConnection.createAnswer();
-        await peerConnection.setLocalDescription(answer);
-        
-        videoCallService.sendAnswer(answer, currentRoomRef.current);
-        console.log('📥 Answer sent successfully');
-      } catch (error) {
-        console.error('❌ Error handling WebRTC offer:', error);
-      }
-    };
+    // Set remote description (offer)
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
+    remoteDescriptionSetRef.current = true; // Mark remote description as set
+    console.log('✅ Remote description (offer) set successfully');
+    
+    // Process any queued ICE candidates
+    await processQueuedIceCandidates();
+    
+    // Create and send answer
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    
+    videoCallService.sendAnswer(answer, currentRoomRef.current);
+    console.log('📥 Answer sent successfully');
+  } catch (error) {
+    console.error('❌ Error handling WebRTC offer:', error);
+  }
+};
 
     const handleWebRTCAnswer = async (data) => {
-      console.log('📥 Received WebRTC answer:', data);
-      const peerConnection = peerConnectionRef.current;
-      
-      if (!peerConnection) {
-        console.warn('⚠️ No peer connection available.');
-        return;
-      }
+  console.log('📥 Received WebRTC answer:', data);
+  const peerConnection = peerConnectionRef.current;
+  
+  if (!peerConnection) {
+    console.warn('⚠️ No peer connection available.');
+    return;
+  }
 
-      if (peerConnection.signalingState !== "have-local-offer") {
-        console.warn('⚠️ Cannot set answer in state:', peerConnection.signalingState);
-        return;
-      }
+  if (peerConnection.signalingState !== "have-local-offer") {
+    console.warn('⚠️ Cannot set answer in state:', peerConnection.signalingState);
+    return;
+  }
 
-      if (!isInitiator.current) {
-        console.warn('⚠️ Received answer but we are not the initiator - ignoring');
-        return;
-      }
+  if (!isInitiator.current) {
+    console.warn('⚠️ Received answer but we are not the initiator - ignoring');
+    return;
+  }
 
-      try {
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-        remoteDescriptionSetRef.current = true; // Mark remote description as set
-        console.log('✅ Remote description (answer) set successfully');
-        
-        // Process any queued ICE candidates
-        await processQueuedIceCandidates();
-      } catch (error) {
-        console.error('❌ Error setting remote description (answer):', error);
-      }
-    };
+  try {
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    remoteDescriptionSetRef.current = true; // Mark remote description as set
+    console.log('✅ Remote description (answer) set successfully');
+    
+    // Process any queued ICE candidates
+    await processQueuedIceCandidates();
+  } catch (error) {
+    console.error('❌ Error setting remote description (answer):', error);
+  }
+};
 
     const handleICECandidate = async (data) => {
-      console.log('🧊 Received ICE candidate:', data);
-      const peerConnection = peerConnectionRef.current;
-      
-      if (!peerConnection) {
-        console.warn('⚠️ No peer connection available - queueing candidate');
-        pendingIceCandidatesRef.current.push(data.candidate);
-        return;
-      }
+  console.log('🧊 Received ICE candidate:', data);
+  const peerConnection = peerConnectionRef.current;
+  
+  if (!peerConnection) {
+    console.warn('⚠️ No peer connection available');
+    return;
+  }
 
-      // Check if remote description is set and peer connection is ready
-      if (remoteDescriptionSetRef.current && peerConnection.remoteDescription) {
-        try {
-          await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-          console.log('✅ ICE candidate added successfully');
-        } catch (error) {
-          console.error('❌ Error adding ICE candidate:', error);
-          // If adding fails, queue it for retry
-          if (error.name === 'InvalidStateError') {
-            console.log('🧊 Queueing failed ICE candidate for retry');
-            pendingIceCandidatesRef.current.push(data.candidate);
-          }
-        }
-      } else {
-        // Queue the ICE candidate for later processing
-        console.log('🧊 Queueing ICE candidate - remote description not set yet');
-        pendingIceCandidatesRef.current.push(data.candidate);
-      }
-    };
+  // Check if remote description is set
+  if (peerConnection.remoteDescription && remoteDescriptionSetRef.current) {
+    try {
+      await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+      console.log('✅ ICE candidate added successfully');
+    } catch (error) {
+      console.error('❌ Error adding ICE candidate:', error);
+    }
+  } else {
+    // Queue the ICE candidate for later processing
+    console.log('🧊 Queueing ICE candidate - remote description not set yet');
+    pendingIceCandidatesRef.current.push(data.candidate);
+  }
+};
 
     // Register event handlers
     videoCallService.on('incoming_call', handleIncomingCall);
@@ -391,54 +344,36 @@ export const VideoCallProvider = ({ children }) => {
       cleanup();
       videoCallService.disconnect();
     };
-  }, [createPeerConnection, getUserMedia, cleanup, processQueuedIceCandidates]);
-
-  // Optional: Debug logging to track WebRTC status (remove in production)
-  useEffect(() => {
-    if (isCalling) {
-      const logStatus = () => {
-        console.log('📊 WebRTC Status:', {
-          hasPeerConnection: !!peerConnectionRef.current,
-          remoteDescriptionSet: remoteDescriptionSetRef.current,
-          queuedCandidates: pendingIceCandidatesRef.current.length,
-          connectionState: peerConnectionRef.current?.connectionState,
-          signalingState: peerConnectionRef.current?.signalingState
-        });
-      };
-      
-      const interval = setInterval(logStatus, 5000); // Log every 5 seconds during calls
-      return () => clearInterval(interval);
-    }
-  }, [isCalling]);
+  }, [createPeerConnection, getUserMedia, cleanup]);
 
   // Action methods
   const initiateCall = useCallback(async (receiverId, appointmentId) => {
-    try {
-      console.log('📞 Initiating call to:', receiverId, 'for appointment:', appointmentId);
-      
-      if (!receiverId) {
-        console.error('❌ receiverId is required');
-        return false;
-      }
-      
-      if (!appointmentId) {
-        console.error('❌ appointmentId is required');
-        return false;
-      }
-      
-      // Pass both receiverId and appointmentId to the service
-      const success = videoCallService.initiateCall(receiverId, appointmentId);
-      if (success) {
-        setIsCalling(true);
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('❌ Failed to initiate call:', error);
-      setIsCalling(false);
+  try {
+    console.log('📞 Initiating call to:', receiverId, 'for appointment:', appointmentId);
+    
+    if (!receiverId) {
+      console.error('❌ receiverId is required');
       return false;
     }
-  }, []);
+    
+    if (!appointmentId) {
+      console.error('❌ appointmentId is required');
+      return false;
+    }
+    
+    // Pass both receiverId and appointmentId to the service
+    const success = videoCallService.initiateCall(receiverId, appointmentId);
+    if (success) {
+      setIsCalling(true);
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('❌ Failed to initiate call:', error);
+    setIsCalling(false);
+    return false;
+  }
+}, []);
 
   const acceptCall = useCallback(async (callId, roomName) => {
     try {
@@ -504,9 +439,7 @@ export const VideoCallProvider = ({ children }) => {
     initiateCall,
     acceptCall,
     rejectCall,
-    endCall,
-    // Debug helper (remove in production)
-    retryQueuedCandidates
+    endCall
   };
 
   return (
