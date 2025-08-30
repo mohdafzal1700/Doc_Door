@@ -40,6 +40,31 @@ const CallButton = ({
     }
   }, [receiverId, appointmentId, appointmentData, doctorName, size, className]);
 
+  // FIXED: Proper timezone handling function
+  const parseAppointmentDateTime = (appointment_date, slot_time) => {
+    try {
+      // Parse date components properly for local timezone
+      const [year, month, day] = appointment_date.split('-');
+      const [hours, minutes] = slot_time.split(':');
+      
+      // Create date in LOCAL timezone (not UTC)
+      const appointmentDateTime = new Date(
+        parseInt(year),
+        parseInt(month) - 1, // Month is 0-indexed
+        parseInt(day),
+        parseInt(hours),
+        parseInt(minutes),
+        0, // seconds
+        0  // milliseconds
+      );
+      
+      return appointmentDateTime;
+    } catch (error) {
+      console.error('❌ Error parsing appointment datetime:', error);
+      return null;
+    }
+  };
+
   // Check if call is available based on appointment timing
   useEffect(() => {
     const checkCallAvailability = () => {
@@ -83,35 +108,44 @@ const CallButton = ({
       }
 
       try {
-        // Parse appointment date and time
+        // FIXED: Use proper timezone parsing
         console.log('🔍 CallButton DEBUG - Parsing datetime:', {
           appointment_date: appointmentData.appointment_date,
           slot_time: appointmentData.slot_time
         });
 
-        const appointmentDate = new Date(appointmentData.appointment_date);
-        const [hours, minutes] = appointmentData.slot_time.split(':');
-        const appointmentDateTime = new Date(appointmentDate);
-        appointmentDateTime.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        const appointmentDateTime = parseAppointmentDateTime(
+          appointmentData.appointment_date, 
+          appointmentData.slot_time
+        );
+
+        if (!appointmentDateTime) {
+          throw new Error('Failed to parse appointment datetime');
+        }
 
         console.log('🔍 CallButton DEBUG - Parsed datetime:', {
-          appointmentDate: appointmentDate.toISOString(),
           appointmentDateTime: appointmentDateTime.toISOString(),
-          hours,
-          minutes
+          localString: appointmentDateTime.toString(),
+          hours: appointmentDateTime.getHours(),
+          minutes: appointmentDateTime.getMinutes()
         });
 
         const now = new Date();
 
-        // Allow calls from appointment start time to 30 minutes after (or customize duration)
-        const startWindow = appointmentDateTime; // Start exactly at appointment time
-        const endWindow = new Date(appointmentDateTime.getTime() + 30 * 60 * 1000); // End 30 minutes after
+        // FIXED: Proper call window calculation
+        // Allow calls from 15 minutes before to 30 minutes after appointment time
+        const startWindow = new Date(appointmentDateTime.getTime() - 15 * 60 * 1000); // 15 min before
+        const endWindow = new Date(appointmentDateTime.getTime() + 30 * 60 * 1000);   // 30 min after
 
         console.log('🔍 CallButton DEBUG - Time windows:', {
           now: now.toISOString(),
+          nowLocal: now.toString(),
           startWindow: startWindow.toISOString(),
+          startWindowLocal: startWindow.toString(),
           endWindow: endWindow.toISOString(),
-          appointmentDateTime: appointmentDateTime.toISOString()
+          endWindowLocal: endWindow.toString(),
+          appointmentDateTime: appointmentDateTime.toISOString(),
+          appointmentLocal: appointmentDateTime.toString()
         });
 
         if (now < startWindow) {
@@ -180,7 +214,7 @@ const CallButton = ({
 
     if (callStatus.canCall && receiverId && appointmentId) {
       console.log('✅ CallButton DEBUG - Initiating call...');
-      initiateCall(receiverId, appointmentId); // Pass appointmentId to initiateCall
+      initiateCall(receiverId, appointmentId);
     } else if (!callStatus.canCall) {
       // Show why call is not available
       console.warn('❌ CallButton DEBUG - Call not available:', callStatus.reason);
