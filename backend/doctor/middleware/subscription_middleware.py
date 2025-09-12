@@ -163,11 +163,11 @@ class SubscriptionMiddleware(MiddlewareMixin):
         try:
             service_count = 0
             try:
-                from .models import Service
+                from doctor.models import Service
                 service_count = Service.objects.filter(doctor=doctor_profile).count()
             except ImportError:
                 try:
-                    from apps.services.models import Service
+                    
                     service_count = Service.objects.filter(doctor=doctor_profile).count()
                 except ImportError:
                     logger.debug("Could not import Service model")
@@ -181,11 +181,11 @@ class SubscriptionMiddleware(MiddlewareMixin):
         try:
             service_count = 0
             try:
-                from .models import Service
+                from doctor.models import Service
                 service_count = await sync_to_async(Service.objects.filter(doctor=doctor_profile).count)()
             except ImportError:
                 try:
-                    from apps.services.models import Service
+                    
                     service_count = await sync_to_async(Service.objects.filter(doctor=doctor_profile).count)()
                 except ImportError:
                     logger.debug("Could not import Service model")

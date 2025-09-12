@@ -38,11 +38,8 @@ doctorAxios.interceptors.response.use(
             } catch (refreshError) {
                 console.error("Doctor token refresh failed:", refreshError);
                 
-                // Clear any stored doctor tokens/data if you have any
-                // localStorage.removeItem('doctorToken'); // if you store any
                 
-                // Redirect doctor to their login page
-                window.location.href = "/login";  // Update to your doctor login route
+                window.location.href = "/login";
                 return Promise.reject(refreshError);
             }
         }

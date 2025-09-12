@@ -69,7 +69,8 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         
         return super().validate(attrs)
     
-    
+
+import re
 class CustomUserCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -78,6 +79,51 @@ class CustomUserCreateSerializer(serializers.ModelSerializer):
             'password': {'write_only': True},
             'otp_created_at': {'read_only': True}
         }
+        
+    def validate_first_name(self,value):
+        if value:
+            cleaned_value=value.replace(' ','')
+            
+            name_pattern =re.compile(r"^[a-zA-Z\-']+$")
+            if not name_pattern.match(cleaned_value):
+                raise serializers.ValidationError(
+                    "First name can only contain letters, hyphens (-), and apostrophes ('). "
+                    "Special characters like @, #, $, etc. are not allowed."
+                )
+            
+            
+            if len(cleaned_value) < 1:
+                raise serializers.ValidationError("First name cannot be empty after removing spaces.")
+            
+            
+            if len(cleaned_value) > 30:
+                raise serializers.ValidationError("First name cannot exceed 30 characters.")
+            
+            return cleaned_value
+        return value
+    
+    def validate_last_name(self, value):
+        """Validate last name: strip spaces, allow only letters and certain characters"""
+        if value:
+            # Strip all spaces from the name
+            cleaned_value = value.replace(' ', '')
+            
+            # Check for invalid characters (allow only letters, hyphens, and apostrophes)
+            name_pattern = re.compile(r"^[a-zA-Z\-']+$")
+            if not name_pattern.match(cleaned_value):
+                raise serializers.ValidationError(
+                    "Last name can only contain letters, hyphens (-), and apostrophes ('). "
+                    "Special characters like @, #, $, etc. are not allowed."
+                )
+            
+            if len(cleaned_value) < 1:
+                raise serializers.ValidationError("Last name cannot be empty after removing spaces.")
+            
+            if len(cleaned_value) > 30:
+                raise serializers.ValidationError("Last name cannot exceed 30 characters.")
+            
+            return cleaned_value
+        return value
 
     def validate_username(self, value):
         if User.objects.filter(username=value).exists():
@@ -110,12 +156,10 @@ class CustomUserCreateSerializer(serializers.ModelSerializer):
         logger.info("Starting user creation process...")
         
         try:
-            # Extract and remove password from validated data
             password = validated_data.pop('password')
             
             logger.info(f" Creating user with email: {validated_data.get('email')}")
 
-            # Create user object
             user = User(**validated_data)
             user.set_password(password)
             user.is_active = False  
@@ -123,10 +167,8 @@ class CustomUserCreateSerializer(serializers.ModelSerializer):
             
             logger.info(f"User saved: {user.id} - {user.email}")
 
-        
             EmailOTP.objects.filter(user=user).delete()
             logger.info(f"Cleared any existing OTP records for {user.email}")
-
 
             logger.info(f"Sending OTP to {user.email}...")
             success, result = send_otp_email(user)
@@ -137,7 +179,6 @@ class CustomUserCreateSerializer(serializers.ModelSerializer):
             else:
             
                 logger.error(f"Registration OTP failed for {user.email}: {result}")
-                # Don't fail registration if OTP sending fails - user can resend
                 logger.warning("User created but OTP sending failed - user can use resend OTP")
 
             return user
@@ -277,10 +318,7 @@ class VerifyForgotPasswordOTPSerializer(serializers.Serializer):
         if email_otp.otp != otp:
             raise serializers.ValidationError("Invalid OTP.")
 
-    
-
         return data
-    
     
     
 class ResetPasswordSerializer(serializers.Serializer):
@@ -318,14 +356,14 @@ class ResetPasswordSerializer(serializers.Serializer):
         password = data.get('password')
         confirm_password = data.get('confirm_password')
 
-        # Check if passwords match
+        
         if password != confirm_password:
             logger.debug("DEBUG - Passwords don't match")
             raise serializers.ValidationError({
                 'confirm_password': 'Passwords do not match.'
             })
 
-        # Just verify user exists (OTP already verified in previous step)
+    
         try:
             user = User.objects.get(email=email)
             logger.debug(f"Found user: {user.email}")
@@ -360,6 +398,11 @@ class UserProfileSerializer(serializers.ModelSerializer):
     full_name = serializers.SerializerMethodField()
     member_since = serializers.SerializerMethodField()
     last_visit = serializers.SerializerMethodField()
+    
+    # Make email read-only to prevent editing
+    email = serializers.EmailField(read_only=True)
+    first_name = serializers.CharField(required=False, allow_blank=True)
+    last_name = serializers.CharField(required=False, allow_blank=True)
 
     # Write-only (for update)
     blood_group = serializers.CharField(max_length=5, required=False, allow_blank=True, write_only=True)
@@ -380,102 +423,179 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'phone_number', 'role', 'is_active', 
             'member_since', 'last_visit',
 
-            # Write-only inputs
             'blood_group', 'age', 'gender',
 
-            # Patient read-only info
             'patient_blood_group', 'patient_age', 'patient_gender',
             'profile_picture_url', 'has_profile_picture',
         ]
-        read_only_fields = ['id', 'role', 'is_active','email']
-
-    # === Computed Field Methods ===
-
+        read_only_fields = ['id', 'role', 'is_active', 'email']  # Added email to read_only_fields
+    
     def get_full_name(self, obj):
         return f"{obj.first_name or ''} {obj.last_name or ''}".strip() or obj.email or obj.username
-
-    def get_member_since(self, obj):
-        
-        
+    
+    def get_member_since(self, obj):                          
         return obj.date_joined.strftime('%Y-%m-%d') if hasattr(obj, 'date_joined') and obj.date_joined else None
-
+    
     def get_last_visit(self, obj):
         return obj.last_login.strftime('%Y-%m-%d') if obj.last_login else None
-
+    
     def get_patient_blood_group(self, obj):
         return getattr(getattr(obj, "patient_profile", None), "blood_group", None)
-
+    
     def get_patient_age(self, obj):
         return getattr(getattr(obj, "patient_profile", None), "age", None)
-
+    
     def get_patient_gender(self, obj):
         return getattr(getattr(obj, "patient_profile", None), "gender", None)
-
+    
     def get_profile_picture_url(self, obj):
         patient = getattr(obj, "patient_profile", None)
-        if patient and patient.profile_picture:
-        
+        if patient and patient.profile_picture:                     
             return patient.profile_picture.url
         return None
-
+    
     def get_has_profile_picture(self, obj):
         patient = getattr(obj, "patient_profile", None)
         return bool(patient and patient.profile_picture)
-
     
-
+    def validate_email(self, value):
+        """Prevent email from being changed"""
+        if self.instance and self.instance.email != value:
+            raise serializers.ValidationError("Email cannot be changed.")
+        return value
+    
+    def validate_first_name(self, value):
+        """Validate first name with proper blank handling"""
+        # If value is None, empty string, or only whitespace - don't update
+        if not value or not value.strip():
+            # Return the current value to prevent updating to blank
+            if self.instance:
+                return self.instance.first_name
+            return ""
+        
+        # Clean the value
+        cleaned_value = value.strip()
+        
+        # Check minimum length (3 characters)
+        if len(cleaned_value) < 3:
+            raise serializers.ValidationError("First name must be at least 3 characters long.")
+        
+        # Check maximum length
+        if len(cleaned_value) > 30:
+            raise serializers.ValidationError("First name cannot exceed 30 characters.")
+        
+        # Pattern for letters, hyphens, and apostrophes
+        name_pattern = re.compile(r"^[A-Za-z]+(?:[\'\-][A-Za-z]+)*$")
+        
+        if not name_pattern.match(cleaned_value):
+            raise serializers.ValidationError(
+                "First name can only contain letters, hyphens (-), and apostrophes (')."
+            )
+        
+        return cleaned_value
+    
+    def validate_last_name(self, value):
+        """Validate last name with proper blank handling"""
+        # If value is None, allow it (no update)
+        if value is None:
+            return value
+        
+        # If empty string or only whitespace, show error
+        if not value or not value.strip():
+            raise serializers.ValidationError("Last name cannot be blank or only spaces.")
+        
+        # Clean the value (remove spaces)
+        cleaned_value = value.replace(' ', '')
+        
+        # Check minimum length
+        if len(cleaned_value) < 1:
+            raise serializers.ValidationError("Last name must have at least 1 character.")
+        
+        # Check maximum length
+        if len(cleaned_value) > 30:
+            raise serializers.ValidationError("Last name cannot exceed 30 characters.")
+        
+        # Pattern validation
+        name_pattern = re.compile(r"^[a-zA-Z\-']+$")
+        if not name_pattern.match(cleaned_value):
+            raise serializers.ValidationError(
+                "Last name can only contain letters, hyphens (-), and apostrophes ('). "
+                "Special characters like @, #, $, etc. are not allowed."
+            )
+        
+        return cleaned_value
+    
     def validate_phone_number(self, value):
         if value:
-            # More comprehensive phone validation
-            phone_pattern = re.compile(r'^\+?1?\d{9,15}$')
-            cleaned = re.sub(r'[\s\-\(\)]', '', value)  # Remove spaces, dashes, parentheses
-            if not phone_pattern.match(cleaned):
-                raise serializers.ValidationError("Invalid phone number format. Use format: +1234567890")
+            cleaned = re.sub(r'[\s\-\(\)+]', '', value)
+            
+            if not cleaned.isdigit():
+                raise serializers.ValidationError("Phone number can only contain digits.")
+            
+            if len(cleaned) != 10:
+                raise serializers.ValidationError("Phone number must be exactly 10 digits.")
+            
+            if len(set(cleaned)) == 1:
+                raise serializers.ValidationError("Phone number cannot have all same digits.")
+                
+            return cleaned
         return value
-
+        
     def validate_age(self, value):
         if value is not None and (value < 0 or value > 150):
             raise serializers.ValidationError("Age must be between 0 and 150.")
         return value
-
+    
     def validate_blood_group(self, value):
         if value:
             valid_blood_groups = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-']
             if value not in valid_blood_groups:
                 raise serializers.ValidationError(f"Blood group must be one of: {', '.join(valid_blood_groups)}")
         return value
-
-    # === Update Logic ===
-
+    
+    def validate(self, data):
+        """Additional validation at the serializer level"""
+        # Prevent email updates at the serializer level as well
+        if 'email' in data and self.instance and data['email'] != self.instance.email:
+            raise serializers.ValidationError({
+                'email': 'Email cannot be changed.'
+            })
+        return data
+    
     def update(self, instance, validated_data):
-        # Extract and separate patient data
+        # Extract patient-specific data
         patient_data = {}
         for field in ['blood_group', 'age', 'gender']:
             if field in validated_data:
                 patient_data[field] = validated_data.pop(field)
 
-        # Remove sensitive or restricted fields that shouldn't be updated via this serializer
-        restricted_fields = ['password', 'is_staff', 'is_superuser', 'is_active', 'role', 'date_joined', 'last_login']
+        # Remove restricted fields
+        restricted_fields = ['password', 'is_staff', 'is_superuser', 'is_active', 'role', 'date_joined', 'last_login', 'email']
         for field in restricted_fields:
             validated_data.pop(field, None)
 
-        # Update user fields
+        # Only update fields that have meaningful changes
         for attr, value in validated_data.items():
+            # Skip updating if the value is the same as current
+            if hasattr(instance, attr) and getattr(instance, attr) == value:
+                continue
             setattr(instance, attr, value)
+        
         instance.save()
 
-        # Update or create patient profile (only for patients)
+        # Update patient profile if needed
         if instance.role == 'patient' and patient_data:
             try:
                 patient_profile, created = Patient.objects.get_or_create(user=instance)
                 for attr, value in patient_data.items():
+                    if hasattr(patient_profile, attr) and getattr(patient_profile, attr) == value:
+                        continue
                     setattr(patient_profile, attr, value)
                 patient_profile.save()
             except Exception as e:
                 raise serializers.ValidationError(f"Error updating patient profile: {str(e)}")
 
-        return instance    
-    
+        return instance
 
 class AddressSerializer(serializers.ModelSerializer):
     """Serializer for user addresses"""
@@ -491,7 +611,6 @@ class AddressSerializer(serializers.ModelSerializer):
     def validate(self, data):
         user = self.context.get('user')
         
-        # Ensure only one primary address per user
         if data.get('is_primary', False) and user:
             existing_primary = Address.objects.filter(
                 user=user, 
@@ -879,10 +998,9 @@ class AppointmentSerializer(serializers.ModelSerializer):
         return value
 
     def validate_doctor(self, value):
-        """Validate doctor ID - handle both UUID strings and integers"""
+        """Enhanced doctor validation"""
         if isinstance(value, str):
             try:
-                
                 doctor_uuid = uuid.UUID(value)
                 user = User.objects.filter(
                     id=doctor_uuid,
@@ -893,6 +1011,10 @@ class AppointmentSerializer(serializers.ModelSerializer):
                 
                 if not user:
                     raise serializers.ValidationError(f"Doctor with ID {value} does not exist or is not approved.")
+                
+                if not Schedules.objects.filter(doctor=user.doctor_profile, is_active=True).exists():
+                    raise serializers.ValidationError("Selected doctor has no active schedules.")
+                    
                 return user.doctor_profile
                 
             except ValueError:
@@ -907,9 +1029,15 @@ class AppointmentSerializer(serializers.ModelSerializer):
                     
                     if not user:
                         raise serializers.ValidationError(f"Doctor with ID {doctor_id} does not exist or is not approved.")
+                    
+                    if not Schedules.objects.filter(doctor=user.doctor_profile, is_active=True).exists():
+                        raise serializers.ValidationError("Selected doctor has no active schedules.")
+                        
                     return user.doctor_profile
+                    
                 except ValueError:
                     raise serializers.ValidationError("Invalid doctor ID format.")
+                    
         elif isinstance(value, int):
             user = User.objects.filter(
                 id=value,
@@ -921,14 +1049,21 @@ class AppointmentSerializer(serializers.ModelSerializer):
             if not user:
                 raise serializers.ValidationError(f"Doctor with ID {value} does not exist or is not approved.")
             
+            if not Schedules.objects.filter(doctor=user.doctor_profile, is_active=True).exists():
+                raise serializers.ValidationError("Selected doctor has no active schedules.")
+                
             return user.doctor_profile
-        
-        
+
         if isinstance(value, Doctor):
+            if not Schedules.objects.filter(doctor=value, is_active=True).exists():
+                raise serializers.ValidationError("Selected doctor has no active schedules.")
             return value
+            
         elif isinstance(value, User) and value.role == 'doctor':
+            if not Schedules.objects.filter(doctor=value.doctor_profile, is_active=True).exists():
+                raise serializers.ValidationError("Selected doctor has no active schedules.")
             return value.doctor_profile
-        
+
         return value
 
     def validate_service(self, value):
@@ -949,23 +1084,34 @@ class AppointmentSerializer(serializers.ModelSerializer):
             return Service.objects.get(id=value)
         return value
 
+    
     def validate_schedule(self, value):
-        """Validate schedule ID"""
+        """Enhanced schedule validation"""
         if not value:
             return None
+            
         if isinstance(value, str):
             try:
                 schedule_id = int(value)
-                if not Schedules.objects.filter(id=schedule_id).exists():
-                    raise serializers.ValidationError(f"Schedule with ID {schedule_id} does not exist.")
-                return Schedules.objects.get(id=schedule_id)
+                try:
+                    schedule = Schedules.objects.get(id=schedule_id, is_active=True)
+                    return schedule
+                except Schedules.DoesNotExist:
+                    raise serializers.ValidationError(f"Active schedule with ID {schedule_id} does not exist.")
             except ValueError:
                 raise serializers.ValidationError("Invalid schedule ID format.")
         elif isinstance(value, int):
-            if not Schedules.objects.filter(id=value).exists():
-                raise serializers.ValidationError(f"Schedule with ID {value} does not exist.")
-            return Schedules.objects.get(id=value)
+            try:
+                schedule = Schedules.objects.get(id=value, is_active=True)
+                return schedule
+            except Schedules.DoesNotExist:
+                raise serializers.ValidationError(f"Active schedule with ID {value} does not exist.")
+        
+        if hasattr(value, 'is_active') and not value.is_active:
+            raise serializers.ValidationError("The selected schedule is not active.")
+        
         return value
+
 
     def validate_address(self, value):
         """Validate address ID for offline appointments"""
@@ -1010,7 +1156,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        """Cross-field validation"""
+        """Enhanced cross-field validation"""
         appointment_date = data.get('appointment_date')
         slot_time = data.get('slot_time')
         doctor = data.get('doctor')
@@ -1022,7 +1168,6 @@ class AppointmentSerializer(serializers.ModelSerializer):
         if appointment_date and slot_time:
             appointment_datetime = datetime.combine(appointment_date, slot_time)
             appointment_datetime = django_timezone.make_aware(appointment_datetime)
-            
             if appointment_datetime <= django_timezone.now() + django_timezone.timedelta(hours=1):
                 raise serializers.ValidationError({
                     'appointment_date': 'Appointment must be scheduled at least 1 hour in advance.'
@@ -1034,9 +1179,46 @@ class AppointmentSerializer(serializers.ModelSerializer):
                 'address': 'Address is required for offline appointments.'
             })
 
-        # Check for double booking
+        if doctor and appointment_date:
+            doctor_schedules = Schedules.objects.filter(
+                doctor=doctor,
+                date=appointment_date,  
+                is_active=True
+            )
+            
+            if not doctor_schedules.exists():
+                raise serializers.ValidationError({
+                    'appointment_date': f'Doctor is not available on {appointment_date.strftime("%B %d, %Y")}. Please select a different date.'
+                })
+            
+            if schedule:
+                if schedule.doctor != doctor:
+                    raise serializers.ValidationError({
+                        'schedule': 'The selected schedule does not belong to the specified doctor.'
+                    })
+                
+                if schedule.date != appointment_date:
+                    raise serializers.ValidationError({
+                        'schedule': f'The selected schedule is not available for {appointment_date.strftime("%B %d, %Y")}.'
+                    })
+                
+                if slot_time:
+                    if slot_time < schedule.start_time or slot_time > schedule.end_time:
+                        raise serializers.ValidationError({
+                            'slot_time': f'Selected time is outside doctor\'s available hours ({schedule.start_time.strftime("%H:%M")} - {schedule.end_time.strftime("%H:%M")}).'
+                        })
+                    
+                    if (schedule.break_start_time and schedule.break_end_time and 
+                        schedule.break_start_time <= slot_time <= schedule.break_end_time):
+                        raise serializers.ValidationError({
+                            'slot_time': f'Selected time falls during break period ({schedule.break_start_time.strftime("%H:%M")} - {schedule.break_end_time.strftime("%H:%M")}).'
+                        })
+            else:
+                
+                schedule = doctor_schedules.first()
+                data['schedule'] = schedule
+
         if doctor and appointment_date and slot_time:
-            # Check existing appointments for this exact slot
             existing_appointments = Appointment.objects.filter(
                 doctor=doctor,
                 appointment_date=appointment_date,
@@ -1044,8 +1226,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
                 status__in=['pending', 'confirmed', 'completed'],
                 is_slot_booked=True
             ).exclude(id=self.instance.id if self.instance else None)
-            
-            # Get the schedule to check max patients per slot
+
             if schedule:
                 max_patients = schedule.max_patients_per_slot
                 if existing_appointments.count() >= max_patients:
@@ -1053,12 +1234,11 @@ class AppointmentSerializer(serializers.ModelSerializer):
                         'slot_time': f'This time slot is fully booked. Maximum {max_patients} patients allowed per slot.'
                     })
             else:
-                # Default check if no schedule provided
                 if existing_appointments.exists():
                     raise serializers.ValidationError({
                         'slot_time': 'This time slot is already booked.'
                     })
-        
+
         return data
 
     def create(self, validated_data):

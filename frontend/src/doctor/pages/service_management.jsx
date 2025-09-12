@@ -924,7 +924,7 @@ const ServicePage = () => {
               </div>
 
               {/* Subscription Info */}
-              {subscriptionData && (
+              {/* {subscriptionData && (
                 <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div className="flex items-center justify-between">
                     <div>
@@ -943,7 +943,7 @@ const ServicePage = () => {
                     )}
                   </div>
                 </div>
-              )}
+              )} */}
             </div>
 
             {/* Error Message */}

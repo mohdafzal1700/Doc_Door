@@ -1037,16 +1037,18 @@ class ServiceView(APIView):
                         'message': 'You can only update your own services.'
                     }, status=status.HTTP_403_FORBIDDEN)
             
+            
             serializer = ServiceSerializer(
-                service,
-                data=request.data,
-                partial=True
+                service, 
+                data=request.data, 
+                partial=True,
+                context={'request': request}  
             )
             
             if serializer.is_valid():
-                updated_service = serializer.save()
-                response_serializer = ServiceSerializer(updated_service)
                 
+                updated_service = serializer.save()  
+                response_serializer = ServiceSerializer(updated_service)
                 return Response({
                     'success': True,
                     'message': 'Service updated successfully',
@@ -1057,7 +1059,7 @@ class ServiceView(APIView):
                     'success': False,
                     'field_errors': serializer.errors
                 }, status=status.HTTP_400_BAD_REQUEST)
-
+                
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -1066,7 +1068,8 @@ class ServiceView(APIView):
                 'message': 'Failed to update service',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
+            
+            
     def delete(self, request):
         """Delete service (only own services)"""
         try:
@@ -1110,6 +1113,7 @@ class ServiceView(APIView):
                 'message': 'Failed to delete service',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 
 class ScheduleView(APIView):
     """Handle schedule operations with doctor-specific filtering"""

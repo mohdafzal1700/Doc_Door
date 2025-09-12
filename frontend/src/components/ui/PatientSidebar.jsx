@@ -55,7 +55,7 @@ const PatientSidebar = ({ activeSection, onSectionNavigation, onLogout, initialA
     // },
     { 
       id: "Wallet", 
-      name: "Payments", 
+      name: "Wallet", 
       icon: CreditCard, 
       href: "/patient/wallet" 
     },

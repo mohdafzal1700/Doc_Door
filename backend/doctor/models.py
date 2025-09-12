@@ -358,19 +358,15 @@ class Doctor(models.Model):
             
             today = timezone.now().date()
             
-            # Debug: Check what relationships exist
             import logging
             logger = logging.getLogger(__name__)
             logger.info(f"Doctor model relationships: {[f.name for f in self._meta.get_fields() if f.is_relation]}")
             
-            # You'll need to replace these with your actual relationship names
-            # Example: if your Service model uses related_name='services', use self.services instead
             services_count = 0
             daily_schedules_count = 0
             monthly_schedules_count = 0
             
             try:
-                # Try different possible relationship names for services
                 if hasattr(self, 'services'):
                     services_count = self.services.filter(is_active=True).count()
                 elif hasattr(self, 'service_set'):

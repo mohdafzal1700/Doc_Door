@@ -114,7 +114,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             
             logger.info(f"Login attempt - Email: {email}, UserType: {user_type}")
                         
-            # Check if user exists
+            
             if not User.objects.filter(email=email).exists():
                 logger.warning(f"No user found with email: {email}")
                 return Response(
@@ -122,11 +122,11 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
             
-            # Get the user
+            
             user = User.objects.get(email=email)
             logger.info(f"User found - Role: {user.role}, ID: {user.id}")
             
-            # Validate that this is a patient login
+        
             if user.role != 'patient':
                 logger.warning(f"Role mismatch - Expected: patient, Got: {user.role}")
                 return Response(
@@ -136,7 +136,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                                             
             response = super().post(request, *args, **kwargs)
             
-            # Check if login was successful
+            
             if response.status_code != 200:
                 logger.error(f"JWT authentication failed: {response.data}")
                 return Response(
@@ -321,7 +321,6 @@ class RegisterUserView(generics.CreateAPIView):
             'message': 'Registration failed',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-
 
 
 class EmailOTPVerifyView(generics.GenericAPIView):
@@ -1489,7 +1488,6 @@ class AppointmentDetailView(APIView):
                 'message': 'Appointment not found'
             }, status=status.HTTP_404_NOT_FOUND)
 
-        # Check if appointment can be cancelled
         if appointment.status in ['cancelled', 'completed']:
             return Response({
                 'success': False,
@@ -1497,14 +1495,12 @@ class AppointmentDetailView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            # Get refund amount (assuming you have consultation_fee field)
             refund_amount = appointment.total_fee
             
             # Handle appointment cancellation with wallet transfer
             success, message = handle_appointment_cancellation(appointment, refund_amount)
             
             if success:
-                # Update appointment status
                 appointment.status = 'cancelled'
                 appointment.save()
                 logger.info(f"Appointment {appointment_id} cancelled and wallet credited")
@@ -1665,10 +1661,6 @@ class UpdatePatientLocationView(generics.CreateAPIView):
     
     def create(self, request, *args, **kwargs):
         """Override create to provide custom response messages"""
-        # logger.debug("="*50)
-        # logger.debug("UpdatePatientLocationView.create() called")
-        # logger.debug(f"User: {request.user.id} ({request.user.username})")
-        # logger.debug(f"Request data: {request.data}")
         
         try:
             # Check if user is authenticated
@@ -1704,7 +1696,6 @@ class UpdatePatientLocationView(generics.CreateAPIView):
             
             logger.debug(f"Serializer validated. Clean data: {serializer.validated_data}")
             
-            # Perform the create logic
             logger.debug("Calling perform_create...")
             self.perform_create(serializer)
             
@@ -1764,9 +1755,6 @@ class CurrentPatientLocationView(generics.RetrieveAPIView):
     
     def retrieve(self, request, *args, **kwargs):
         """Override retrieve to provide custom response format"""
-        logger.debug("="*50)
-        logger.debug("CurrentPatientLocationView.retrieve() called")
-        logger.debug(f"User: {request.user.id} ({request.user.username})")
         
         try:
             instance = self.get_object()
@@ -1882,9 +1870,8 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
             logger.debug(f"Bounding box: {bounding_box}")
 
             try:
-                # Pre-filter doctors using bounding box to reduce database load
                 doctor_locations = DoctorLocation.objects.filter(
-                    doctor__user__is_active=True,  # Filter by user's active status
+                    doctor__user__is_active=True,  
                     latitude__gte=bounding_box['min_lat'],
                     latitude__lte=bounding_box['max_lat'],
                     longitude__gte=bounding_box['min_lng'],
@@ -1895,33 +1882,27 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                 
             except Exception as query_error:
                 logger.error(f"Error in doctor query: {str(query_error)}")
-                # Fallback to simpler query without bounding box
                 doctor_locations = DoctorLocation.objects.filter(
                     doctor__user__is_active=True
                 ).select_related('doctor', 'doctor__user')
 
-            # Calculate exact distances for pre-filtered doctors and apply radius filter
             nearby_locations = []
             distance_calculations = 0
             
             for location in doctor_locations:
                 try:
-                    # Skip if doctor or user is None
                     if not location.doctor or not location.doctor.user:
                         continue
 
-                    # Skip if user is not active (double-check)
                     if not location.doctor.user.is_active:
                         continue
 
-                    # Calculate exact distance using Haversine formula
                     distance = self.calculate_distance(
                         patient_lat, patient_lng,
                         location.latitude, location.longitude
                     )
                     distance_calculations += 1
 
-                    # Apply exact radius filter
                     if distance <= radius:
                         location.distance = round(distance, 2)
                         nearby_locations.append(location)
@@ -1933,13 +1914,11 @@ class SearchNearbyDoctorsView(generics.ListAPIView):
                     logger.error(f"Error calculating distance for doctor {location.id}: {str(e)}")
                     continue
 
-            # Sort by distance
             nearby_locations.sort(key=lambda x: getattr(x, 'distance', float('inf')))
 
             logger.debug(f"Performed {distance_calculations} distance calculations")
             logger.debug(f"Found {len(nearby_locations)} doctors within {radius}km")
 
-            # Serialize the data
             serializer = self.get_serializer(nearby_locations, many=True)
             
             response_data = {
@@ -1979,14 +1958,12 @@ class PaymentInitiationView(APIView):
     def post(self, request, appointment_id):
         """Create payment order based on selected method"""
         try:
-            # Get appointment and verify ownership
             appointment = get_object_or_404(
                 Appointment, 
                 id=appointment_id, 
                 patient__user=request.user
             )
 
-            # Check if appointment is confirmed and unpaid
             if appointment.status != 'confirmed':
                 return Response({
                     'success': False,
@@ -1999,28 +1976,24 @@ class PaymentInitiationView(APIView):
                     'message': 'Payment already completed for this appointment'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Validate input with better error handling
             serializer = PaymentInitiationSerializer(data=request.data)
             if not serializer.is_valid():
-                # Log the validation errors for debugging
                 logger.error(f"Payment initiation validation failed: {serializer.errors}")
                 return Response({
                     'success': False,
                     'message': 'Invalid payment data',
                     'field_errors': serializer.errors,
-                    'received_data': request.data  # Add this for debugging
+                    'received_data': request.data
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             payment_method = serializer.validated_data['method']
 
-            # Validate payment method
             if payment_method not in ['wallet', 'razorpay']:
                 return Response({
                     'success': False,
                     'message': f'Invalid payment method: {payment_method}. Must be "wallet" or "razorpay"'
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # Get or create payment record
             payment, created = Payment.objects.get_or_create(
                 appointment=appointment,
                 defaults={
@@ -2030,18 +2003,15 @@ class PaymentInitiationView(APIView):
                 }
             )
 
-            # Update method if payment exists but method changed
             if not created and payment.method != payment_method:
                 payment.method = payment_method
                 payment.status = 'pending'
                 payment.failure_reason = None
                 payment.save()
 
-            # Handle wallet payment
             if payment_method == 'wallet':
                 return self._process_wallet_payment(payment, appointment)
 
-            # Handle Razorpay payment
             elif payment_method == 'razorpay':
                 return self._process_razorpay_payment(payment, appointment)
 
@@ -2050,20 +2020,18 @@ class PaymentInitiationView(APIView):
             return Response({
                 'success': False,
                 'message': 'Failed to initiate payment',
-                'error': str(e)  # Include error for debugging
+                'error': str(e)  
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def _process_wallet_payment(self, payment, appointment):
         """Process immediate wallet payment"""
         try:
             with transaction.atomic():
-                # Get or create wallet first
                 wallet, _ = PatientWallet.objects.get_or_create(
                     patient=appointment.patient,
                     defaults={'balance': Decimal('0.00')}
                 )
-
-                # Check wallet balance
+                
                 if wallet.balance < payment.amount:
                     payment.status = 'failed'
                     payment.failure_reason = f"Insufficient wallet balance. Available: ₹{wallet.balance}, Required: ₹{payment.amount}"
@@ -2349,8 +2317,7 @@ class Wallet(APIView):
     
     def get(self, request):
         try:
-            # Get or create wallet for the patient
-            patient = request.user.patient_profile  # or however you access the patient profile
+            patient = request.user.patient_profile  
             wallet, created = PatientWallet.objects.get_or_create(
                 patient=patient,
                 defaults={'balance': Decimal('0.00')}
@@ -2418,15 +2385,12 @@ class PatientReviewCreateView(APIView):
     
     def post(self, request):
         
-        
-        # Check if user is a patient by role
         if request.user.role != 'patient':
             return Response({
                 'success': False,
                 'message': 'Only patients can submit reviews.'
             }, status=status.HTTP_403_FORBIDDEN)
         
-        # Get patient object
         patient = None
         try:
             patient = Patient.objects.get(user=request.user)
@@ -2437,13 +2401,11 @@ class PatientReviewCreateView(APIView):
                 'message': 'Patient profile not found. Please contact support.'
             }, status=status.HTTP_404_NOT_FOUND)
         
-        # Validate that the doctor exists before creating serializer
         doctor_user_id = request.data.get('doctor')
         if doctor_user_id:
             try:
                 from doctor.models import Doctor
                 doctor = Doctor.objects.get(user__id=doctor_user_id)
-                # Replace the user ID with doctor ID in request data
                 request.data['doctor'] = doctor.id
             except Doctor.DoesNotExist:
                 return Response({
@@ -2499,12 +2461,10 @@ class DoctorReviewsListView(APIView):
             doctor = None
             
             try:
-                # Try getting doctor by doctor ID first
                 doctor = Doctor.objects.get(id=doctor_id)
                 actual_doctor_id = doctor.id
                 logger.info(f"Found doctor by doctor ID: {doctor.id}")
             except Doctor.DoesNotExist:
-                # If not found, try getting doctor by user ID
                 try:
                     doctor = Doctor.objects.get(user__id=doctor_id)
                     actual_doctor_id = doctor.id
@@ -2516,7 +2476,6 @@ class DoctorReviewsListView(APIView):
                         'message': 'Doctor not found'
                     }, status=status.HTTP_404_NOT_FOUND)
             
-            # Now get reviews using the actual doctor ID
             queryset = DoctorReview.objects.filter(
                 doctor_id=actual_doctor_id,
                 status='approved'
@@ -2528,7 +2487,6 @@ class DoctorReviewsListView(APIView):
             
             serializer = DoctorReviewSerializer(queryset, many=True)
             
-            # Calculate average rating
             total_reviews = queryset.count()
             if total_reviews > 0:
                 avg_rating = queryset.aggregate(

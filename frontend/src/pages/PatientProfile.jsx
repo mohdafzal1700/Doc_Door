@@ -345,37 +345,6 @@ const PatientProfile = () => {
                             </div>
 
                             {/* Account Information */}
-                            <div className="space-y-6">
-                                <SectionHeader 
-                                    icon={Activity} 
-                                    iconBg="bg-blue-100" 
-                                    title="Account Information"
-                                    action={
-                                        <button
-                                            onClick={handleRefresh}
-                                            disabled={refreshing}
-                                            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-                                            title="Refresh data"
-                                        >
-                                            <RefreshCw size={16} className={`text-gray-500 ${refreshing ? 'animate-spin' : ''}`} />
-                                        </button>
-                                    }
-                                />
-                                <div className="space-y-4">
-                                    <InfoCard 
-                                        icon={Calendar} 
-                                        iconBg="bg-blue-100" 
-                                        label="Member Since" 
-                                        value={user.member_since ? new Date(user.member_since).toLocaleDateString() : 'Not available'} 
-                                    />
-                                    <InfoCard 
-                                        icon={Activity} 
-                                        iconBg="bg-green-100" 
-                                        label="Last Visit" 
-                                        value={user.last_visit ? new Date(user.last_visit).toLocaleDateString() : 'No recent visits'} 
-                                    />
-                                </div>
-                            </div>
                         </div>
                     </div>
 
