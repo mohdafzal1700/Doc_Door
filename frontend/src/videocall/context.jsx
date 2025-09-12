@@ -1,25 +1,24 @@
-// contexts/VideoCallContext.js
+
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import videoCallService from '../service/webrtc';
 
-// Updated WebRTC Configuration with TURN server
+
 const rtcConfiguration = {
   iceServers: [
     // Google STUN servers
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     // Your TURN server
-    {
-      urls: ['turn:api.docdoor.muhammedafsal.online:3478'],
-      username: 'webrtcuser',
-      credential: 'strongpassword'
-    },
-    // TURN over TLS (secure)
-    {
-      urls: ['turns:api.docdoor.muhammedafsal.online:5349'],
-      username: 'webrtcuser',
-      credential: 'strongpassword'
-    }
+      {
+        urls: ['turn:api.docdoor.muhammedafsal.online:3478'],
+        username: 'testuser',
+        credential: 'testpass'
+      },
+      {
+        urls: ['turns:api.docdoor.muhammedafsal.online:5349'],
+        username: 'testuser',
+        credential: 'testpass'
+      }
   ],
   iceCandidatePoolSize: 10
 };
