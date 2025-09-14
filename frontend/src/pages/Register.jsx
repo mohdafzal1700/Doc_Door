@@ -114,45 +114,83 @@ const Register = () => {
           }
         })
       } catch (error) {
-        console.error("Registration error:", error)
-        
-        // Handle backend validation errors
-        if (error?.response?.data) {
-          const backendErrors = error.response.data
-          
-          // Handle field-specific errors
-          if (backendErrors.email) {
-            formik.setFieldError("email", backendErrors.email[0])
-            toast.error(backendErrors.email[0])
-          }
-          if (backendErrors.username) {
-            formik.setFieldError("username", backendErrors.username[0])
-          }
-          if (backendErrors.phone_number) {
-            formik.setFieldError("phone", backendErrors.phone_number[0])
-          }
-          if (backendErrors.password) {
-            formik.setFieldError("password", backendErrors.password[0])
-          }
-          if (backendErrors.first_name) {
-            formik.setFieldError("firstName", backendErrors.first_name[0])
-          }
-          if (backendErrors.last_name) {
-            formik.setFieldError("lastName", backendErrors.last_name[0])
-          }
-
-          // Handle non-field errors
-          if (typeof backendErrors === 'string') {
-            toast.error(backendErrors)
-          } else if (backendErrors.detail) {
-            toast.error(backendErrors.detail)
-          }
-        } else {
-          toast.error("Something went wrong. Please try again.")
-        }
-      } finally {
-        setLoading(false)
-      }
+  console.error("Registration error:", error)
+  
+  // Handle backend validation errors
+  if (error?.response?.data) {
+    const backendResponse = error.response.data
+    console.log("Backend error response:", backendResponse)
+    
+    // Check if errors are nested under 'errors' object
+    const backendErrors = backendResponse.errors || backendResponse
+    
+    // Handle field-specific errors
+    if (backendErrors.email) {
+      const emailError = Array.isArray(backendErrors.email) ? backendErrors.email[0] : backendErrors.email
+      formik.setFieldError("email", emailError)
+      toast.error(emailError)
+    }
+    
+    if (backendErrors.username) {
+      const usernameError = Array.isArray(backendErrors.username) ? backendErrors.username[0] : backendErrors.username
+      formik.setFieldError("username", usernameError)
+      toast.error(usernameError)
+    }
+    
+    if (backendErrors.phone_number) {
+      const phoneError = Array.isArray(backendErrors.phone_number) ? backendErrors.phone_number[0] : backendErrors.phone_number
+      formik.setFieldError("phone", phoneError)
+      toast.error(phoneError)
+    }
+    
+    if (backendErrors.password) {
+      const passwordError = Array.isArray(backendErrors.password) ? backendErrors.password[0] : backendErrors.password
+      formik.setFieldError("password", passwordError)
+      toast.error(passwordError)
+    }
+    
+    if (backendErrors.first_name) {
+      const firstNameError = Array.isArray(backendErrors.first_name) ? backendErrors.first_name[0] : backendErrors.first_name
+      formik.setFieldError("firstName", firstNameError)
+      toast.error(firstNameError)
+    }
+    
+    if (backendErrors.last_name) {
+      const lastNameError = Array.isArray(backendErrors.last_name) ? backendErrors.last_name[0] : backendErrors.last_name
+      formik.setFieldError("lastName", lastNameError)
+      toast.error(lastNameError)
+    }
+    
+    // Handle general message from backend response
+    if (backendResponse.message && backendResponse.success === false) {
+      toast.error(backendResponse.message)
+    }
+    
+    // Handle non-field errors
+    if (typeof backendErrors === 'string') {
+      toast.error(backendErrors)
+    } else if (backendErrors.detail) {
+      toast.error(backendErrors.detail)
+    } else if (backendErrors.non_field_errors) {
+      const nonFieldError = Array.isArray(backendErrors.non_field_errors) 
+        ? backendErrors.non_field_errors[0] 
+        : backendErrors.non_field_errors
+      toast.error(nonFieldError)
+    }
+    
+    // If no specific errors were found, show the general message
+    if (!backendErrors.email && !backendErrors.username && !backendErrors.phone_number && 
+        !backendErrors.password && !backendErrors.first_name && !backendErrors.last_name &&
+        !backendErrors.detail && !backendErrors.non_field_errors && backendResponse.message) {
+      toast.error(backendResponse.message)
+    }
+    
+  } else {
+    toast.error("Something went wrong. Please try again.")
+  }
+} finally {
+  setLoading(false)
+}
     },
   })
 

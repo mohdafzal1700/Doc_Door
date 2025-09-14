@@ -111,7 +111,7 @@ export default function DoctorFeedbackForm() {
       
       // Optionally redirect after success
       setTimeout(() => {
-        navigate('/dashboard') // or wherever you want to redirect
+        navigate(-1)// or wherever you want to redirect
       }, 2000)
 
     } catch (error) {

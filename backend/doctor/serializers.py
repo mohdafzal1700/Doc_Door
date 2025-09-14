@@ -1,52 +1,72 @@
-from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.exceptions import AuthenticationFailed
-from django.contrib.auth import authenticate
-from .models import User, Doctor, DoctorEducation, DoctorCertification, DoctorProof,Service,Schedules,DoctorLocation
-from datetime import datetime, timedelta
-from django.utils import timezone
-from datetime import datetime,date
-import hashlib
+import io
 import logging
-import razorpay
+from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import timedelta
-from django.db import transaction
-from django.utils import timezone
+
 from django.conf import settings
+from django.contrib.auth import authenticate
+from django.db import transaction
+from django.db.models import Sum, Avg, Count, Q
+from django.http import HttpResponse
+from django.utils import timezone
+from reportlab.lib.colors import HexColor, Color
+
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.exceptions import AuthenticationFailed
-from django.contrib.auth import authenticate
-from rest_framework import serializers
-import logging
-from django.db import transaction
-from doctor.models  import SubscriptionPlan,DoctorSubscription,SubscriptionUpgrade
+import re
+import razorpay
+
+from .models import (
+    User,
+    Doctor,
+    DoctorEducation,
+    DoctorCertification,
+    DoctorProof,
+    Service,
+    Schedules,
+    DoctorLocation,
+    Appointment
+)
+
+from doctor.models import SubscriptionPlan, DoctorSubscription, SubscriptionUpgrade
 from adminside.serializers import SubscriptionPlanSerializer
-from django.conf import settings
-import razorpay
-from decimal import Decimal, ROUND_HALF_UP
 
+# ReportLab imports for PDF generation
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.units import inch
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Table,
+    TableStyle,
+    Paragraph,
+    Spacer,
+    PageBreak
+)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.pdfgen import canvas
+from reportlab.graphics.shapes import Drawing, Rect
+from reportlab.graphics.charts.linecharts import HorizontalLineChart
+from reportlab.graphics.widgets.markers import makeMarker
 
-from rest_framework import serializers
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from rest_framework_simplejwt.exceptions import AuthenticationFailed
-from django.contrib.auth import authenticate
-
+# Logger setup
 logger = logging.getLogger(__name__)
+
+
 
 class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
     username_field = 'email'
     
     def __init__(self, *args, **kwargs):
+        '''Remove the default 'username' field because authentication uses 'email' instead'''
+        
         super().__init__(*args, **kwargs)
-        # Remove username field and use email
         if 'username' in self.fields:
             del self.fields['username']
         
-        # Add email field explicitly
         self.fields['email'] = serializers.EmailField()
-        # Optional: Add userType field if needed for frontend
         self.fields['userType'] = serializers.CharField(required=False)
 
     def validate(self, attrs):
@@ -59,7 +79,6 @@ class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
             if not email or not password:
                 raise AuthenticationFailed('Email and password are required')
             
-            # Explicit authentication call
             user = authenticate(
                 request=self.context.get('request'), 
                 username=email, 
@@ -70,7 +89,6 @@ class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
                 logger.warning(f"Authentication failed for email: {email}")
                 raise AuthenticationFailed('Invalid email or password')
             
-            # Role-based access control - use safe attribute access
             user_role = getattr(user, 'role', None)
             if user_role != 'doctor':
                 logger.warning(f"Non-doctor login attempt: {email} (role: {user_role})")
@@ -78,14 +96,12 @@ class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
                     f'This login is only for doctors. Your account is registered as {user_role or "unknown"}.'
                 )
             
-            # Account status checks
             if not user.is_active:
                 logger.warning(f"Inactive user login attempt: {email}")
                 raise AuthenticationFailed(
                     'Your account is not active. Please verify your email.'
                 )
             
-            # Check if user is blocked (if you have this field)
             if hasattr(user, 'is_blocked') and getattr(user, 'is_blocked', False):
                 logger.warning(f"Blocked user login attempt: {email}")
                 raise AuthenticationFailed(
@@ -99,7 +115,6 @@ class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
             self.user = user
             
         except AuthenticationFailed:
-            # Re-raise authentication failed exceptions
             raise
         except Exception as e:
             logger.error(f"Unexpected error in doctor login validation: {str(e)}", exc_info=True)
@@ -112,16 +127,15 @@ class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
             # Add doctor-specific data to token response
             doctor_profile = None
             try:
-                # Safe access to doctor profile
+                
                 if hasattr(self.user, 'doctor_profile'):
                     doctor_profile = self.user.doctor_profile
-                elif hasattr(self.user, 'doctorprofile'):  # Alternative naming
-                    doctor_profile = self.user.doctorprofile
+                # elif hasattr(self.user, 'doctorprofile'):  
+                #     doctor_profile = self.user.doctorprofile
             except Exception as profile_error:
                 logger.warning(f"Could not access doctor profile for {self.user.email}: {str(profile_error)}")
                 doctor_profile = None
             
-            # Build doctor profile data safely
             doctor_profile_data = None
             if doctor_profile:
                 try:
@@ -145,8 +159,7 @@ class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
                         'specialization': None,
                         'experience': None,
                     }
-            
-            # Add user data to response - ENSURE ALL UUIDs ARE CONVERTED TO STRINGS
+                    
             data['user'] = {
                 'id': str(self.user.id),  # Convert UUID to string
                 'email': self.user.email,
@@ -174,7 +187,6 @@ class CustomDoctorTokenObtainPairSerializer(TokenObtainPairSerializer):
             token['user_id'] = str(user.id)  # Convert UUID to string
             token['email'] = user.email
             token['role'] = getattr(user, 'role', 'doctor')
-            
             
             return token
         except Exception as e:
@@ -259,7 +271,7 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'role', 'is_active']
 
-    # === Computed Field Methods ===
+
 
     def get_full_name(self, obj):
         return f"{obj.first_name or ''} {obj.last_name or ''}".strip() or obj.email or obj.username
@@ -338,48 +350,252 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         """Return the gender from doctor profile"""
         return getattr(getattr(obj, "doctor_profile", None), "gender", '')
 
-    # === Validation Methods ===
 
-    def validate_email(self, value):
-        user = self.instance
-        if user and User.objects.filter(email=value).exclude(id=user.id).exists():
-            raise serializers.ValidationError("This email is already in use.")
+
+    def validate_name_field(self, value, field_name):
+        """Generic name field validation for first_name, last_name"""
+        if not value or not value.strip():
+            raise serializers.ValidationError(f"{field_name} cannot be blank or contain only whitespace.")
+        
+        cleaned_value = value.strip()
+        
+        name_pattern = re.compile(r'^[a-zA-Z\s\'-]+$')
+        if not name_pattern.match(cleaned_value):
+            raise serializers.ValidationError(f"{field_name} can only contain letters, spaces, hyphens, and apostrophes.")
+        
+        if len(cleaned_value) < 2:
+            raise serializers.ValidationError(f"{field_name} must be at least 2 characters long.")
+        
+        if len(cleaned_value) > 50:
+            raise serializers.ValidationError(f"{field_name} cannot exceed 50 characters.")
+        
+        return cleaned_value
+
+    def validate_first_name(self, value):
+        return self.validate_name_field(value, "First name")
+
+    def validate_last_name(self, value):
+        return self.validate_name_field(value, "Last name")
+
+    def validate_location(self, value):
+        """Validate location field"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Location cannot be blank or contain only whitespace.")
+        
+        cleaned_value = value.strip()
+        
+        location_pattern = re.compile(r'^[a-zA-Z\s,.\'-]+$')
+        if not location_pattern.match(cleaned_value):
+            raise serializers.ValidationError("Location contains invalid characters. Only letters, numbers, spaces, commas, periods, hyphens, and apostrophes are allowed.")
+        
+        if len(cleaned_value) < 3:
+            raise serializers.ValidationError("Location must be at least 3 characters long.")
+        
+        if len(cleaned_value) > 200:
+            raise serializers.ValidationError("Location cannot exceed 200 characters.")
+        
+        return cleaned_value
+
+    def validate_date_of_birth(self, value):
+        """Validate date of birth - cannot be in future and reasonable age limits"""
+        if not value:
+            return value
+        
+        today = date.today()
+        
+        if value > today:
+            raise serializers.ValidationError("Date of birth cannot be in the future.")
+        
+        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
+        
+        if age < 18:
+            raise serializers.ValidationError("Doctor must be at least 18 years old.")
+        
+        if age > 100:
+            raise serializers.ValidationError("Please enter a valid date of birth.")
+        
         return value
 
-    def validate_phone_number(self, value):
-        if value:
-            import re
-            phone_pattern = re.compile(r'^\+?1?\d{9,15}$')
-            cleaned = re.sub(r'[\s\-\(\)]', '', value)
-            if not phone_pattern.match(cleaned):
-                raise serializers.ValidationError("Invalid phone number format. Use format: +1234567890")
-        return value
+    def validate_experience(self, value):
+        """Validate years of experience"""
+        if value is None:
+            return value
+        
+        if not isinstance(value, (int, float)) or value < 0:
+            raise serializers.ValidationError("Years of experience must be a positive number.")
+        
+        if value > 60:
+            raise serializers.ValidationError("Years of experience cannot exceed 60 years.")
+        
+        return int(value)
 
     def validate_years_of_experience(self, value):
-        if value is not None and (value < 0 or value > 50):
-            raise serializers.ValidationError("Years of experience must be between 0 and 50.")
-        return value
+        return self.validate_experience(value)
+
+    def validate_phone_number(self, value):
+        """Enhanced phone number validation"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Phone number cannot be blank.")
+        
+        cleaned = re.sub(r'[^\d+]', '', value.strip())
+        
+        if not cleaned:
+            raise serializers.ValidationError("Phone number must contain at least one digit.")
+        
+        digits_only = re.sub(r'[^\d]', '', cleaned)
+        
+        if len(digits_only) < 10:
+            raise serializers.ValidationError("Phone number must be at least 10 digits long.")
+        
+        if len(digits_only) > 15:
+            raise serializers.ValidationError("Phone number cannot exceed 15 digits.")
+        
+        if len(set(digits_only)) == 1:
+            raise serializers.ValidationError("Phone number cannot contain all identical digits.")
+        
+        invalid_patterns = ['1234567890', '0987654321', '1111111111', '0000000000']
+        if digits_only in invalid_patterns or digits_only[-10:] in invalid_patterns:
+            raise serializers.ValidationError("Please enter a valid phone number.")
+        
+        phone_pattern = re.compile(r'^[\+]?[\d\s\-\(\)]+$')
+        if not phone_pattern.match(value.strip()):
+            raise serializers.ValidationError("Phone number contains invalid characters. Use only digits, +, spaces, hyphens, and parentheses.")
+        
+        return value.strip()
+
+    def validate_email(self, value):
+        """Enhanced email validation"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Email cannot be blank.")
+        
+        cleaned_email = value.strip().lower()
+        
+        email_pattern = re.compile(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$')
+        if not email_pattern.match(cleaned_email):
+            raise serializers.ValidationError("Please enter a valid email address.")
+        
+        user = self.instance
+        if user and User.objects.filter(email=cleaned_email).exclude(id=user.id).exists():
+            raise serializers.ValidationError("This email is already in use.")
+        
+        return cleaned_email
 
     def validate_consultation_fee(self, value):
-        if value is not None and value < 0:
+        """Enhanced consultation fee validation"""
+        if value is None:
+            return value
+        
+        # if not isinstance(value, (int, float)):
+        #     raise serializers.ValidationError("Consultation fee must be a number.")
+        
+        if value < 0:
             raise serializers.ValidationError("Consultation fee cannot be negative.")
+        
+        if value > 10000: 
+            raise serializers.ValidationError("Consultation fee seems too high. Please enter a reasonable amount.")
+        
+        return round(float(value), 2)
+
+    def validate_clinic_name(self, value):
+        """Validate clinic name"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Clinic name cannot be blank or contain only whitespace.")
+        
+        cleaned_value = value.strip()
+        
+        clinic_pattern = re.compile(r'^[a-zA-Z0-9\s,.\'&()-]+$')
+        if not clinic_pattern.match(cleaned_value):
+            raise serializers.ValidationError("Clinic name contains invalid characters.")
+        
+        if len(cleaned_value) < 3:
+            raise serializers.ValidationError("Clinic name must be at least 3 characters long.")
+        
+        if len(cleaned_value) > 100:
+            raise serializers.ValidationError("Clinic name cannot exceed 100 characters.")
+        
+        return cleaned_value
+
+    def validate_specialization(self, value):
+        """Validate medical specialization"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("Specialization cannot be blank or contain only whitespace.")
+        
+        cleaned_value = value.strip()
+        
+        spec_pattern = re.compile(r'^[a-zA-Z\s\-()&,]+$')
+        if not spec_pattern.match(cleaned_value):
+            raise serializers.ValidationError("Specialization can only contain letters, spaces, hyphens, parentheses, and commas.")
+        
+        if len(cleaned_value) < 3:
+            raise serializers.ValidationError("Specialization must be at least 3 characters long.")
+        
+        if len(cleaned_value) > 100:
+            raise serializers.ValidationError("Specialization cannot exceed 100 characters.")
+        
+        return cleaned_value
+
+    def validate_license_number(self, value):
+        """Validate medical license number"""
+        if not value or not value.strip():
+            raise serializers.ValidationError("License number cannot be blank or contain only whitespace.")
+        
+        cleaned_value = value.strip().upper()
+        
+        # License numbers typically contain letters and numbers
+        license_pattern = re.compile(r'^[A-Z0-9\-/]+$')
+        if not license_pattern.match(cleaned_value):
+            raise serializers.ValidationError("License number can only contain letters, numbers, hyphens, and forward slashes.")
+        
+        if len(cleaned_value) < 5:
+            raise serializers.ValidationError("License number must be at least 5 characters long.")
+        
+        if len(cleaned_value) > 20:
+            raise serializers.ValidationError("License number cannot exceed 20 characters.")
+        
+        return cleaned_value
+
+    def validate_bio(self, value):
+        """Validate doctor bio"""
+        if value and value.strip():
+            cleaned_value = value.strip()
+            
+            if len(cleaned_value) < 10:
+                raise serializers.ValidationError("Bio must be at least 10 characters long if provided.")
+            
+            if len(cleaned_value) > 1000:
+                raise serializers.ValidationError("Bio cannot exceed 1000 characters.")
+            
+            return cleaned_value
+        
         return value
 
     def validate(self, data):
-        # Validate that at least one consultation mode is selected if provided
+        """Overall validation for the serializer"""
         consultation_online = data.get('consultation_mode_online')
         consultation_offline = data.get('consultation_mode_offline')
         
+        # Validate consultation modes
         if consultation_online is not None or consultation_offline is not None:
             if not consultation_online and not consultation_offline:
-                raise serializers.ValidationError("At least one consultation mode must be selected")
+                raise serializers.ValidationError("At least one consultation mode must be selected.")
+        
+        # Cross-field validation for date of birth and experience
+        dob = data.get('date_of_birth')
+        experience = data.get('experience') or data.get('years_of_experience')
+        
+        if dob and experience:
+            today = date.today()
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            
+            # Experience cannot be more than age - 18 (assuming medical school at 18)
+            max_possible_experience = age - 18
+            if experience > max_possible_experience:
+                raise serializers.ValidationError(f"Years of experience ({experience}) seems inconsistent with date of birth. Maximum possible experience based on age: {max_possible_experience}")
         
         return data
 
-    # === Update Logic ===
 
     def update(self, instance, validated_data):
-        from django.utils import timezone
         
         logger.debug(f" DEBUG: Received validated_data keys: {list(validated_data.keys())}")
         
@@ -403,7 +619,7 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         for field in doctor_fields:
             if field in validated_data:
                 value = validated_data.pop(field)
-                # Add this debug line:
+                
                 logger.debug(f" DEBUG: Processing field '{field}' with value: {value} (type: {type(value)})")
                 
                 if field == 'department':
@@ -416,20 +632,17 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
                 else:
                     doctor_data[field] = value
 
-        # Remove sensitive or restricted fields
         restricted_fields = ['password', 'is_staff', 'is_superuser', 'is_active', 'role', 'date_joined', 'last_login']
         for field in restricted_fields:
             validated_data.pop(field, None)
 
-        # Update user fields
         user_updated = False
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
             user_updated = True
             logger.debug(f" DEBUG: Updated user.{attr} = {value}")
         
-        
-        # Update user first_name and last_name if provided in doctor_data
+
         for field in ['first_name', 'last_name']:
             if field in doctor_data:
                 setattr(instance, field, doctor_data.pop(field))
@@ -440,7 +653,6 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
             instance.save()
             logger.debug("DEBUG: User model saved")
 
-        # Update or create doctor profile (only for doctors)
         if instance.role == 'doctor' and doctor_data:
             logger.debug(f" DEBUG: Updating doctor profile with data: {doctor_data}")
             try:
@@ -465,7 +677,6 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
                     }
                 )
                 
-                # Update doctor profile fields
                 for attr, value in doctor_data.items():
                     old_value = getattr(doctor_profile, attr, 'NOT_FOUND')
                     setattr(doctor_profile, attr, value)
@@ -475,7 +686,6 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
                 doctor_profile.save()
                 logger.debug("DEBUG: Doctor profile saved")
                 
-                # Check if profile is complete and update accordingly
                 if self._is_profile_complete(doctor_profile):
                     doctor_profile.is_profile_setup_done = True
                     doctor_profile.save()
@@ -533,9 +743,9 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
         } for cert in certifications]
     
     
-    
 class DoctorEducationSerializer(serializers.ModelSerializer):
-    # User fields for education context
+    """Serializer for doctor Education """ 
+    
     first_name = serializers.CharField(source='doctor.user.first_name', read_only=True)
     last_name = serializers.CharField(source='doctor.user.last_name', read_only=True)
     phone_number = serializers.CharField(source='doctor.user.phone_number', read_only=True)
@@ -576,17 +786,16 @@ class DoctorEducationSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         """Override create to update education completion status"""
         instance = super().create(validated_data)
-        # Update education completion status - FIXED: call the correct method
+        
         if hasattr(instance, 'doctor'):
             instance.doctor.check_education_completion()
-            # Also trigger overall verification check
             instance.doctor.check_verification_completion()
         return instance
     
     def update(self, instance, validated_data):
         """Override update to check completion status"""
         instance = super().update(instance, validated_data)
-        # Update education completion status - FIXED: call the correct method
+        # Update education completion status
         if hasattr(instance, 'doctor'):
             instance.doctor.check_education_completion()
             # Also trigger overall verification check
@@ -594,7 +803,8 @@ class DoctorEducationSerializer(serializers.ModelSerializer):
         return instance
 
 class DoctorCertificationSerializer(serializers.ModelSerializer):
-    # User fields for certification context
+    """Serializer for doctor Certification (User + Doctor)"""
+    
     first_name = serializers.CharField(source='doctor.user.first_name', read_only=True)
     last_name = serializers.CharField(source='doctor.user.last_name', read_only=True)
     phone_number = serializers.CharField(source='doctor.user.phone_number', read_only=True)
@@ -603,6 +813,8 @@ class DoctorCertificationSerializer(serializers.ModelSerializer):
     role = serializers.CharField(source='doctor.user.role', read_only=True)
     certificate_image_url = serializers.SerializerMethodField()
     has_certificate_image = serializers.SerializerMethodField()
+    
+    
     class Meta:
         model = DoctorCertification
         fields = [
@@ -624,7 +836,6 @@ class DoctorCertificationSerializer(serializers.ModelSerializer):
     def get_has_certificate_image(self, obj):
         """Check if certification has an image"""
         return bool(obj.certificate_image)
-    
     
     def validate_year_of_issue(self, value):
         current_year = datetime.now().year
@@ -664,7 +875,7 @@ class DoctorCertificationSerializer(serializers.ModelSerializer):
 
 
 class DoctorProofSerializer(serializers.ModelSerializer):
-    # User fields for proof context
+    """Serializer for doctor Proof (User + Doctor)""" 
     first_name = serializers.CharField(source='doctor.user.first_name', read_only=True)
     last_name = serializers.CharField(source='doctor.user.last_name', read_only=True)
     phone_number = serializers.CharField(source='doctor.user.phone_number', read_only=True)
@@ -675,6 +886,7 @@ class DoctorProofSerializer(serializers.ModelSerializer):
     has_license_image = serializers.SerializerMethodField()
     id_proof_url=serializers.SerializerMethodField()
     has_id_proof=serializers.SerializerMethodField()
+    
     
     class Meta:
         model = DoctorProof
@@ -729,7 +941,8 @@ class DoctorProofSerializer(serializers.ModelSerializer):
 
 
 class VerificationStatusSerializer(serializers.ModelSerializer):
-    # Profile completion status
+    """Serializer for doctor Fully Verification (User + Doctor)"""
+    
     is_profile_setup_done = serializers.BooleanField(read_only=True)
     is_education_done = serializers.BooleanField(read_only=True)
     is_certification_done = serializers.BooleanField(read_only=True)
@@ -758,8 +971,9 @@ class VerificationStatusSerializer(serializers.ModelSerializer):
         ]
 
 
-# Comprehensive Doctor Profile Serializer (includes everything)
 class CompleteDoctorProfileSerializer(serializers.ModelSerializer):
+    """Serializer for Doctor Profile Complete Checking(User + Doctor)"""
+    
     # User fields
     first_name = serializers.CharField(source='user.first_name', read_only=True)
     last_name = serializers.CharField(source='user.last_name', read_only=True)
@@ -794,9 +1008,9 @@ class CompleteDoctorProfileSerializer(serializers.ModelSerializer):
         
         
 class doctorStatusSerializer(serializers.Serializer):
+    """Serializer for doctor Status (User + Doctor)"""
+    
     is_active=serializers.BooleanField(required=True) 
-    
-    
     def update(self,instance,validated_data):
         
         if instance.is_staff and not validated_data.get('is_active', True):
@@ -840,46 +1054,35 @@ class DoctorApplicationListSerializer(serializers.ModelSerializer):
         return getattr(getattr(obj, "doctor_profile", None), "experience", 0)
 
 
-    def update(self, instance, validated_data):
-        action = validated_data.get('action')  # 'approve' or 'reject'
-        admin_comments = validated_data.get('admin_comments', '')
+    # def update(self, instance, validated_data):
+    #     action = validated_data.get('action')  # 'approve' or 'reject'
+    #     admin_comments = validated_data.get('admin_comments', '')
         
-        # Get the doctor profile
-        doctor_profile = instance.doctor_profile
+    #     doctor_profile = instance.doctor_profile
         
-        if action == 'approve':
-            doctor_profile.verification_status = 'approved'
-        elif action == 'reject':
-            doctor_profile.verification_status = 'rejected'
-            # You might want to store rejection reason
-            doctor_profile.rejection_reason = admin_comments
+    #     if action == 'approve':
+    #         doctor_profile.verification_status = 'approved'
+    #     elif action == 'reject':
+    #         doctor_profile.verification_status = 'rejected'
+    #         doctor_profile.rejection_reason = admin_comments
         
-        doctor_profile.save()
+    #     doctor_profile.save()
         
-        # Update user's is_active status if needed
-        if action == 'approve':
-            instance.is_active = True
-            instance.save(update_fields=['is_active'])
+    #     if action == 'approve':
+    #         instance.is_active = True
+    #         instance.save(update_fields=['is_active'])
         
-        return instance
+    #     return instance
 
 class DoctorApplicationDetailSerializer(serializers.ModelSerializer):
     """Complete doctor application details using your existing serializers"""
     
-    # 1. DOCTOR PROFILE - Reuse your existing DoctorProfileSerializer logic
     doctor_profile = serializers.SerializerMethodField()
-    
-    # 2. EDUCATION - Reuse your existing DoctorEducationSerializer
     doctor_educations = serializers.SerializerMethodField()
-    
-    # 3. CERTIFICATIONS - Reuse your existing DoctorCertificationSerializer  
     doctor_certifications = serializers.SerializerMethodField()
-    
-    # 4. LICENSE/PROOF - Reuse your existing DoctorProofSerializer
     doctor_proof = serializers.SerializerMethodField()
-    
-    # Verification status summary
     verification_summary = serializers.SerializerMethodField()
+    
     
     class Meta:
         model = User
@@ -1033,14 +1236,11 @@ class DoctorApprovalActionSerializer(serializers.Serializer):
     
     def update(self, instance, validated_data):
         """Update doctor verification status"""
-        from django.utils import timezone
         
-        # Get the doctor profile
         doctor = instance.doctor_profile
         action = validated_data['action']
         admin_comment = validated_data.get('admin_comment', '')
         
-        # Update verification status
         if action == 'approve':
             doctor.verification_status = 'approved'
             instance.is_active = True 
@@ -1054,16 +1254,17 @@ class DoctorApprovalActionSerializer(serializers.Serializer):
         doctor.save()
         instance.save()
         
-        # Log the action
         logger.info(f" APPROVAL ACTION: {action.upper()} for Doctor {doctor.id}")
         logger.info(f"Admin Comment: {admin_comment}")
         
         return instance
     
+    
 class ServiceSerializer(serializers.ModelSerializer):
     """Serializer for Service model with plan-based validation"""
     
     total_fee = serializers.SerializerMethodField()
+    
     
     class Meta:
         model = Service
@@ -1202,8 +1403,6 @@ class ServiceSerializer(serializers.ModelSerializer):
                 logger.warning(f"Premium service invalid duration: {slot_duration}")
                 errors['slot_duration'] = 'Premium service can have 15, 30, 45, 60, or 90 minute slots'
         
-        # Both online and offline allowed for premium
-        
         return errors
 
     def _check_doctor_plan_access(self, service_name, service_mode):
@@ -1222,7 +1421,6 @@ class ServiceSerializer(serializers.ModelSerializer):
         if not current_plan:
             return False, "No active subscription found"
         
-        # Check if doctor's plan allows this service type
         allowed_service_types = getattr(current_plan, 'allowed_service_types', [])
         
         if service_name not in allowed_service_types:
@@ -1278,7 +1476,6 @@ class ServiceSerializer(serializers.ModelSerializer):
         if request and hasattr(request.user, 'doctor_profile'):
             doctor = request.user.doctor_profile
             
-            # Use the existing method to check if doctor can create service
             can_create = doctor.can_create_service(service_mode)
             
             if not can_create:
@@ -1302,9 +1499,8 @@ class ServiceSerializer(serializers.ModelSerializer):
         
         logger.debug("Service validation completed successfully")
         return data
-
 class SchedulesSerializer(serializers.ModelSerializer):
-    """Serializer for Schedules model with doctor and service details"""
+    """Serializer for Schedules model with doctor and service details and appointment protection"""
     
     # Doctor fields for context
     doctor_first_name = serializers.CharField(source='doctor.user.first_name', read_only=True)
@@ -1326,169 +1522,199 @@ class SchedulesSerializer(serializers.ModelSerializer):
     break_duration = serializers.SerializerMethodField(read_only=True)
     available_services = serializers.SerializerMethodField(read_only=True)
     
+    # Appointment protection fields
+    has_appointments = serializers.SerializerMethodField(read_only=True)
+    appointments_count = serializers.SerializerMethodField(read_only=True)
+    earliest_appointment = serializers.SerializerMethodField(read_only=True)
+    latest_appointment = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Schedules
         fields = [
             'id', 'doctor', 'service', 'mode', 'date', 'start_time', 'end_time',
             'slot_duration', 'break_start_time', 'break_end_time', 'total_slots',
             'booked_slots', 'max_patients_per_slot', 'is_active', 'created_at', 'updated_at',
-            # Doctor fields (read-only for context)
+            # Doctor fields
             'doctor_first_name', 'doctor_last_name', 'doctor_phone', 'doctor_email', 'doctor_name',
-            # Service fields (read-only for context)
+            # Service fields
             'service_name', 'service_mode', 'service_fee', 'service_description', 'available_services',
             # Calculated fields
-            'available_slots', 'is_fully_booked', 'working_hours', 'break_duration'
+            'available_slots', 'is_fully_booked', 'working_hours', 'break_duration',
+            # Appointment fields
+            'has_appointments', 'appointments_count', 'earliest_appointment', 'latest_appointment'
         ]
+        
         read_only_fields = [
-            'id', 'doctor', 'created_at', 'updated_at', 'doctor_first_name', 'doctor_last_name',
-            'doctor_phone', 'doctor_email', 'doctor_name', 'service_name', 'service_mode',
-            'service_fee', 'service_description', 'available_slots', 'is_fully_booked',
-            'working_hours', 'break_duration', 'available_services', 
+            'id', 'doctor', 'created_at', 'updated_at',
+            'doctor_first_name', 'doctor_last_name', 'doctor_phone', 'doctor_email', 'doctor_name',
+            'service_name', 'service_mode', 'service_fee', 'service_description', 'available_services',
+            'available_slots', 'is_fully_booked', 'working_hours', 'break_duration',
+            'has_appointments', 'appointments_count', 'earliest_appointment', 'latest_appointment'
         ]
 
+    # Existing methods
     def get_doctor_name(self, obj):
-        """Get full doctor name"""
         if obj.doctor and obj.doctor.user:
             return f"{obj.doctor.user.first_name} {obj.doctor.user.last_name}".strip()
         return None
-    
+
     def get_available_services(self, obj):
-        """Get all services available to this doctor"""
         if obj.doctor:
             services = obj.doctor.service_set.filter(is_active=True)
             return ServiceSerializer(services, many=True).data
         return []
 
     def get_available_slots(self, obj):
-        """Get available slots"""
         return obj.get_available_slots()
 
     def get_is_fully_booked(self, obj):
-        """Check if schedule is fully booked"""
         return obj.is_fully_booked()
 
     def get_working_hours(self, obj):
-        """Get working hours"""
         return obj.get_working_hours()
 
     def get_break_duration(self, obj):
-        """Get break duration in minutes"""
         return obj.get_break_duration()
 
-    def validate_date(self, value):
-        """Validate date is not in the past"""
-        if value < timezone.now().date():
-            raise serializers.ValidationError("Schedule date cannot be in the past.")
-        return value
+    # Appointment protection methods
+    def get_has_appointments(self, obj):
+        try:
+            
+            return Appointment.objects.filter(
+                schedule=obj,
+                status__in=['confirmed', 'pending'],
+                appointment_date=obj.date
+            ).exists()
+        except:
+            return False
 
-    def validate_slot_duration(self, value):
-        """Validate slot duration"""
-        if value <= timedelta(0):
-            raise serializers.ValidationError("Slot duration must be positive.")
-        return value
+    def get_appointments_count(self, obj):
+        try:
+            
+            return Appointment.objects.filter(
+                schedule=obj,
+                status__in=['confirmed', 'pending'],
+                appointment_date=obj.date
+            ).count()
+        except:
+            return 0
 
-    def validate_max_patients_per_slot(self, value):
-        """Validate max patients per slot"""
-        if value <= 0:
-            raise serializers.ValidationError("Maximum patients per slot must be at least 1.")
-        return value
+    def get_earliest_appointment(self, obj):
+        try:
+            
+            earliest = Appointment.objects.filter(
+                schedule=obj,
+                status__in=['confirmed', 'pending'],
+                appointment_date=obj.date
+            ).order_by('slot_time').first()
+            if earliest:
+                return earliest.slot_time.strftime('%H:%M')
+        except:
+            pass
+        return None
 
-    def validate_booked_slots(self, value):
-        """Validate booked slots"""
-        if value < 0:
-            raise serializers.ValidationError("Booked slots cannot be negative.")
-        return value
-
-    def validate_total_slots(self, value):
-        """Validate total slots"""
-        if value < 0:
-            raise serializers.ValidationError("Total slots cannot be negative.")
-        return value
+    def get_latest_appointment(self, obj):
+        try:
+            
+            latest = Appointment.objects.filter(
+                schedule=obj,
+                status__in=['confirmed', 'pending'],
+                appointment_date=obj.date
+            ).order_by('-slot_time').first()
+            if latest:
+                return latest.slot_time.strftime('%H:%M')
+        except:
+            pass
+        return None
 
     def validate(self, data):
-        """Cross-field validation"""
+        """Enhanced cross-field validation with appointment protection"""
         errors = {}
         
-        # Validate basic time logic
+        # Basic time validation
         start_time = data.get('start_time')
         end_time = data.get('end_time')
-        
-        if start_time and end_time:
-            if start_time >= end_time:
-                errors['end_time'] = "End time must be after start time."
-        
-        # Validate break times
+        if start_time and end_time and start_time >= end_time:
+            errors['end_time'] = "End time must be after start time."
+
+        # Break time validation
         break_start_time = data.get('break_start_time')
         break_end_time = data.get('break_end_time')
-        
         if break_start_time and break_end_time:
-            # Break end must be after break start
             if break_start_time >= break_end_time:
                 errors['break_end_time'] = "Break end time must be after break start time."
-            
-            # Break must be within schedule time
-            if start_time and end_time:
-                if break_start_time < start_time:
-                    errors['break_start_time'] = "Break start time must be within schedule hours."
-                if break_end_time > end_time:
-                    errors['break_end_time'] = "Break end time must be within schedule hours."
-        
-        # Validate if only one break time is provided
+            if start_time and break_start_time < start_time:
+                errors['break_start_time'] = "Break start time must be within schedule hours."
+            if end_time and break_end_time > end_time:
+                errors['break_end_time'] = "Break end time must be within schedule hours."
+
+        # Validate both break times provided together
         if bool(break_start_time) != bool(break_end_time):
             if not break_start_time:
                 errors['break_start_time'] = "Break start time is required when break end time is provided."
             if not break_end_time:
                 errors['break_end_time'] = "Break end time is required when break start time is provided."
-        
-        # Validate booked slots don't exceed total slots
+
+        # Validate slots
         booked_slots = data.get('booked_slots', 0)
         total_slots = data.get('total_slots', 0)
-        
         if booked_slots > total_slots:
             errors['booked_slots'] = "Booked slots cannot exceed total slots."
-        
-        # Validate service mode matches schedule mode (if both are provided)
-        service = data.get('service')
-        mode = data.get('mode')
-        
+
+        # Subscription validation
         request = self.context.get('request')
-        if request and hasattr(request.user, 'doctor_profile'):
-            doctor = request.user.doctor_profile
-            schedule_date = data.get('date')
-            
-            # Check if doctor can create schedule
-            if not doctor.can_create_schedule(schedule_date):
-                plan = doctor.get_current_plan()
-                if not plan:
-                    errors['subscription'] = 'Active subscription required to create schedules.'
-                else:
-                    usage_stats = doctor.get_usage_stats()
-                    if usage_stats['daily_schedules']['used'] >= usage_stats['daily_schedules']['limit']:
-                        errors['schedule_limit'] = 'Daily schedule limit reached for your plan.'
-                    elif usage_stats['monthly_schedules']['used'] >= usage_stats['monthly_schedules']['limit']:
-                        errors['schedule_limit'] = 'Monthly schedule limit reached for your plan.'
-                    
-                    errors['current_usage'] = usage_stats
-                    errors['redirect_to'] = 'subscription_upgrade'
-        
-        
-        
-        
+        if request and hasattr(request.user, 'role') and request.user.role == 'doctor':
+            try:
+                doctor = Doctor.objects.get(user=request.user)
+                schedule_date = data.get('date')
+                if schedule_date and not doctor.can_create_schedule(schedule_date):
+                    plan = doctor.get_current_plan()
+                    if not plan:
+                        errors['subscription'] = 'Active subscription required to create schedules.'
+                    else:
+                        usage_stats = doctor.get_usage_stats()
+                        if usage_stats['daily_schedules']['used'] >= usage_stats['daily_schedules']['limit']:
+                            errors['schedule_limit'] = 'Daily schedule limit reached for your plan.'
+                        elif usage_stats['monthly_schedules']['used'] >= usage_stats['monthly_schedules']['limit']:
+                            errors['schedule_limit'] = 'Monthly schedule limit reached for your plan.'
+            except Doctor.DoesNotExist:
+                pass
+
+        # Appointment protection for updates
+        if self.instance:
+            try:
+                
+                existing_appointments = Appointment.objects.filter(
+                    schedule=self.instance,
+                    status__in=['confirmed', 'pending'],
+                    appointment_date=self.instance.date
+                )
+                
+                if existing_appointments.exists():
+                    # Prevent critical time changes
+                    if start_time and start_time != self.instance.start_time:
+                        errors['start_time'] = "Cannot change start time when appointments exist"
+                    if end_time and end_time != self.instance.end_time:
+                        errors['end_time'] = "Cannot change end time when appointments exist"
+                    if data.get('slot_duration') and data.get('slot_duration') != self.instance.slot_duration:
+                        errors['slot_duration'] = "Cannot change slot duration when appointments exist"
+            except ImportError:
+                pass
+
         if errors:
             raise serializers.ValidationError(errors)
-        
         return data
 
     def create(self, validated_data):
-        """Override create to handle auto-calculation of total slots"""
+        """Override create to handle auto-calculation"""
         instance = super().create(validated_data)
         
-        # Auto-calculate total slots if not provided but other fields are available
-        if (not instance.total_slots and 
-            instance.start_time and instance.end_time and instance.slot_duration):
+        # Auto-calculate total slots
+        if (not instance.total_slots and instance.start_time and 
+            instance.end_time and instance.slot_duration):
             instance.total_slots = instance.calculate_total_slots()
             instance.save()
-            
+
         # Update doctor's consultation mode
         doctor = instance.doctor
         if instance.mode == 'online':
@@ -1500,10 +1726,10 @@ class SchedulesSerializer(serializers.ModelSerializer):
         return instance
 
     def update(self, instance, validated_data):
-        """Override update to handle auto-calculation of total slots"""
+        """Override update with recalculation"""
         instance = super().update(instance, validated_data)
         
-        # Recalculate total slots if time-related fields are updated
+        # Recalculate total slots if needed
         time_fields = ['start_time', 'end_time', 'slot_duration', 'break_start_time', 'break_end_time']
         if any(field in validated_data for field in time_fields):
             if (instance.start_time and instance.end_time and instance.slot_duration):
@@ -1511,7 +1737,7 @@ class SchedulesSerializer(serializers.ModelSerializer):
                 if calculated_slots != instance.total_slots:
                     instance.total_slots = calculated_slots
                     instance.save()
-                    
+
         # Update doctor's consultation mode
         doctor = instance.doctor
         if instance.mode == 'online':
@@ -1521,6 +1747,7 @@ class SchedulesSerializer(serializers.ModelSerializer):
         doctor.save()
         
         return instance
+    
     
 class DoctorLocationSerializer(serializers.ModelSerializer):
     doctor_name = serializers.CharField(source='doctor.user.get_full_name', read_only=True)
@@ -1602,6 +1829,7 @@ def generate_short_receipt(prefix, doctor_id, timestamp=None):
     
     # Ensure it's within 40 characters (should be around 12-16 chars)
     return receipt[:40]
+
 
 class SubscriptionActivationSerializer(serializers.Serializer):
     """Serializer for activating a new subscription or updating existing one"""
@@ -2242,23 +2470,7 @@ class DashboardDataService:
             'credit_details': list(this_month_credits.values('id', 'amount', 'remarks', 'appointment__appointment_date')),
             'debit_details': list(this_month_debits.values('id', 'amount', 'remarks', 'appointment__appointment_date'))
         }
-# pdf_report_service.py
-import io
-from datetime import datetime, timedelta
-from django.http import HttpResponse
-from django.db.models import Sum, Count, Q
-from django.utils import timezone
-from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, PageBreak
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch
-from reportlab.pdfgen import canvas
-from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
-from reportlab.graphics.shapes import Drawing, Rect
-from reportlab.graphics.charts.linecharts import HorizontalLineChart
-from reportlab.graphics.widgets.markers import makeMarker
-from reportlab.lib.colors import HexColor
+
 
 class DoctorReportPDFService:
     """Service class to generate PDF reports for doctor dashboard"""

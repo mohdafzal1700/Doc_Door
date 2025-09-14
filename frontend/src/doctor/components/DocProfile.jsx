@@ -332,7 +332,7 @@ const DoctorProfilePage = () => {
                                 </div>
 
                                 {/* Account Details */}
-                                <div className="bg-white rounded-xl shadow-sm p-6">
+                                {/* <div className="bg-white rounded-xl shadow-sm p-6">
                                     <h2 className="text-xl font-semibold text-gray-900 mb-4">Account Details</h2>
                                     <div className="space-y-3">
                                         <div className="flex items-start">
@@ -350,7 +350,7 @@ const DoctorProfilePage = () => {
                                             </div>
                                         </div>
                                     </div>
-                                </div>
+                                </div> */}
                             </div>
                         </div>
 

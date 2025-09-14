@@ -1495,26 +1495,37 @@ class AppointmentDetailView(APIView):
             }, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            refund_amount = appointment.total_fee
-            
-            # Handle appointment cancellation with wallet transfer
-            success, message = handle_appointment_cancellation(appointment, refund_amount)
-            
-            if success:
+            # Check if the appointment was paid for
+            if appointment.is_paid:
+                # Handle appointment cancellation with wallet refund
+                refund_amount = appointment.total_fee
+                success, message = handle_appointment_cancellation(appointment, refund_amount)
+                
+                if success:
+                    appointment.status = 'cancelled'
+                    appointment.save()
+                    logger.info(f"Appointment {appointment_id} cancelled and wallet credited with refund")
+                    
+                    return Response({
+                        'success': True,
+                        'message': f'Appointment cancelled successfully. {message}'
+                    }, status=status.HTTP_200_OK)
+                else:
+                    logger.error(f"Failed to process wallet refund for appointment {appointment_id}: {message}")
+                    return Response({
+                        'success': False,
+                        'message': f'Appointment cancellation failed: {message}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                # Appointment was not paid, just cancel it without refund
                 appointment.status = 'cancelled'
                 appointment.save()
-                logger.info(f"Appointment {appointment_id} cancelled and wallet credited")
+                logger.info(f"Unpaid appointment {appointment_id} cancelled without refund")
                 
                 return Response({
                     'success': True,
-                    'message': f'Appointment cancelled successfully. {message}'
+                    'message': 'Appointment cancelled successfully'
                 }, status=status.HTTP_200_OK)
-            else:
-                logger.error(f"Failed to process wallet transfer for appointment {appointment_id}: {message}")
-                return Response({
-                    'success': False,
-                    'message': f'Appointment cancellation failed: {message}'
-                }, status=status.HTTP_400_BAD_REQUEST)
                 
         except Exception as e:
             logger.error(f"Error cancelling appointment {appointment_id}: {str(e)}")

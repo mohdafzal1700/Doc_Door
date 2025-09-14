@@ -375,7 +375,7 @@ const PatientPortal = () => {
                   <div className="flex-1">
                     <div className="flex items-center space-x-3 mb-2">
                       <h1 className="text-2xl font-bold text-gray-900">
-                        {user.name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || "Patient"}
+                        {user.username || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.username || "Patient"}
                       </h1>
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                         Patient

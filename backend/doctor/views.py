@@ -11,7 +11,7 @@ from django.db import transaction
 from django.db.models import Q, Count, Sum, Avg
 from django.http import HttpResponse
 from django.conf import settings
-
+from django.db import models
 # DRF imports
 from rest_framework import generics, status
 from rest_framework.views import APIView
@@ -55,7 +55,7 @@ from .serializers import (
 )
 from adminside.serializers import SubscriptionPlanSerializer
 from doctor.serializers import CustomDoctorTokenObtainPairSerializer
-from patients.serializers import AppointmentSerializer
+from patients.serializers import AppointmentSerializer,DoctorReviewSerializer
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -1116,30 +1116,24 @@ class ServiceView(APIView):
 
 
 class ScheduleView(APIView):
-    """Handle schedule operations with doctor-specific filtering"""
+    """Handle schedule operations with doctor-specific filtering and appointment protection"""
     permission_classes = [IsAuthenticated]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get(self, request):
         """Get schedule list filtered by user role"""
         try:
-            # Check user role and filter accordingly
             if hasattr(request.user, 'role') and request.user.role == 'doctor':
-                # Doctor sees only their schedules
                 try:
                     doctor = Doctor.objects.get(user=request.user)
                     schedules = Schedules.objects.filter(doctor=doctor).select_related('doctor', 'service')
                 except Doctor.DoesNotExist:
-                    # If doctor profile doesn't exist, return empty list
                     schedules = Schedules.objects.none()
             else:
-                # Admin or other roles see all schedules
                 schedules = Schedules.objects.select_related('doctor', 'service').all()
-            
+
             schedules = schedules.order_by('date', 'start_time')
-            
             serializer = SchedulesSerializer(schedules, many=True)
-            
             return Response({
                 'success': True,
                 'data': serializer.data,
@@ -1155,61 +1149,20 @@ class ScheduleView(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    class ScheduleView(APIView):
-        """Handle schedule operations with doctor-specific filtering"""
-        permission_classes = [IsAuthenticated]
-        parser_classes = [MultiPartParser, FormParser, JSONParser]
-
-        def get(self, request):
-            """Get schedule list filtered by user role"""
-            try:
-                # Check user role and filter accordingly
-                if hasattr(request.user, 'role') and request.user.role == 'doctor':
-                    # Doctor sees only their schedules
-                    try:
-                        doctor = Doctor.objects.get(user=request.user)
-                        schedules = Schedules.objects.filter(doctor=doctor).select_related('doctor', 'service')
-                    except Doctor.DoesNotExist:
-                        # If doctor profile doesn't exist, return empty list
-                        schedules = Schedules.objects.none()
-                else:
-                    # Admin or other roles see all schedules
-                    schedules = Schedules.objects.select_related('doctor', 'service').all()
-                
-                schedules = schedules.order_by('date', 'start_time')
-                
-                serializer = SchedulesSerializer(schedules, many=True)
-                
-                return Response({
-                    'success': True,
-                    'data': serializer.data,
-                    'count': schedules.count()
-                }, status=status.HTTP_200_OK)
-
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                return Response({
-                    'success': False,
-                    'message': 'Failed to fetch schedules',
-                    'error': str(e)
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
     def post(self, request):
-        """Create new schedule (only doctors can create)"""
-        logger.info("Received data:", request.data)
+        """Create new schedule with overlap protection"""
         try:
-            # Check if user has doctor role
+            # Check doctor role
             if not hasattr(request.user, 'role') or request.user.role != 'doctor':
                 return Response({
                     'success': False,
-                    'message': 'Access denied. Only doctors can create schedules.',
+                    'message': 'Access denied. Only doctors can create schedules.'
                 }, status=status.HTTP_403_FORBIDDEN)
 
-            # Get or create doctor profile
+            # Get doctor profile
             doctor, created = Doctor.objects.get_or_create(user=request.user)
-            
-            # Validate that the service belongs to this doctor
+
+            # Validate service ownership
             service_id = request.data.get('service')
             if service_id:
                 try:
@@ -1219,8 +1172,38 @@ class ScheduleView(APIView):
                         'success': False,
                         'message': 'You can only create schedules for your own services.'
                     }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Check for overlapping schedules
+            schedule_date = request.data.get('date')
+            start_time = request.data.get('start_time')
+            end_time = request.data.get('end_time')
             
-            # ADD THIS SUBSCRIPTION CHECK:
+            if schedule_date and start_time and end_time:
+                overlapping_schedules = Schedules.objects.filter(
+                    doctor=doctor,
+                    date=schedule_date,
+                    is_active=True
+                ).filter(
+                    models.Q(start_time__lt=end_time) & models.Q(end_time__gt=start_time)
+                )
+                
+                if overlapping_schedules.exists():
+                    overlap_details = []
+                    for sch in overlapping_schedules:
+                        overlap_details.append({
+                            'schedule_id': sch.id,
+                            'service': sch.service.service_name,
+                            'time': f"{sch.start_time.strftime('%H:%M')} - {sch.end_time.strftime('%H:%M')}"
+                        })
+                    
+                    return Response({
+                        'success': False,
+                        'message': 'Schedule time conflicts with existing schedules',
+                        'conflicts': overlap_details,
+                        'suggestion': 'Please choose a different time'
+                    }, status=status.HTTP_409_CONFLICT)
+
+            # Subscription check
             if not doctor.can_create_schedule():
                 plan = doctor.get_current_plan()
                 if not plan:
@@ -1239,15 +1222,12 @@ class ScheduleView(APIView):
                         'current_usage': usage_stats,
                         'redirect_to': '/subscription/upgrade/'
                     }, status=status.HTTP_403_FORBIDDEN)
-            
-            # PASS CONTEXT TO SERIALIZER:
+
+            # Create schedule
             serializer = SchedulesSerializer(data=request.data, context={'request': request})
-            
             if serializer.is_valid():
-                # Auto-assign the doctor to the schedule
                 schedule = serializer.save(doctor=doctor)
                 response_serializer = SchedulesSerializer(schedule)
-                
                 return Response({
                     'success': True,
                     'message': 'Schedule created successfully',
@@ -1268,12 +1248,11 @@ class ScheduleView(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def patch(self, request,schedule_id=None):
-        """Update schedule (only own schedules)"""
+    def patch(self, request, schedule_id=None):
+        """Update schedule with appointment protection"""
         try:
             if not schedule_id:
                 schedule_id = request.data.get('id')
-            
             if not schedule_id:
                 return Response({
                     'success': False,
@@ -1281,11 +1260,11 @@ class ScheduleView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             schedule = get_object_or_404(
-                Schedules.objects.select_related('doctor', 'service'), 
+                Schedules.objects.select_related('doctor', 'service'),
                 id=schedule_id
             )
-            
-            # Check if user has permission to update this schedule
+
+            # Check permissions
             if hasattr(request.user, 'role') and request.user.role == 'doctor':
                 doctor = get_object_or_404(Doctor, user=request.user)
                 if schedule.doctor != doctor:
@@ -1293,10 +1272,45 @@ class ScheduleView(APIView):
                         'success': False,
                         'message': 'You can only update your own schedules.'
                     }, status=status.HTTP_403_FORBIDDEN)
+
+            # CHECK FOR EXISTING APPOINTMENTS
+            try:
                 
-                # If service is being updated, validate it belongs to this doctor
-                service_id = request.data.get('service')
-                if service_id and service_id != schedule.service.id:
+                existing_appointments = Appointment.objects.filter(
+                    schedule=schedule,
+                    status__in=['confirmed', 'pending'],
+                    appointment_date=schedule.date
+                )
+                
+                if existing_appointments.exists():
+                    # Check for critical changes
+                    new_start_time = request.data.get('start_time')
+                    new_end_time = request.data.get('end_time')
+                    new_slot_duration = request.data.get('slot_duration')
+                    
+                    conflicts = []
+                    if new_start_time and new_start_time != schedule.start_time:
+                        conflicts.append("Cannot change start time with existing appointments")
+                    if new_end_time and new_end_time != schedule.end_time:
+                        conflicts.append("Cannot change end time with existing appointments")
+                    if new_slot_duration and new_slot_duration != schedule.slot_duration:
+                        conflicts.append("Cannot change slot duration with existing appointments")
+                    
+                    if conflicts:
+                        return Response({
+                            'success': False,
+                            'message': 'Cannot modify schedule with existing appointments',
+                            'conflicts': conflicts,
+                            'appointments_count': existing_appointments.count(),
+                            'suggestion': 'Please cancel appointments first or create a new schedule'
+                        }, status=status.HTTP_409_CONFLICT)
+            except ImportError:
+                pass  # Skip if Appointment model doesn't exist
+
+            # Validate service ownership
+            service_id = request.data.get('service')
+            if service_id and service_id != schedule.service.id:
+                if hasattr(request.user, 'role') and request.user.role == 'doctor':
                     try:
                         service = Service.objects.get(id=service_id, doctor=doctor)
                     except Service.DoesNotExist:
@@ -1304,17 +1318,18 @@ class ScheduleView(APIView):
                             'success': False,
                             'message': 'You can only assign your own services to schedules.'
                         }, status=status.HTTP_400_BAD_REQUEST)
-            
+
+            # Update schedule
             serializer = SchedulesSerializer(
                 schedule,
                 data=request.data,
-                partial=True
+                partial=True,
+                context={'request': request}
             )
             
             if serializer.is_valid():
                 updated_schedule = serializer.save()
                 response_serializer = SchedulesSerializer(updated_schedule)
-                
                 return Response({
                     'success': True,
                     'message': 'Schedule updated successfully',
@@ -1335,12 +1350,11 @@ class ScheduleView(APIView):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    def delete(self, request,schedule_id=None):
-        """Delete schedule (only own schedules)"""
+    def delete(self, request, schedule_id=None):
+        """Delete schedule with appointment protection"""
         try:
             if not schedule_id:
                 schedule_id = request.data.get('id')
-            
             if not schedule_id:
                 return Response({
                     'success': False,
@@ -1348,8 +1362,8 @@ class ScheduleView(APIView):
                 }, status=status.HTTP_400_BAD_REQUEST)
 
             schedule = get_object_or_404(Schedules, id=schedule_id)
-            
-            # Check if user has permission to delete this schedule
+
+            # Check permissions
             if hasattr(request.user, 'role') and request.user.role == 'doctor':
                 doctor = get_object_or_404(Doctor, user=request.user)
                 if schedule.doctor != doctor:
@@ -1357,16 +1371,30 @@ class ScheduleView(APIView):
                         'success': False,
                         'message': 'You can only delete your own schedules.'
                     }, status=status.HTTP_403_FORBIDDEN)
-            
-            # # Check if schedule has bookings (if you have booking model)
-            # if schedule.bookings.exists():
-            #     return Response({
-            #         'success': False,
-            #         'message': 'Cannot delete schedule with existing bookings.'
-            #     }, status=status.HTTP_400_BAD_REQUEST)
-            
+
+            # CHECK FOR EXISTING APPOINTMENTS
+            try:
+                
+                existing_appointments = Appointment.objects.filter(
+                    schedule=schedule,
+                    status__in=['confirmed', 'pending'],
+                    appointment_date=schedule.date
+                )
+                
+                if existing_appointments.exists():
+                    appointment_times = [apt.slot_time.strftime('%H:%M') for apt in existing_appointments]
+                    return Response({
+                        'success': False,
+                        'message': 'Cannot delete schedule with existing appointments',
+                        'appointments_count': existing_appointments.count(),
+                        'appointment_times': appointment_times,
+                        'suggestion': 'Please cancel all appointments first or mark schedule as inactive',
+                        'alternative_action': 'mark_inactive'
+                    }, status=status.HTTP_409_CONFLICT)
+            except ImportError:
+                pass  # Skip if Appointment model doesn't exist
+
             schedule.delete()
-            
             return Response({
                 'success': True,
                 'message': 'Schedule deleted successfully'
@@ -1380,7 +1408,6 @@ class ScheduleView(APIView):
                 'message': 'Failed to delete schedule',
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
 
 class DoctorLocationCreateView(generics.CreateAPIView):
     """Add new doctor location"""
@@ -3358,24 +3385,73 @@ class DoctorReportDownloadView(APIView):
                 'message': error_message
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
             
-            
 class Review(APIView):
+    permission_classes = [IsAuthenticated]  # Ensure user is authenticated
     
-    def get(self,request):
+    def get(self, request):
         try:
-            review=request.user.doctor_profile.review.all()
-            return Response(
-                {
-                    'success':True,
-                    'data':review
-                }
-            )
-        except Exception as e:
+            # Debug: Log user info
+            logger.debug(f"User: {request.user}")
+            logger.debug(f"User ID: {request.user.id}")
+            logger.debug(f"Is authenticated: {request.user.is_authenticated}")
+            
+            if not request.user.is_authenticated:
+                logger.warning("Unauthenticated access attempt to Review API")
+                return Response(
+                    {'success': False, 'message': 'Authentication required'},
+                    status=status.HTTP_401_UNAUTHORIZED
+                )
+            
+            if not hasattr(request.user, 'doctor_profile'):
+                logger.warning("User does not have doctor_profile attribute")
+                return Response(
+                    {'success': False, 'message': 'Doctor profile not found. User is not registered as a doctor.'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            doctor_profile = request.user.doctor_profile
+            if not doctor_profile:
+                logger.warning("Doctor profile is None")
+                return Response(
+                    {'success': False, 'message': 'Doctor profile not found'},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            
+            # Debug doctor profile
+            logger.debug(f"Doctor profile: {doctor_profile}")
+            logger.debug(f"Doctor profile ID: {doctor_profile.id}")
+            
+            if not hasattr(doctor_profile, 'reviews'):
+                logger.error("Doctor profile does not have reviews attribute")
+                return Response(
+                    {'success': False, 'message': 'Reviews relationship not found'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+            
+            reviews = doctor_profile.reviews.all()
+            logger.info(f"Doctor {doctor_profile.id} has {reviews.count()} reviews")
+            
+            serializer = DoctorReviewSerializer(reviews, many=True)
             
             return Response(
                 {
-                    'success':False,
-                    'message':'something went wrong'
-                    
-                }
+                    'success': True,
+                    'data': serializer.data,
+                    'total_reviews': reviews.count()
+                },
+                status=status.HTTP_200_OK
+            )
+            
+        except AttributeError as e:
+            logger.error(f"AttributeError in Review API: {e}", exc_info=True)
+            return Response(
+                {'success': False, 'message': f'Attribute error: {str(e)}'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+            
+        except Exception as e:
+            logger.exception("Unexpected error in Review API")
+            return Response(
+                {'success': False, 'message': f'Something went wrong: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

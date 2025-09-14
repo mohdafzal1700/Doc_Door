@@ -1,12 +1,12 @@
 // AxiosInterceptors/UserInterceptor.js - IMPROVED VERSION
 import axios from "axios";
 
-const BASE_URL = 'https://api.docdoor.muhammedafsal.online/api/auth/';
+const BASE_URL = 'http://localhost:8000/api/auth/';
 
 // Create axios instance
 const axiosInstance = axios.create({
     baseURL: BASE_URL,
-    withCredentials: true, 
+    withCredentials: true, // CRITICAL: This sends cookies automatically
     timeout: 10000,
 });
 

@@ -49,6 +49,7 @@ import AdminReviewPage from "./admin/reviewaM"
 import { NotificationProvider } from "./components/home/notificationprovider"
 import WalletPage from "./pages/Wallet"
 import GoogleCallback from "./components/ui/simp"
+import DoctorReviewPage from "./doctor/pages/doctor-reviews"
 
 
 function App() {
@@ -98,6 +99,7 @@ function App() {
         <Route path='/patient/myAppointments' element={<MyAppointments />} />
         <Route path='/doctor/appointmentsRequest' element={<AppointmentRequestsPage/>} />
         <Route path='/doctor/appointmentsPage' element={<DoctorDashboard/>} />
+        <Route path='/doctor/review' element={<DoctorReviewPage/>} />
         <Route path='/patient/findDoctor' element={<FindDoctorPage/>} />
         <Route path='/patient/nearbyDoctorFinder' element={<NearbyDoctorFinder/>} />
         <Route path='/admin/Plan' element={<SubscriptionPlansManager/>} />

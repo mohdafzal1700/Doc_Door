@@ -16,7 +16,6 @@ const PatientProfile = () => {
 
 
 
-    
 
 
     // Enhanced fetch function that gets both profile and address data
@@ -218,7 +217,7 @@ const PatientProfile = () => {
     }
 
     // Use the full_name from backend or construct display name
-    const displayName = user.full_name || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email || 'User'
+    const displayName = user.username || `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email || 'User'
 
     return (
         <div className="min-h-screen bg-gradient-to-br from-purple-50 via-white to-blue-50">

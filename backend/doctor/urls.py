@@ -57,6 +57,8 @@ urlpatterns = [
     
     path('dashboard/', views.DoctorDashboardView.as_view(), name='doctor-dashboard'),
     path('dashboard-report/', views.DoctorReportDownloadView.as_view(), name='doctor-dashboard-report'),
+    
+    path('review/', views.Review.as_view(), name='doctor_reviews'),
 ]
 
 

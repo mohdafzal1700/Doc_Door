@@ -856,3 +856,5 @@ export const fetchDoctorDashboard = (options = {}) => {
 
 export const downloadDashboardReport = (params) =>
     axios.get('dashboard-report/', { params, responseType: 'blob' });
+
+export const docReview = () => axios.get('review/');

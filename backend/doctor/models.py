@@ -422,6 +422,7 @@ class Doctor(models.Model):
             logger.error(f"Error in get_usage_stats: {str(e)}", exc_info=True)
             return None
             
+            
 class Patient(models.Model):
     GENDER_CHOICES = [
         ('male', 'Male'),
