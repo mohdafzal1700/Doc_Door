@@ -255,24 +255,23 @@ const EditProfile = () => {
     
     try {
       // Trim all string values before sending
-      const profileData = {
-        first_name: formData.first_name.trim(),
-        last_name: formData.last_name.trim(),
-        email: formData.email.trim(),
-        phone: formData.phone.trim(),
-        gender: formData.gender,
-        age: formData.age ? formData.age.trim() : '',
-        bloodGroup: formData.bloodGroup ? formData.bloodGroup.trim().toUpperCase() : '',
-        address: {
-          street1: formData.address.street1.trim(),
-          street2: formData.address.street2.trim(),
-          city: formData.address.city.trim(),
-          state: formData.address.state.trim(),
-          zipCode: formData.address.zipCode.trim(),
-          country: formData.address.country.trim()
-        }
-      }
-
+     const profileData = {
+  first_name: (formData.first_name || '').trim(),
+  last_name: (formData.last_name || '').trim(),
+  email: (formData.email || '').trim(),
+  phone: (formData.phone || '').trim(),
+  gender: formData.gender || '',
+  age: formData.age ? (formData.age || '').trim() : '',
+  bloodGroup: formData.bloodGroup ? (formData.bloodGroup || '').trim().toUpperCase() : '',
+  address: {
+    street1: (formData.address.street1 || '').trim(),
+    street2: (formData.address.street2 || '').trim(),
+    city: (formData.address.city || '').trim(),
+    state: (formData.address.state || '').trim(),
+    zipCode: (formData.address.zipCode || '').trim(),
+    country: (formData.address.country || '').trim()
+  }
+}
       const response = await updateUserProfile(profileData)
       
       if (response.data.success) {
