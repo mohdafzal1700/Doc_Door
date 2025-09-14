@@ -2,7 +2,7 @@ import io
 import logging
 from datetime import datetime, date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
-
+import hashlib
 from django.conf import settings
 from django.contrib.auth import authenticate
 from django.db import transaction

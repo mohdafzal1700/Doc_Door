@@ -2,6 +2,7 @@
 import logging
 from decimal import Decimal
 from datetime import datetime, date, timedelta
+import hashlib
 
 # Django imports
 from django.shortcuts import render, get_object_or_404
