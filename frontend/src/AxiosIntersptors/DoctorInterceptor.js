@@ -1,7 +1,7 @@
 import axios from "axios";
 
 // Change this to match your DRF backend route for doctor APIs
-const BASE_URL = 'http://localhost:8000/api/doctor/';
+const BASE_URL = 'https://api.docdoor.muhammedafsal.online/api/doctor/';
 
 const doctorAxios = axios.create({
     baseURL: BASE_URL,
@@ -11,7 +11,7 @@ const doctorAxios = axios.create({
 // Token refresh function specifically for doctors
 export const refreshDoctorToken = () => {
     return axios.post(
-        "http://localhost:8000/api/auth/token/refresh/", 
+        "https://api.docdoor.muhammedafsal.online/api/auth/token/refresh/", 
         {}, 
         { withCredentials: true }
     );

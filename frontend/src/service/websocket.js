@@ -1,6 +1,6 @@
 import { getStoredUserData, isUserAuthenticated, getValidAccessToken } from "../utils/auth"
 
-const CHAT_URL = "ws://localhost:8000/ws/chat/"
+const CHAT_URL = "wss://api.docdoor.muhammedafsal.online/ws/chat/"
 
 // WebSocket instances
 const chatSockets = new Map()
@@ -417,7 +417,7 @@ export const closeAllSockets = () => {
 }
 
 
-const NOTIFICATION_URL = "ws://localhost:8000/ws/notifications/"
+const NOTIFICATION_URL = "wss://api.docdoor.muhammedafsal.online/ws/notifications/"
 
 export const connectNotificationSocket = async () => {
     if (!isUserAuthenticated()) {
