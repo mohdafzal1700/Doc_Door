@@ -274,7 +274,7 @@ class DoctorProfileSerializer(serializers.ModelSerializer):
 
 
     def get_full_name(self, obj):
-        return f"{obj.first_name or ''} {obj.last_name or ''}".strip() or obj.email or obj.username
+        return f"DR.{obj.first_name or ''} {obj.last_name or ''}".strip() or obj.email or obj.username
 
     def get_member_since(self, obj):
         return obj.date_joined.strftime('%Y-%m-%d') if hasattr(obj, 'date_joined') and obj.date_joined else None
