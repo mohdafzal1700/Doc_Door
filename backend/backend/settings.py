@@ -37,7 +37,7 @@ ALLOWED_HOSTS = [
     '127.0.0.1',
     'localhost',
     'api.docdoor.muhammedafsal.online',
-    '13.210.204.167',
+    '13.235.66.160',
     '*'
 ]
 
